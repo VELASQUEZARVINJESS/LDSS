@@ -1,0 +1,209 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS applicant dashboard" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | Applicant Dashboard</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="applicant-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item dropdown no-caret me-3 dropdown-notifications">
+                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle ldss-bell-alert" id="applicantAlerts" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="bell"></i></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow animated--fade-in-up" aria-labelledby="applicantAlerts">
+                        <h6 class="dropdown-header d-flex align-items-center justify-content-between">
+                            <span>Notifications</span>
+                            <span class="badge bg-light text-dark border" id="dashboardAlertsUnreadPill">0</span>
+                        </h6>
+                        <div id="dashboardAlertsList">
+                            <span class="dropdown-item small text-muted">No notifications yet.</span>
+                        </div>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item small text-center" href="applicant-notifications.html">View all notifications</a>
+                    </div>
+                </li>
+                <li class="nav-item dropdown no-caret">
+                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
+                        <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
+                        <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
+                        <a class="dropdown-item" href="applicant-certification.html">Certification</a>
+                        <a class="dropdown-item" href="applicant-renewal.html">Renewal</a>
+                        <a class="dropdown-item" href="applicant-help.html">Help</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="../logout.html">Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">Applicant</div>
+                            <a class="nav-link" href="applicant-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
+                                My Applications
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="layout"></i></div>
+                                            Applicant Dashboard
+                                        </h1>
+                                        <div class="small text-muted" id="dashboardWelcomeText">Welcome to your scholarship portal.</div>
+                                        <div class="small ldss-muted">Track your scholarship application status and required actions.</div>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3 ldss-quick-actions">
+                                        <a class="btn btn-dark btn-sm me-2" href="application-detail.html" id="dashboardHeaderViewApplicationBtn">View My Application</a>
+                                        <a class="btn btn-outline-dark btn-sm" href="applicant-application-form.html">New Application</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <div class="alert d-none" id="dashboardStatus" role="alert"></div>
+                        <div class="row g-3 mb-4">
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-status-card p-3 h-100">
+                                    <div class="ldss-status-label">Current Application</div>
+                                    <div class="ldss-status-value mt-1" id="dashboardCurrentApplicationValue">-</div>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardCurrentApplicationChip">No data yet</span>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-status-card p-3 h-100">
+                                    <div class="ldss-status-label">Interview Schedule</div>
+                                    <div class="ldss-status-value mt-1" id="dashboardInterviewValue">-</div>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardInterviewChip">No data yet</span>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-status-card p-3 h-100">
+                                    <div class="ldss-status-label">Certification</div>
+                                    <div class="ldss-status-value mt-1" id="dashboardCertificationValue">-</div>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardCertificationChip">No data yet</span>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-status-card p-3 h-100">
+                                    <div class="ldss-status-label">Release Status</div>
+                                    <div class="ldss-status-value mt-1" id="dashboardReleaseValue">-</div>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardReleaseChip">No data yet</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card mb-4">
+                            <div class="card-header">Quick Actions</div>
+                            <div class="card-body ldss-quick-actions">
+                                <div class="d-flex flex-wrap gap-2">
+                                    <a class="btn btn-dark btn-sm" href="applicant-application-form.html">New Application</a>
+                                    <a class="btn btn-outline-dark btn-sm" href="applicant-application-form.html" id="dashboardContinueDraftBtn">Continue Draft</a>
+                                    <a class="btn btn-outline-dark btn-sm" href="application-detail.html" id="dashboardQuickViewApplicationBtn">View My Application</a>
+                                    <a class="btn btn-outline-dark btn-sm" href="applicant-notifications.html">View Notifications</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-4">
+                            <div class="col-lg-4">
+                                <div class="card h-100">
+                                    <div class="card-header">Recent Activity</div>
+                                    <div class="card-body">
+                                        <ul class="list-group list-group-flush" id="dashboardRecentActivityList">
+                                            <li class="list-group-item px-0">
+                                                <div class="small fw-600">No recent activity yet.</div>
+                                                <div class="small text-muted">Start by creating your scholarship application.</div>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <div class="card h-100">
+                                    <div class="card-header">Requirement Summary</div>
+                                    <div class="card-body" id="dashboardRequirementSummary">
+                                        <div class="d-flex justify-content-between mb-2">
+                                            <span class="small">No requirements yet.</span>
+                                            <span class="ldss-chip ldss-chip-neutral">No data</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <div class="card h-100">
+                                    <div class="card-header">Application Timeline</div>
+                                    <div class="card-body">
+                                        <ol class="ldss-timeline" id="dashboardTimelineList">
+                                            <li class="ldss-timeline-item">
+                                                <div class="small fw-600">No timeline yet.</div>
+                                                <div class="small text-muted">Submit your first application to begin tracking.</div>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS Applicant Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-applicant-dashboard.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

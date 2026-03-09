@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS | System Administrator System Settings" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | System Administrator System Settings</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="super-admin-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item me-2">
+                    <a class="btn btn-icon btn-transparent-dark" href="super-admin-reports.html"><i data-feather="bell"></i></a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-icon btn-transparent-dark" href="../logout.html"><i data-feather="log-out"></i></a>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">System Administrator</div>
+                            <a class="nav-link" href="super-admin-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="super-admin-user-management.html">
+                                <div class="nav-link-icon"><i data-feather="users"></i></div>
+                                User Management
+                            </a>
+                            <a class="nav-link" href="super-admin-master-data.html">
+                                <div class="nav-link-icon"><i data-feather="database"></i></div>
+                                Master Data
+                            </a>
+                            <a class="nav-link" href="super-admin-scholarship-settings.html">
+                                <div class="nav-link-icon"><i data-feather="sliders"></i></div>
+                                Scholarship Settings
+                            </a>
+                            <a class="nav-link" href="super-admin-reports.html">
+                                <div class="nav-link-icon"><i data-feather="bar-chart-2"></i></div>
+                                Reports
+                            </a>
+                            <a class="nav-link" href="super-admin-audit-logs.html">
+                                <div class="nav-link-icon"><i data-feather="clipboard"></i></div>
+                                Audit Logs
+                            </a>
+                            <a class="nav-link" href="super-admin-backup-restore.html">
+                                <div class="nav-link-icon"><i data-feather="hard-drive"></i></div>
+                                Backup &amp; Restore
+                            </a>
+                            <a class="nav-link" href="super-admin-system-settings.html">
+                                <div class="nav-link-icon"><i data-feather="settings"></i></div>
+                                System Settings
+                            </a>
+                            <a class="nav-link" href="../logout.html">
+                                <div class="nav-link-icon"><i data-feather="log-out"></i></div>
+                                Logout
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="layers"></i></div>
+                                            System Administrator System Settings
+                                        </h1>
+                                        <div class="small ldss-muted">Global configuration shell for platform-wide controls.</div>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3">
+                                        <a class="btn btn-dark btn-sm me-2" href="super-admin-user-management.html">Open User Management</a>
+                                        <a class="btn btn-outline-dark btn-sm" href="super-admin-dashboard.html">Back to Dashboard</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <!-- TODO(Supabase): persist system-wide settings and feature flags -->
+                        <div class="card">
+                            <div class="card-header">Module Placeholder</div>
+                            <div class="card-body">
+                                <div class="ldss-shell-placeholder">
+                                    <div class="fw-700 mb-1">System Administrator System Settings</div>
+                                    <p class="small mb-2">This static page is intentionally included so role navigation works end-to-end in Phase 1.</p>
+                                    <p class="small mb-0">Replace this with connected Supabase-backed UI in the next implementation pass.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS System Administrator Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+                <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+

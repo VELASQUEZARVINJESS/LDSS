@@ -1,0 +1,378 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS applicant profile page" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | My Profile</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="applicant-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item me-2">
+                    <a class="btn btn-icon btn-transparent-dark ldss-bell-alert" href="applicant-notifications.html"><i data-feather="bell"></i></a>
+                </li>
+                <li class="nav-item dropdown no-caret">
+                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
+                        <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
+                        <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
+                        <a class="dropdown-item" href="applicant-certification.html">Certification</a>
+                        <a class="dropdown-item" href="applicant-renewal.html">Renewal</a>
+                        <a class="dropdown-item" href="applicant-help.html">Help</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="../logout.html">Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">Applicant</div>
+                            <a class="nav-link" href="applicant-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
+                                My Applications
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="id-card"></i></div>
+                                            My Profile
+                                        </h1>
+                                        <div class="small ldss-muted">Review and update your scholarship profile information.</div>
+                                        <ol class="ldss-breadcrumb mt-1">
+                                            <li><a href="applicant-dashboard.html">Dashboard</a></li>
+                                            <li>My Profile</li>
+                                        </ol>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3">
+                                        <a class="btn btn-outline-dark btn-sm" href="applicant-dashboard.html">Back to Dashboard</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <div class="alert d-none" id="profileStatus" role="alert"></div>
+                        <div class="row g-4">
+                            <div class="col-lg-4">
+                                <div class="card h-100">
+                                    <div class="card-header">Profile Overview</div>
+                                    <div class="card-body">
+                                        <div class="text-center mb-3">
+                                            <img class="rounded-circle border" src="../img/daet-lgu.png" alt="Applicant Photo" style="width: 84px; height: 84px; object-fit: cover;" />
+                                        </div>
+                                        <div class="small text-muted text-uppercase mb-1">Applicant Name</div>
+                                        <div class="fw-700 mb-2" id="profileNameDisplay">Juan Dela Cruz</div>
+                                        <div class="small text-muted text-uppercase mb-1">Application ID</div>
+                                        <div class="mb-2" id="profileLatestApplicationNo">-</div>
+                                        <div class="small text-muted text-uppercase mb-1">Scholarship Type</div>
+                                        <div id="profileLatestScholarshipType">-</div>
+                                        <hr />
+                                        <div class="small text-muted text-uppercase mb-1">Photo Verification</div>
+                                        <div class="small">Applicant-submitted photo: <span class="ldss-chip ldss-chip-success">On File</span></div>
+                                        <div class="small mt-1">Secretary verified/interview photo: <span class="ldss-chip ldss-chip-neutral">Pending</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-8">
+                                <div class="card mb-4">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Personal Information</span>
+                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditPersonal">Edit</button>
+                                    </div>
+                                    <div class="card-body row g-3">
+                                        <div class="col-md-6">
+                                            <div class="small text-muted">Date of Birth</div>
+                                            <div id="profileDobDisplay">August 9, 2006</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="small text-muted">Civil Status</div>
+                                            <div id="profileCivilStatusDisplay">Single</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="small text-muted">Sex</div>
+                                            <div id="profileSexDisplay">Male</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="small text-muted">Barangay</div>
+                                            <div id="profileBarangayDisplay">Barangay Alawihao, Daet</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="card mb-4">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Contact Information</span>
+                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditContact">Edit</button>
+                                    </div>
+                                    <div class="card-body row g-3">
+                                        <div class="col-md-6">
+                                            <div class="small text-muted">Email</div>
+                                            <div id="profileEmailDisplay">juan.delacruz@example.com</div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="small text-muted">Mobile Number</div>
+                                            <div id="profileMobileDisplay">0917 123 4567</div>
+                                        </div>
+                                        <div class="col-12">
+                                            <div class="small text-muted">Address</div>
+                                            <div id="profileAddressDisplay">Purok 4, Barangay Alawihao, Daet, Camarines Norte</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-4">
+                            <div class="col-lg-6">
+                                <div class="card h-100">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Educational Information</span>
+                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditEducation">Edit</button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="small text-muted">School</div>
+                                        <div class="mb-2" id="profileSchoolDisplay">Camarines Norte State College</div>
+                                        <div class="small text-muted">Course / Year</div>
+                                        <div class="mb-2" id="profileCourseYearDisplay">BS Information Technology - 1st Year</div>
+                                        <div class="small text-muted">Student Number</div>
+                                        <div id="profileStudentNoDisplay">2026-001234</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-6">
+                                <div class="card h-100">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Family Background</span>
+                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditFamily">Edit</button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="small text-muted">Guardian Name</div>
+                                        <div class="mb-2" id="profileGuardianDisplay">Maria Dela Cruz</div>
+                                        <div class="small text-muted">Guardian Occupation</div>
+                                        <div class="mb-2" id="profileOccupationDisplay">Vendor</div>
+                                        <div class="small text-muted">Combined Monthly Income</div>
+                                        <div id="profileIncomeDisplay">PHP 15,000.00</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card mt-4">
+                            <div class="card-header">Document Summary</div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-sm-6 col-lg-3"><span class="ldss-chip ldss-chip-success">Enrollment Form Uploaded</span></div>
+                                    <div class="col-sm-6 col-lg-3"><span class="ldss-chip ldss-chip-success">Report Card Uploaded</span></div>
+                                    <div class="col-sm-6 col-lg-3"><span class="ldss-chip ldss-chip-accent">Barangay Certificate For Validation</span></div>
+                                    <div class="col-sm-6 col-lg-3"><span class="ldss-chip ldss-chip-neutral">Income Certificate Missing</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS Applicant Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+
+        <div class="modal fade" id="modalEditPersonal" tabindex="-1" aria-labelledby="modalEditPersonalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="modalEditPersonalLabel">Edit Personal Information</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form class="row g-3">
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalFullName">Full Name</label>
+                                <input class="form-control" id="modalFullName" type="text" value="Juan Dela Cruz" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small mb-1" for="modalDob">Date of Birth</label>
+                                <input class="form-control" id="modalDob" type="date" value="2006-08-09" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small mb-1" for="modalCivilStatus">Civil Status</label>
+                                <select class="form-select" id="modalCivilStatus">
+                                    <option selected>Single</option>
+                                    <option>Married</option>
+                                    <option>Separated</option>
+                                    <option>Widowed</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small mb-1" for="modalSex">Sex</label>
+                                <select class="form-select" id="modalSex">
+                                    <option selected>Male</option>
+                                    <option>Female</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="small mb-1" for="modalBarangay">Barangay</label>
+                                <select class="form-select" id="modalBarangay">
+                                    <option value="Barangay Alawihao, Daet" selected>Barangay Alawihao, Daet</option>
+                                </select>
+                                <div class="form-text">Daet barangays will load automatically from the TXT list file.</div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
+                        <button class="btn btn-dark" type="button" id="savePersonalBtn">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="modalEditContact" tabindex="-1" aria-labelledby="modalEditContactLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="modalEditContactLabel">Edit Contact Information</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form class="row g-3">
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalEmail">Email</label>
+                                <input class="form-control" id="modalEmail" type="email" value="juan.delacruz@example.com" />
+                            </div>
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalMobile">Mobile Number</label>
+                                <input class="form-control" id="modalMobile" type="text" value="0917 123 4567" />
+                            </div>
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalAddress">Address</label>
+                                <textarea class="form-control" id="modalAddress" rows="3">Purok 4, Barangay Alawihao, Daet, Camarines Norte</textarea>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
+                        <button class="btn btn-dark" type="button" id="saveContactBtn">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="modalEditEducation" tabindex="-1" aria-labelledby="modalEditEducationLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="modalEditEducationLabel">Edit Educational Information</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form class="row g-3">
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalSchool">School</label>
+                                <input class="form-control" id="modalSchool" type="text" value="Camarines Norte State College" />
+                            </div>
+                            <div class="col-md-7">
+                                <label class="small mb-1" for="modalCourse">Course</label>
+                                <input class="form-control" id="modalCourse" type="text" value="BS Information Technology" />
+                            </div>
+                            <div class="col-md-5">
+                                <label class="small mb-1" for="modalYearLevel">Year Level</label>
+                                <select class="form-select" id="modalYearLevel">
+                                    <option selected>1st Year</option>
+                                    <option>2nd Year</option>
+                                    <option>3rd Year</option>
+                                    <option>4th Year</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalStudentNo">Student Number</label>
+                                <input class="form-control" id="modalStudentNo" type="text" value="2026-001234" />
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
+                        <button class="btn btn-dark" type="button" id="saveEducationBtn">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="modalEditFamily" tabindex="-1" aria-labelledby="modalEditFamilyLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="modalEditFamilyLabel">Edit Family Background</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form class="row g-3">
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalGuardian">Guardian Name</label>
+                                <input class="form-control" id="modalGuardian" type="text" value="Maria Dela Cruz" />
+                            </div>
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalOccupation">Guardian Occupation</label>
+                                <input class="form-control" id="modalOccupation" type="text" value="Vendor" />
+                            </div>
+                            <div class="col-12">
+                                <label class="small mb-1" for="modalIncome">Combined Monthly Income (PHP)</label>
+                                <input class="form-control" id="modalIncome" type="number" value="15000" />
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
+                        <button class="btn btn-dark" type="button" id="saveFamilyBtn">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-applicant-profile.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+
+

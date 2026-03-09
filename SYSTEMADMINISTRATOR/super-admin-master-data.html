@@ -1,0 +1,175 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS | System Administrator Master Data" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | System Administrator Master Data</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="super-admin-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item me-2">
+                    <a class="btn btn-icon btn-transparent-dark" href="super-admin-reports.html"><i data-feather="bell"></i></a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-icon btn-transparent-dark" href="../logout.html"><i data-feather="log-out"></i></a>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">System Administrator</div>
+                            <a class="nav-link" href="super-admin-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="super-admin-user-management.html">
+                                <div class="nav-link-icon"><i data-feather="users"></i></div>
+                                User Management
+                            </a>
+                            <a class="nav-link" href="super-admin-master-data.html">
+                                <div class="nav-link-icon"><i data-feather="database"></i></div>
+                                Master Data
+                            </a>
+                            <a class="nav-link" href="super-admin-scholarship-settings.html">
+                                <div class="nav-link-icon"><i data-feather="sliders"></i></div>
+                                Scholarship Settings
+                            </a>
+                            <a class="nav-link" href="super-admin-reports.html">
+                                <div class="nav-link-icon"><i data-feather="bar-chart-2"></i></div>
+                                Reports
+                            </a>
+                            <a class="nav-link" href="super-admin-audit-logs.html">
+                                <div class="nav-link-icon"><i data-feather="clipboard"></i></div>
+                                Audit Logs
+                            </a>
+                            <a class="nav-link" href="super-admin-backup-restore.html">
+                                <div class="nav-link-icon"><i data-feather="hard-drive"></i></div>
+                                Backup &amp; Restore
+                            </a>
+                            <a class="nav-link" href="super-admin-system-settings.html">
+                                <div class="nav-link-icon"><i data-feather="settings"></i></div>
+                                System Settings
+                            </a>
+                            <a class="nav-link" href="../logout.html">
+                                <div class="nav-link-icon"><i data-feather="log-out"></i></div>
+                                Logout
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="layers"></i></div>
+                                            System Administrator Master Data
+                                        </h1>
+                                        <div class="small ldss-muted">Reference data management shell for scholarship operations.</div>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3">
+                                        <a class="btn btn-dark btn-sm me-2" href="super-admin-scholarship-settings.html">Open Scholarship Settings</a>
+                                        <a class="btn btn-outline-dark btn-sm" href="super-admin-dashboard.html">Back to Dashboard</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <div class="alert d-none" id="masterDataStatus" role="alert"></div>
+                        <div class="row g-4">
+                            <div class="col-lg-7">
+                                <div class="card h-100">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Applicant Sector Tag Options</span>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-outline-dark ldss-btn-medium" id="masterDataResetSectorsBtn" type="button">Reset Default</button>
+                                            <button class="btn btn-dark ldss-btn-medium" id="masterDataSaveSectorsBtn" type="button">Save Changes</button>
+                                        </div>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="small text-muted mb-3">These sector tags appear in Secretary &gt; Interview Verification (Applicant Sector Tags).</div>
+                                        <div class="row g-2 mb-3">
+                                            <div class="col-sm-9">
+                                                <label class="small mb-1" for="masterDataSectorInput">Add Sector Tag</label>
+                                                <input class="form-control" id="masterDataSectorInput" type="text" placeholder="Example: PWD, Solo Parent, Farmer Household" maxlength="40" />
+                                            </div>
+                                            <div class="col-sm-3 d-flex align-items-end">
+                                                <button class="btn btn-outline-dark w-100 ldss-btn-medium" id="masterDataAddSectorBtn" type="button">Add</button>
+                                            </div>
+                                        </div>
+                                        <div class="small text-muted mb-2">Current Tags</div>
+                                        <div class="d-flex flex-wrap gap-2" id="masterDataSectorList"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-5">
+                                <div class="card h-100">
+                                    <div class="card-header">How It Works</div>
+                                    <div class="card-body">
+                                        <div class="ldss-shell-placeholder mb-3">
+                                            <div class="fw-600 mb-1">Secretary Usage</div>
+                                            <div class="small">Staff can toggle these tags per applicant during interview verification.</div>
+                                        </div>
+                                        <div class="ldss-shell-placeholder mb-3">
+                                            <div class="fw-600 mb-1">Data Storage (Phase 1)</div>
+                                            <div class="small">Saved in browser storage per domain to keep static hosting compatibility.</div>
+                                        </div>
+                                        <div class="ldss-shell-placeholder">
+                                            <div class="fw-600 mb-1">Next Integration</div>
+                                            <div class="small">Move this module to Supabase-backed master data for centralized configuration.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- TODO(Supabase): move sector tag options from localStorage to centralized master data table -->
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS System Administrator Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+                <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-superadmin-master-data.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+

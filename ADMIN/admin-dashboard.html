@@ -1,0 +1,228 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS admin dashboard" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | Admin Dashboard</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="admin-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item dropdown no-caret me-3 dropdown-notifications">
+                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle ldss-bell-alert" id="adminAlerts" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="bell"></i></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="adminAlerts">
+                        <h6 class="dropdown-header">Admin Priority Notifications</h6>
+                        <a class="dropdown-item small" href="admin-approval-queue.html">9 secretary recommendations awaiting decision.</a>
+                        <a class="dropdown-item small" href="certification-placeholder.html">4 approved records are ready for certification.</a>
+                        <a class="dropdown-item small" href="admin-release-management.html">3 release batches require assignment.</a>
+                    </div>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-icon btn-transparent-dark" href="../logout.html"><i data-feather="log-out"></i></a>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">Admin</div>
+                            <a class="nav-link" href="admin-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="admin-approval-queue.html">
+                                <div class="nav-link-icon"><i data-feather="check-square"></i></div>
+                                Approval Queue
+                            </a>
+                            <a class="nav-link" href="admin-scholar-records.html">
+                                <div class="nav-link-icon"><i data-feather="users"></i></div>
+                                Scholar Records
+                            </a>
+                            <a class="nav-link" href="certification-placeholder.html">
+                                <div class="nav-link-icon"><i data-feather="award"></i></div>
+                                Certifications
+                            </a>
+                            <a class="nav-link" href="admin-release-management.html">
+                                <div class="nav-link-icon"><i data-feather="package"></i></div>
+                                Release Management
+                            </a>
+                            <a class="nav-link" href="admin-reports.html">
+                                <div class="nav-link-icon"><i data-feather="bar-chart-2"></i></div>
+                                Reports
+                            </a>
+<a class="nav-link" href="../logout.html">
+                                <div class="nav-link-icon"><i data-feather="log-out"></i></div>
+                                Logout
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="shield"></i></div>
+                                            Admin Dashboard
+                                        </h1>
+                                        <div class="small ldss-muted">Approve recommendations, manage certifications, and monitor releases.</div>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3">
+                                        <a class="btn btn-dark btn-sm me-2" href="admin-approval-queue.html">Review Approval Queue</a>
+                                        <a class="btn btn-outline-dark btn-sm" href="certification-placeholder.html">Open Certifications</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <!-- TODO(Supabase): load admin metrics and recommendation-centric notification feed -->
+                        <div class="alert alert-warning border mb-4">
+                            <div class="d-flex align-items-start">
+                                <i class="me-2 mt-1" data-feather="alert-triangle"></i>
+                                <div>
+                                    <div class="fw-700">Priority: Secretary Recommendations Pending</div>
+                                    <div class="small">9 records were endorsed by secretary and require admin decision within 48 hours.</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-4">
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Pending Approval</div>
+                                    <div class="h4 mt-2 mb-0">27</div>
+                                    <div class="small mt-2">Includes waitlist cases</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Recommended by Secretary</div>
+                                    <div class="h4 mt-2 mb-0">9</div>
+                                    <div class="small mt-2">Needs immediate action</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Certification Ready</div>
+                                    <div class="h4 mt-2 mb-0">4</div>
+                                    <div class="small mt-2">For PDF generation</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Release Action Pending</div>
+                                    <div class="h4 mt-2 mb-0">3</div>
+                                    <div class="small mt-2">Awaiting batch assignment</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-4">
+                            <div class="col-lg-8">
+                                <div class="card">
+                                    <div class="card-header">Recent Recommendation Activity</div>
+                                    <div class="card-body p-0">
+                                        <div class="table-responsive">
+                                            <table class="table mb-0">
+                                                <thead class="bg-light">
+                                                    <tr>
+                                                        <th>Application ID</th>
+                                                        <th>Applicant</th>
+                                                        <th>Secretary Recommendation</th>
+                                                        <th>Received</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td>LDSS-2026-00108</td>
+                                                        <td>Renz Garcia</td>
+                                                        <td><span class="ldss-chip ldss-chip-success">Approve</span></td>
+                                                        <td>March 9, 2026</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>LDSS-2026-00111</td>
+                                                        <td>Angela Rivera</td>
+                                                        <td><span class="ldss-chip ldss-chip-accent">Waitlist</span></td>
+                                                        <td>March 9, 2026</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td>LDSS-2026-00115</td>
+                                                        <td>Joemar Flores</td>
+                                                        <td><span class="ldss-chip ldss-chip-danger">Reject</span></td>
+                                                        <td>March 8, 2026</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-4">
+                                <div class="card h-100">
+                                    <div class="card-header">Action Checklist</div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <div class="small fw-600">Approve or decide waitlist cases</div>
+                                            <div class="small text-muted">Prioritize recommendations older than 2 days.</div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <div class="small fw-600">Generate pending certifications</div>
+                                            <div class="small text-muted">4 approved applicants are ready for PDF certificates.</div>
+                                        </div>
+                                        <div>
+                                            <div class="small fw-600">Prepare release batches</div>
+                                            <div class="small text-muted">Coordinate with Mayor&apos;s Office release window.</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS Admin Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+                <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script>window.LDSS_REQUIRED_ROLE = "admin";</script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+

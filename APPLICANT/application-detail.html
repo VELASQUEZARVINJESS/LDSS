@@ -1,0 +1,229 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS application detail and tracking page" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | Application Tracking</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="applicant-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item me-2">
+                    <a class="btn btn-icon btn-transparent-dark ldss-bell-alert" href="applicant-notifications.html"><i data-feather="bell"></i></a>
+                </li>
+                <li class="nav-item dropdown no-caret">
+                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
+                        <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
+                        <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
+                        <a class="dropdown-item" href="applicant-certification.html">Certification</a>
+                        <a class="dropdown-item" href="applicant-renewal.html">Renewal</a>
+                        <a class="dropdown-item" href="applicant-help.html">Help</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="../logout.html">Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">Applicant</div>
+                            <a class="nav-link" href="applicant-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
+                                My Applications
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="clipboard"></i></div>
+                                            Application Detail / Tracking
+                                        </h1>
+                                        <div class="small ldss-muted" id="detailApplicationIdDisplay">Application ID: -</div>
+                                        <ol class="ldss-breadcrumb mt-1">
+                                            <li><a href="applicant-dashboard.html">Dashboard</a></li>
+                                            <li><a href="applicant-applications.html">My Applications</a></li>
+                                            <li>Application Detail</li>
+                                        </ol>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3">
+                                        <a class="btn btn-outline-dark btn-sm" href="applicant-applications.html">Back to Applications</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <div class="alert d-none" id="detailStatus" role="alert"></div>
+                        <div class="row g-4">
+                            <div class="col-lg-4">
+                                <div class="card h-100">
+                                    <div class="card-header">Current Status</div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <div class="small text-muted">Overall</div>
+                                            <div class="h5 mb-0" id="detailOverallStatus">-</div>
+                                        </div>
+                                        <div class="mb-2 d-flex justify-content-between">
+                                            <span class="small">Submission Check</span>
+                                            <span class="ldss-chip ldss-chip-neutral" id="detailSubmissionCheckChip">Pending</span>
+                                        </div>
+                                        <div class="mb-2 d-flex justify-content-between">
+                                            <span class="small">Hard-copy Validation</span>
+                                            <span class="ldss-chip ldss-chip-neutral" id="detailHardcopyChip">Pending</span>
+                                        </div>
+                                        <div class="mb-2 d-flex justify-content-between">
+                                            <span class="small">Interview</span>
+                                            <span class="ldss-chip ldss-chip-neutral" id="detailInterviewChip">Not Scheduled</span>
+                                        </div>
+                                        <div class="d-flex justify-content-between">
+                                            <span class="small">Admin Decision</span>
+                                            <span class="ldss-chip ldss-chip-neutral" id="detailAdminDecisionChip">Pending</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-8">
+                                <div class="card h-100">
+                                    <div class="card-header">Interview Schedule</div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-4">
+                                                <div class="small text-muted">Date</div>
+                                                <div class="fw-600" id="detailInterviewDate">-</div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="small text-muted">Time</div>
+                                                <div class="fw-600" id="detailInterviewTime">-</div>
+                                            </div>
+                                            <div class="col-md-4">
+                                                <div class="small text-muted">Venue</div>
+                                                <div class="fw-600" id="detailInterviewVenue">-</div>
+                                            </div>
+                                            <div class="col-12">
+                                                <div class="alert alert-light border mb-0" id="detailInterviewNote">Interview is not yet scheduled.</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-4 mt-1">
+                            <div class="col-lg-6">
+                                <div class="card h-100">
+                                    <div class="card-header">Requirement Checklist</div>
+                                    <div class="card-body" id="detailRequirementChecklist">
+                                        <div class="d-flex justify-content-between mb-2">
+                                            <span class="small">Loading requirements...</span>
+                                            <span class="ldss-chip ldss-chip-neutral">Please wait</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-6">
+                                <div class="card h-100">
+                                    <div class="card-header">Tracking Timeline</div>
+                                    <div class="card-body">
+                                        <ol class="ldss-timeline" id="detailTimelineList">
+                                            <li class="ldss-timeline-item">
+                                                <div class="small fw-600">Loading timeline...</div>
+                                                <div class="small text-muted">Please wait</div>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-4 mt-1">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header">Photo Verification</div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-6">
+                                                <div class="small text-muted mb-2">Applicant-Submitted Photo</div>
+                                                <div class="ldss-photo-slot" id="detailApplicantPhotoPlaceholder">No applicant photo on file.</div>
+                                                <img class="img-fluid rounded border d-none" id="detailApplicantPhotoPreview" alt="Applicant submitted photo" />
+                                                <a class="small d-none mt-2" id="detailApplicantPhotoLink" target="_blank" rel="noopener">Open applicant photo</a>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="small text-muted mb-2">Verified Interview Photo (Secretary)</div>
+                                                <div class="ldss-photo-slot" id="detailVerifiedPhotoPlaceholder">No verified interview photo yet.</div>
+                                                <img class="img-fluid rounded border d-none" id="detailVerifiedPhotoPreview" alt="Verified interview photo" />
+                                                <a class="small d-none mt-2" id="detailVerifiedPhotoLink" target="_blank" rel="noopener">Open verified photo</a>
+                                                <div class="small text-muted mt-2">Verified photo is captured/uploaded by the secretary during interview verification.</div>
+                                            </div>
+                                            <div class="col-12">
+                                                <div class="small text-muted mb-2">Applicant Sector Tags</div>
+                                                <div class="d-flex flex-wrap gap-2" id="detailSectorTags">
+                                                    <span class="small text-muted">No sector tags assigned yet.</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS Applicant Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-applicant-application-detail.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

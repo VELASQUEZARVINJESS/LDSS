@@ -1,0 +1,241 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS applicant scholarship application form" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | New Scholarship Application</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="applicant-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
+                LDSS
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item me-2">
+                    <a class="btn btn-icon btn-transparent-dark ldss-bell-alert" href="applicant-notifications.html"><i data-feather="bell"></i></a>
+                </li>
+                <li class="nav-item dropdown no-caret">
+                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
+                        <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
+                        <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
+                        <a class="dropdown-item" href="applicant-certification.html">Certification</a>
+                        <a class="dropdown-item" href="applicant-renewal.html">Renewal</a>
+                        <a class="dropdown-item" href="applicant-help.html">Help</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="../logout.html">Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">Applicant</div>
+                            <a class="nav-link" href="applicant-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
+                                My Applications
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="edit"></i></div>
+                                            New Scholarship Application
+                                        </h1>
+                                        <div class="small ldss-muted">Fill out this form and submit complete requirements for review.</div>
+                                        <div class="small text-muted mt-1" id="applicationFormIdDisplay">Application ID: New draft (not yet saved)</div>
+                                        <ol class="ldss-breadcrumb mt-1">
+                                            <li><a href="applicant-dashboard.html">Dashboard</a></li>
+                                            <li><a href="applicant-applications.html">My Applications</a></li>
+                                            <li>New Application</li>
+                                        </ol>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3">
+                                        <a class="btn btn-outline-dark btn-sm" href="applicant-applications.html">Back to Applications</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="container-xl px-4 mt-4">
+                        <div class="alert d-none" id="applicationFormStatus" role="alert"></div>
+                        <div class="card mb-4">
+                            <div class="card-header">Application Information</div>
+                            <div class="card-body">
+                                <form class="row g-3">
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="schoolYear">School Year</label>
+                                        <select class="form-select" id="schoolYear">
+                                            <option selected>2026-2027</option>
+                                            <option>2025-2026</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="scholarshipType">Scholarship Type</label>
+                                        <select class="form-select" id="scholarshipType">
+                                            <option selected>College Financial Assistance</option>
+                                            <option>Senior High Assistance</option>
+                                            <option>Special Academic Grant</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="applicantCategory">Applicant Category</label>
+                                        <select class="form-select" id="applicantCategory">
+                                            <option value="new" selected>New Applicant</option>
+                                            <option value="renewal" disabled>Renewal (Temporarily Disabled)</option>
+                                        </select>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header">Education Details</div>
+                            <div class="card-body">
+                                <form class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="small mb-1" for="schoolName">School Name</label>
+                                        <input class="form-control" id="schoolName" type="text" placeholder="Enter school name" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="course">Course / Strand</label>
+                                        <input class="form-control" id="course" type="text" placeholder="e.g. BSIT" />
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="small mb-1" for="yearLevel">Year Level</label>
+                                        <select class="form-select" id="yearLevel">
+                                            <option value="1st Year" selected>1st</option>
+                                            <option value="2nd Year">2nd</option>
+                                            <option value="3rd Year">3rd</option>
+                                            <option value="4th Year">4th</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="gwa">Latest GWA</label>
+                                        <input class="form-control" id="gwa" type="text" placeholder="e.g. 1.75" />
+                                    </div>
+                                    <div class="col-md-8">
+                                        <label class="small mb-1" for="addressSchool">School Address</label>
+                                        <input class="form-control" id="addressSchool" type="text" placeholder="City / Province" />
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header">Family and Financial Information</div>
+                            <div class="card-body">
+                                <form class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="small mb-1" for="guardianName">Guardian Name</label>
+                                        <input class="form-control" id="guardianName" type="text" />
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="small mb-1" for="guardianOccupation">Occupation</label>
+                                        <input class="form-control" id="guardianOccupation" type="text" />
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="small mb-1" for="monthlyIncome">Monthly Income (PHP)</label>
+                                        <input class="form-control" id="monthlyIncome" type="number" min="0" step="0.01" placeholder="15000" />
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="small mb-1" for="financialNotes">Financial Notes</label>
+                                        <textarea class="form-control" id="financialNotes" rows="3" placeholder="Optional notes"></textarea>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header">Requirement Uploads (JPG, PNG, PDF)</div>
+                            <div class="card-body">
+                                <form class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="small mb-1" for="reqEnrollment">Proof of Enrollment</label>
+                                        <input class="form-control" id="reqEnrollment" type="file" accept=".jpg,.jpeg,.png,.pdf" />
+                                        <div class="form-text" id="reqEnrollmentFeedback"></div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="small mb-1" for="reqReportCard">Latest Report Card</label>
+                                        <input class="form-control" id="reqReportCard" type="file" accept=".jpg,.jpeg,.png,.pdf" />
+                                        <div class="form-text" id="reqReportCardFeedback"></div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="small mb-1" for="reqBarangay">Barangay Certificate</label>
+                                        <input class="form-control" id="reqBarangay" type="file" accept=".jpg,.jpeg,.png,.pdf" />
+                                        <div class="form-text" id="reqBarangayFeedback"></div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="small mb-1" for="reqIncome">Income Certificate</label>
+                                        <input class="form-control" id="reqIncome" type="file" accept=".jpg,.jpeg,.png,.pdf" />
+                                        <div class="form-text" id="reqIncomeFeedback"></div>
+                                    </div>
+                                    <div class="col-12">
+                                        <div class="form-check">
+                                            <input class="form-check-input" id="declaration" type="checkbox" />
+                                            <label class="form-check-label" for="declaration">I certify that the information and documents I submitted are true and valid.</label>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="d-flex flex-wrap gap-2 pb-4">
+                            <button class="btn btn-outline-dark" id="saveDraftBtn" type="button">Save Draft</button>
+                            <button class="btn btn-dark" id="submitApplicationBtn" type="button">Submit Application</button>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSS Applicant Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-applicant-application-form.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
+
+
+
+
+
+
+
+
+
+

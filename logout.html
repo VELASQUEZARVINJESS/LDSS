@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSS sign out page" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSS | Signing Out</title>
+        <link href="css/styles.css" rel="stylesheet" />
+        <link href="css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="img/icon.png" />
+    </head>
+    <body class="ldss-auth">
+        <div class="ldss-auth-wrap">
+            <div class="card ldss-auth-card border-0 shadow-sm">
+                <div class="card-body p-4 text-center">
+                    <img class="ldss-auth-logo mb-2" src="img/daet-lgu.png" alt="LGU Daet Logo" />
+                    <h1 class="h5 ldss-auth-title mb-2">Signing Out</h1>
+                    <p class="ldss-auth-subtitle mb-3">Please wait while your secure session is ending.</p>
+                    <div id="logoutStatus" class="small text-muted">Redirecting to login...</div>
+                </div>
+            </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="js/supabase-config.js"></script>
+        <script>
+            (function () {
+                "use strict";
+
+                var statusEl = document.getElementById("logoutStatus");
+                function setStatus(message) {
+                    if (statusEl) {
+                        statusEl.textContent = message;
+                    }
+                }
+
+                async function signOutAndRedirect() {
+                    try {
+                        if (window.supabase && window.supabase.createClient && window.LDSS_SUPABASE_URL && window.LDSS_SUPABASE_ANON_KEY) {
+                            var client = window.supabase.createClient(window.LDSS_SUPABASE_URL, window.LDSS_SUPABASE_ANON_KEY);
+                            await client.auth.signOut();
+                        }
+                    } catch (error) {
+                        setStatus("Session sign-out encountered an issue. Redirecting...");
+                    }
+                    window.location.href = "login.html";
+                }
+
+                signOutAndRedirect();
+            })();
+        </script>
+    </body>
+</html>
