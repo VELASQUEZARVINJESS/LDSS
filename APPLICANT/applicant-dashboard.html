@@ -94,30 +94,30 @@
                         <div class="row g-3 mb-4">
                             <div class="col-sm-6 col-xl-3">
                                 <div class="ldss-status-card p-3 h-100">
-                                    <div class="ldss-status-label">Current Application</div>
+                                    <div class="ldss-status-label">Application Status</div>
                                     <div class="ldss-status-value mt-1" id="dashboardCurrentApplicationValue">-</div>
                                     <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardCurrentApplicationChip">No data yet</span>
                                 </div>
                             </div>
                             <div class="col-sm-6 col-xl-3">
                                 <div class="ldss-status-card p-3 h-100">
+                                    <div class="ldss-status-label">Exam Result Summary</div>
+                                    <div class="ldss-status-value mt-1" id="dashboardExamValue">-</div>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardExamChip">No exam record yet</span>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-xl-3">
+                                <div class="ldss-status-card p-3 h-100">
                                     <div class="ldss-status-label">Interview Schedule</div>
                                     <div class="ldss-status-value mt-1" id="dashboardInterviewValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardInterviewChip">No data yet</span>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardInterviewChip">No interview yet</span>
                                 </div>
                             </div>
                             <div class="col-sm-6 col-xl-3">
                                 <div class="ldss-status-card p-3 h-100">
-                                    <div class="ldss-status-label">Certification</div>
-                                    <div class="ldss-status-value mt-1" id="dashboardCertificationValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardCertificationChip">No data yet</span>
-                                </div>
-                            </div>
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-status-card p-3 h-100">
-                                    <div class="ldss-status-label">Release Status</div>
-                                    <div class="ldss-status-value mt-1" id="dashboardReleaseValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardReleaseChip">No data yet</span>
+                                    <div class="ldss-status-label">Next Step</div>
+                                    <div class="ldss-status-value mt-1" id="dashboardNextStepValue">-</div>
+                                    <span class="ldss-chip ldss-chip-neutral mt-2" id="dashboardNextStepChip">Waiting for application</span>
                                 </div>
                             </div>
                         </div>
@@ -187,6 +187,7 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/ldss-workflow.js"></script>
         <script src="../js/supabase-applicant-dashboard.js"></script>
         <script src="../js/scripts.js"></script>
     </body>

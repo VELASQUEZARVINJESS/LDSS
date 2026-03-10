@@ -5,27 +5,8 @@
     const REMARKS_SECTOR_META_START = "[[LDSS_SECTOR_TAGS]]";
     const REMARKS_SECTOR_META_END = "[[/LDSS_SECTOR_TAGS]]";
 
-    const STATUS_META = {
-        draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
-        submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
-        interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        recommended: { label: "Recommended", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
-        approved: { label: "Approved", chipClass: "ldss-chip-success" },
-        waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
-        rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
-        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
-        certification_ready: { label: "Certification Ready", chipClass: "ldss-chip-success" },
-        release_scheduled: { label: "Release Scheduled", chipClass: "ldss-chip-accent" },
-        released: { label: "Released", chipClass: "ldss-chip-success" }
-    };
-
     const DOC_TYPE_LABELS = {
-        proof_of_enrollment: "Proof of Enrollment",
-        report_card: "Latest Report Card",
-        barangay_certificate: "Barangay Certificate",
-        income_certificate: "Income Certificate"
+        income_certificate: "Tax Exemption Certificate (PDF)"
     };
 
     const DOC_STATUS_META = {
@@ -36,8 +17,37 @@
         missing: { label: "Not Uploaded", chipClass: "ldss-chip-neutral" }
     };
 
+    const INTERVIEW_META = {
+        not_scheduled: { label: "Not Scheduled", chipClass: "ldss-chip-neutral" },
+        scheduled: { label: "Scheduled", chipClass: "ldss-chip-accent" },
+        rescheduled: { label: "Rescheduled", chipClass: "ldss-chip-accent" },
+        completed: { label: "Completed", chipClass: "ldss-chip-success" },
+        no_show: { label: "No Show", chipClass: "ldss-chip-danger" },
+        cancelled: { label: "Cancelled", chipClass: "ldss-chip-danger" }
+    };
+
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function workflow() {
+        return window.LDSS_WORKFLOW || {
+            statusMeta: function (status) {
+                return { label: (status || "-").toString(), chipClass: "ldss-chip-neutral", nextStep: "Wait for update." };
+            },
+            nextStepForApplicant: function () {
+                return "Wait for update.";
+            },
+            examSummaryFromRecord: function () {
+                return {
+                    controlNo: "-",
+                    scoreText: "-",
+                    percentageText: "-",
+                    resultLabel: "Pending",
+                    resultChipClass: "ldss-chip-neutral"
+                };
+            }
+        };
     }
 
     function showStatus(message, type) {
@@ -73,7 +83,11 @@
     }
 
     function statusMeta(status) {
-        return STATUS_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
+        return workflow().statusMeta(status);
+    }
+
+    function interviewMeta(status) {
+        return INTERVIEW_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
     }
 
     function formatDateTime(value) {
@@ -164,13 +178,6 @@
         if (blockMatch && blockMatch[1]) {
             tags = uniqueTags(blockMatch[1].split("|"));
             working = working.replace(blockMatch[0], "");
-        }
-
-        const legacyPattern = /^\s*Sector Tags\s*:\s*(.+)$/im;
-        const legacyMatch = working.match(legacyPattern);
-        if (legacyMatch && legacyMatch[1]) {
-            tags = uniqueTags(tags.concat(legacyMatch[1].split(",")));
-            working = working.replace(legacyPattern, "");
         }
 
         return {
@@ -279,63 +286,158 @@
         return fallback.data[0];
     }
 
+    async function fetchExamRecord(context, application) {
+        const primary = await context.client
+            .from("exam_records")
+            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, remarks, updated_at")
+            .eq("application_id", application.id)
+            .maybeSingle();
+
+        if (!primary.error) {
+            return primary.data || null;
+        }
+
+        // TODO(Supabase): remove fallback once exam_records is deployed in production.
+        const fallback = await context.client
+            .from("interviews")
+            .select("exam_score, updated_at")
+            .eq("application_id", application.id)
+            .maybeSingle();
+
+        if (fallback.error || !fallback.data) {
+            return null;
+        }
+
+        const normalizedStatus = workflow().normalizeStatus ? workflow().normalizeStatus(application.status) : (application.status || "");
+        let inferredResult = "pending";
+        if (normalizedStatus === "passed_exam") {
+            inferredResult = "passed";
+        } else if (normalizedStatus === "failed_exam") {
+            inferredResult = "failed";
+        }
+
+        return {
+            application_id: application.id,
+            exam_control_no: null,
+            raw_score: fallback.data.exam_score,
+            percentage_score: fallback.data.exam_score,
+            result: inferredResult,
+            status: "encoded",
+            remarks: null,
+            updated_at: fallback.data.updated_at
+        };
+    }
+
+    async function fetchInterviewRecord(context, applicationId) {
+        const primary = await context.client
+            .from("interview_records")
+            .select("application_id, scheduled_at, venue, status, remarks, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (!primary.error) {
+            return primary.data || null;
+        }
+
+        // TODO(Supabase): remove fallback once interview_records is deployed in production.
+        const fallback = await context.client
+            .from("interviews")
+            .select("scheduled_at, venue, status, remarks, updated_at, verified_photo_path")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (fallback.error) {
+            return null;
+        }
+        return fallback.data || null;
+    }
+
+    async function fetchApprovalRecord(context, applicationId) {
+        const primary = await context.client
+            .from("approval_records")
+            .select("application_id, decision_status, decided_at, decision_notes")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (!primary.error) {
+            return primary.data || null;
+        }
+
+        // TODO(Supabase): remove fallback once approval_records is deployed in production.
+        const fallback = await context.client
+            .from("approval_queue")
+            .select("decision_status, decided_at, decision_notes")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (fallback.error) {
+            return null;
+        }
+        return fallback.data || null;
+    }
+
     function renderHeader(application) {
         setText("detailApplicationIdDisplay", "Application ID: " + application.application_no);
     }
 
-    function renderStatusCards(application, interview, approval) {
+    function renderStatusCards(application, examRecord, interviewRecord, approvalRecord) {
         const appStatus = statusMeta(application.status);
         setText("detailOverallStatus", appStatus.label);
+        setText("detailSubmittedAt", formatDateTime(application.submitted_at || application.created_at));
+        setChip("detailWorkflowChip", appStatus.label, appStatus.chipClass);
 
-        const submitted = !!application.submitted_at || application.status !== "draft";
-        setChip("detailSubmissionCheckChip", submitted ? "Completed" : "Pending", submitted ? "ldss-chip-success" : "ldss-chip-neutral");
+        let finalLabel = "Pending";
+        let finalClass = "ldss-chip-neutral";
 
-        const hardcopyReadyStates = ["under_secretary_review", "interview_scheduled", "recommended", "for_admin_approval", "approved", "waitlisted", "rejected", "certification_ready", "release_scheduled", "released"];
-        const hardcopyDoneStates = ["for_admin_approval", "approved", "waitlisted", "rejected", "certification_ready", "release_scheduled", "released"];
-        if (hardcopyDoneStates.includes(application.status)) {
-            setChip("detailHardcopyChip", "Completed", "ldss-chip-success");
-        } else if (hardcopyReadyStates.includes(application.status)) {
-            setChip("detailHardcopyChip", "In Progress", "ldss-chip-accent");
-        } else {
-            setChip("detailHardcopyChip", "Pending", "ldss-chip-neutral");
-        }
-
-        if (interview && interview.status && interview.status !== "not_scheduled") {
-            const interviewDone = interview.status === "completed";
-            setChip("detailInterviewChip", interviewDone ? "Completed" : "Scheduled", interviewDone ? "ldss-chip-success" : "ldss-chip-accent");
-        } else {
-            setChip("detailInterviewChip", "Not Scheduled", "ldss-chip-neutral");
-        }
-
-        if (approval && approval.decision_status && approval.decision_status !== "pending") {
-            const decision = approval.decision_status;
-            if (decision === "approved") {
-                setChip("detailAdminDecisionChip", "Approved", "ldss-chip-success");
-            } else if (decision === "waitlisted") {
-                setChip("detailAdminDecisionChip", "Waitlisted", "ldss-chip-accent");
-            } else {
-                setChip("detailAdminDecisionChip", "Rejected/Returned", "ldss-chip-danger");
+        if (approvalRecord && approvalRecord.decision_status) {
+            if (approvalRecord.decision_status === "approved") {
+                finalLabel = "Approved";
+                finalClass = "ldss-chip-success";
+            } else if (approvalRecord.decision_status === "waitlisted") {
+                finalLabel = "Waitlisted";
+                finalClass = "ldss-chip-accent";
+            } else if (approvalRecord.decision_status === "rejected") {
+                finalLabel = "Rejected";
+                finalClass = "ldss-chip-danger";
             }
         } else {
-            setChip("detailAdminDecisionChip", "Pending", "ldss-chip-neutral");
+            const normalized = workflow().normalizeStatus ? workflow().normalizeStatus(application.status) : (application.status || "");
+            if (["approved", "released", "for_release"].includes(normalized)) {
+                finalLabel = "Approved";
+                finalClass = "ldss-chip-success";
+            } else if (normalized === "waitlisted") {
+                finalLabel = "Waitlisted";
+                finalClass = "ldss-chip-accent";
+            } else if (normalized === "rejected") {
+                finalLabel = "Rejected";
+                finalClass = "ldss-chip-danger";
+            }
         }
-    }
 
-    function renderInterview(interview) {
-        const parsedRemarks = parseRemarksWithSectorMeta(interview && interview.remarks ? interview.remarks : "");
+        setChip("detailFinalDecisionChip", finalLabel, finalClass);
 
-        if (!interview || !interview.scheduled_at) {
+        const examSummary = workflow().examSummaryFromRecord(examRecord);
+        setText("detailExamControlNo", examSummary.controlNo || "-");
+        setText("detailExamRawScore", examSummary.scoreText || "-");
+        setText("detailExamPercentage", examSummary.percentageText || "-");
+        setChip("detailExamResultChip", examSummary.resultLabel || "Pending", examSummary.resultChipClass || "ldss-chip-neutral");
+
+        setText("detailNextStepText", workflow().nextStepForApplicant(application.status));
+
+        if (interviewRecord && interviewRecord.scheduled_at) {
+            const iMeta = interviewMeta(interviewRecord.status || "scheduled");
+            setText("detailInterviewDate", formatDateOnly(interviewRecord.scheduled_at));
+            setText("detailInterviewTime", formatTimeOnly(interviewRecord.scheduled_at));
+            setText("detailInterviewVenue", interviewRecord.venue || "-");
+            setText("detailInterviewNote", interviewRecord.remarks || "Bring your complete hard-copy requirements and printed official application form.");
+            setChip("detailInterviewChip", iMeta.label, iMeta.chipClass);
+        } else {
             setText("detailInterviewDate", "-");
             setText("detailInterviewTime", "-");
             setText("detailInterviewVenue", "-");
             setText("detailInterviewNote", "Interview is not yet scheduled.");
-            return;
+            setChip("detailInterviewChip", "Not Scheduled", "ldss-chip-neutral");
         }
-
-        setText("detailInterviewDate", formatDateOnly(interview.scheduled_at));
-        setText("detailInterviewTime", formatTimeOnly(interview.scheduled_at));
-        setText("detailInterviewVenue", interview.venue || "-");
-        setText("detailInterviewNote", parsedRemarks.plainRemarks || "Bring original hard-copy requirements and school ID for verification.");
     }
 
     function latestDocStatusByType(documents) {
@@ -362,7 +464,7 @@
         }
 
         const latest = latestDocStatusByType(documents || []);
-        const requiredOrder = ["proof_of_enrollment", "report_card", "barangay_certificate", "income_certificate"];
+        const requiredOrder = ["income_certificate"];
 
         wrapper.innerHTML = requiredOrder
             .map(function (docType) {
@@ -380,7 +482,7 @@
             .join("");
     }
 
-    function renderTimeline(application, interview, approval) {
+    function renderTimeline(application, examRecord, interviewRecord, approvalRecord) {
         const timeline = byId("detailTimelineList");
         if (!timeline) {
             return;
@@ -392,11 +494,15 @@
         if (application.submitted_at) {
             events.push({ label: "Application submitted", at: application.submitted_at });
         }
-        if (interview && interview.scheduled_at) {
-            events.push({ label: "Interview scheduled", at: interview.scheduled_at });
+        if (examRecord && examRecord.updated_at) {
+            const summary = workflow().examSummaryFromRecord(examRecord);
+            events.push({ label: "Exam result: " + summary.resultLabel, at: examRecord.updated_at });
         }
-        if (approval && approval.decided_at) {
-            events.push({ label: "Admin decision: " + (approval.decision_status || "updated"), at: approval.decided_at });
+        if (interviewRecord && interviewRecord.scheduled_at) {
+            events.push({ label: "Interview scheduled", at: interviewRecord.scheduled_at });
+        }
+        if (approvalRecord && approvalRecord.decided_at) {
+            events.push({ label: "Final decision: " + (approvalRecord.decision_status || "updated"), at: approvalRecord.decided_at });
         }
         if (application.updated_at) {
             const current = statusMeta(application.status).label;
@@ -432,51 +538,49 @@
             return;
         }
 
-        const [interviewResult, docsResult, approvalResult] = await Promise.all([
-            context.client
-                .from("interviews")
-                .select("scheduled_at, venue, status, result, remarks, verified_photo_path, created_at")
-                .eq("application_id", application.id)
-                .maybeSingle(),
+        const dataResults = await Promise.all([
+            fetchExamRecord(context, application),
+            fetchInterviewRecord(context, application.id),
+            fetchApprovalRecord(context, application.id),
             context.client
                 .from("application_documents")
                 .select("document_type, verification_status, created_at")
                 .eq("application_id", application.id),
             context.client
-                .from("approval_queue")
-                .select("decision_status, decided_at")
-                .eq("application_id", application.id)
+                .from("profiles")
+                .select("applicant_photo_path, verified_interview_photo_path")
+                .eq("id", context.user.id)
                 .maybeSingle()
         ]);
 
-        const profileResult = await context.client
-            .from("profiles")
-            .select("applicant_photo_path, verified_interview_photo_path")
-            .eq("id", context.user.id)
-            .maybeSingle();
+        const examRecord = dataResults[0];
+        const interviewRecord = dataResults[1];
+        const approvalRecord = dataResults[2];
+        const docsResult = dataResults[3];
+        const profileResult = dataResults[4];
 
-        const interview = interviewResult && !interviewResult.error ? interviewResult.data : null;
         const documents = docsResult && !docsResult.error ? docsResult.data : [];
-        const approval = approvalResult && !approvalResult.error ? approvalResult.data : null;
         const profile = profileResult && !profileResult.error ? profileResult.data : null;
 
-        const sectorMeta = parseRemarksWithSectorMeta((interview && interview.remarks) || application.secretary_remarks || "");
+        const sectorMeta = parseRemarksWithSectorMeta((interviewRecord && interviewRecord.remarks) || application.secretary_remarks || "");
 
         const applicantPhotoPath = profile && profile.applicant_photo_path ? profile.applicant_photo_path : "";
-        const verifiedPhotoPath = (interview && interview.verified_photo_path)
+        const verifiedPhotoPath = (interviewRecord && interviewRecord.verified_photo_path)
             || (profile && profile.verified_interview_photo_path)
             || "";
 
-        const [applicantPhotoUrl, verifiedPhotoUrl] = await Promise.all([
+        const urlResults = await Promise.all([
             applicantPhotoPath ? createSignedUrl(context, applicantPhotoPath) : Promise.resolve(""),
             verifiedPhotoPath ? createSignedUrl(context, verifiedPhotoPath) : Promise.resolve("")
         ]);
 
+        const applicantPhotoUrl = urlResults[0];
+        const verifiedPhotoUrl = urlResults[1];
+
         renderHeader(application);
-        renderStatusCards(application, interview, approval);
-        renderInterview(interview);
+        renderStatusCards(application, examRecord, interviewRecord, approvalRecord);
         renderRequirements(documents);
-        renderTimeline(application, interview, approval);
+        renderTimeline(application, examRecord, interviewRecord, approvalRecord);
         renderSectorTags(sectorMeta.sectorTags);
 
         setPhotoArea(

@@ -3,29 +3,43 @@
 
     const PAGE_SIZE = 8;
     const BATCH_APPLY_LIMIT = 30;
+    const INTERVIEW_QUEUE_APPLICATION_STATUSES = [
+        "passed_exam",
+        "special_endorsement_review",
+        "for_interview",
+        "interview_scheduled",
+        "interview_completed",
+        "hard_copy_verified",
+        "for_approval",
+        "waitlisted",
+        "approved",
+        "rejected",
+        "for_release",
+        "released"
+    ];
 
     const LOCKED_APP_STATUSES = [
-        "for_admin_approval",
+        "for_approval",
         "approved",
         "waitlisted",
         "rejected",
-        "certification_ready",
-        "release_scheduled",
+        "for_release",
         "released"
     ];
 
     const APP_STATUS_META = {
-        submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
+        passed_exam: { label: "Passed Exam", chipClass: "ldss-chip-success" },
+        failed_exam: { label: "Failed Exam", chipClass: "ldss-chip-danger" },
+        special_endorsement_review: { label: "Special Endorsement Review", chipClass: "ldss-chip-accent" },
+        for_interview: { label: "For Interview", chipClass: "ldss-chip-accent" },
         interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        recommended: { label: "Recommended", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
-        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
+        interview_completed: { label: "Interview Completed", chipClass: "ldss-chip-accent" },
+        hard_copy_verified: { label: "Hard Copy Verified", chipClass: "ldss-chip-success" },
+        for_approval: { label: "For Approval", chipClass: "ldss-chip-accent" },
         approved: { label: "Approved", chipClass: "ldss-chip-success" },
         waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
         rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
-        certification_ready: { label: "Certification Ready", chipClass: "ldss-chip-success" },
-        release_scheduled: { label: "Release Scheduled", chipClass: "ldss-chip-accent" },
+        for_release: { label: "For Release", chipClass: "ldss-chip-accent" },
         released: { label: "Released", chipClass: "ldss-chip-success" }
     };
 
@@ -407,6 +421,38 @@
         renderPagination(filteredRows.length);
     }
 
+    async function fetchInterviewMap(applicationIds) {
+        if (!applicationIds.length) {
+            return {};
+        }
+
+        let result = await authContext.client
+            .from("interview_records")
+            .select("id, application_id, batch_label, scheduled_at, venue, status, result, remarks, updated_at")
+            .in("application_id", applicationIds);
+
+        if (result.error) {
+            if (!/does not exist|relation/i.test(result.error.message || "")) {
+                throw new Error("Failed to load interview records: " + result.error.message);
+            }
+
+            result = await authContext.client
+                .from("interviews")
+                .select("id, application_id, batch_label, scheduled_at, venue, status, result, remarks, updated_at")
+                .in("application_id", applicationIds);
+
+            if (result.error) {
+                return {};
+            }
+        }
+
+        const map = {};
+        (result.data || []).forEach(function (interview) {
+            map[interview.application_id] = interview;
+        });
+        return map;
+    }
+
     async function loadInterviewData() {
         showStatus("");
 
@@ -421,7 +467,10 @@
             return;
         }
 
-        const appRows = appResult.data || [];
+        const appRows = (appResult.data || []).filter(function (row) {
+            return INTERVIEW_QUEUE_APPLICATION_STATUSES.includes((row.status || "").toString().toLowerCase());
+        });
+
         const applicationIds = appRows.map(function (row) { return row.id; }).filter(Boolean);
         const applicantIds = Array.from(new Set(appRows.map(function (row) { return row.applicant_id; }).filter(Boolean)));
 
@@ -439,18 +488,12 @@
             }
         }
 
-        const interviewMap = {};
-        if (applicationIds.length > 0) {
-            const interviewResult = await authContext.client
-                .from("interviews")
-                .select("id, application_id, batch_label, scheduled_at, venue, status, result, remarks, updated_at")
-                .in("application_id", applicationIds);
-
-            if (!interviewResult.error && interviewResult.data) {
-                interviewResult.data.forEach(function (interview) {
-                    interviewMap[interview.application_id] = interview;
-                });
-            }
+        let interviewMap = {};
+        try {
+            interviewMap = await fetchInterviewMap(applicationIds);
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to load interview records.", "alert-danger");
+            interviewMap = {};
         }
 
         allRows = appRows.map(function (app) {
@@ -538,11 +581,19 @@
             encoded_by: authContext.user.id
         };
 
-        const result = await authContext.client
+        let result = await authContext.client
+            .from("interview_records")
+            .upsert(payload, { onConflict: "application_id" })
+            .select("id, application_id, scheduled_at, venue, status, result")
+            .single();
+
+        if (result.error) {
+            result = await authContext.client
             .from("interviews")
             .upsert(payload, { onConflict: "application_id" })
             .select("id, application_id, scheduled_at, venue, status, result")
             .single();
+        }
 
         if (result.error) {
             throw new Error("Failed to save interview row: " + result.error.message);
@@ -556,11 +607,15 @@
             return row.application_status;
         }
 
-        if (["scheduled", "rescheduled", "completed", "no_show", "cancelled"].includes(interviewStatus)) {
+        if (["scheduled", "rescheduled"].includes(interviewStatus)) {
             return "interview_scheduled";
         }
 
-        return "under_secretary_review";
+        if (interviewStatus === "completed") {
+            return "interview_completed";
+        }
+
+        return "for_interview";
     }
 
     async function syncApplicationStatus(row, interviewStatus) {

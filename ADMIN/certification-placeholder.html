@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8" />
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-        <meta name="description" content="LDSS certification placeholder page" />
+        <meta name="description" content="LDSS admin printable application form preview" />
         <meta name="author" content="LGU Daet" />
-        <title>LDSS | Certification Placeholder</title>
+        <title>LDSS | Printable Application Form</title>
         <link href="../css/styles.css" rel="stylesheet" />
         <link href="../css/ldss.css" rel="stylesheet" />
         <link rel="icon" type="image/png" href="../img/icon.png" />
@@ -56,7 +56,7 @@
                                 <div class="nav-link-icon"><i data-feather="bar-chart-2"></i></div>
                                 Reports
                             </a>
-<a class="nav-link" href="../logout.html">
+                            <a class="nav-link" href="../logout.html">
                                 <div class="nav-link-icon"><i data-feather="log-out"></i></div>
                                 Logout
                             </a>
@@ -73,52 +73,182 @@
                                     <div class="col-auto mb-3">
                                         <h1 class="page-header-title">
                                             <div class="page-header-icon"><i data-feather="file-text"></i></div>
-                                            Certification (Placeholder)
+                                            Printable Application Form
                                         </h1>
-                                        <div class="small ldss-muted">Temporary static shell for certification generation and preview.</div>
+                                        <div class="small ldss-muted">Preview and print the submitted applicant form with 1x1 photo.</div>
                                         <ol class="ldss-breadcrumb mt-1">
                                             <li><a href="admin-dashboard.html">Dashboard</a></li>
                                             <li>Certifications</li>
                                         </ol>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3">
-                                        <button class="btn btn-dark btn-sm me-2" type="button">Generate PDF (Placeholder)</button>
-                                        <button class="btn btn-outline-dark btn-sm" type="button">Send to Applicant</button>
+                                        <button class="btn btn-dark btn-sm" id="certPrintBtn" type="button">Print Form</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </header>
                     <div class="container-xl px-4 mt-4">
-                        <!-- TODO(Supabase): generate PDF certification using approved scholar records and storage bucket -->
+                        <div class="alert d-none ldss-print-hide" id="certStatus" role="alert"></div>
                         <div class="row g-4">
-                            <div class="col-lg-4">
+                            <div class="col-lg-4 ldss-print-hide">
                                 <div class="card h-100">
-                                    <div class="card-header">Certificate Metadata</div>
+                                    <div class="card-header">Load Application</div>
                                     <div class="card-body">
-                                        <div class="small text-muted">Application ID</div>
-                                        <div class="mb-2">LDSS-2026-00108</div>
-                                        <div class="small text-muted">Scholar Name</div>
-                                        <div class="mb-2">Renz Garcia</div>
-                                        <div class="small text-muted">Certificate Status</div>
-                                        <div class="mb-2"><span class="ldss-chip ldss-chip-accent">Ready for Generation</span></div>
+                                        <label class="small mb-1" for="certSearchInput">Application ID or Number</label>
+                                        <input class="form-control" id="certSearchInput" type="text" placeholder="UUID or LDSS-YYYY-XXXXX" />
+                                        <div class="d-flex flex-wrap gap-2 mt-3">
+                                            <button class="btn btn-dark btn-sm" id="certLoadBtn" type="button">Load Record</button>
+                                            <button class="btn btn-outline-dark btn-sm" id="certLoadLatestBtn" type="button">Load Latest</button>
+                                        </div>
+                                        <hr class="my-3" />
+                                        <div class="small text-muted">Loaded Application</div>
+                                        <div class="mb-2 fw-700" id="certMetaApplicationNo">-</div>
+                                        <div class="small text-muted">Applicant</div>
+                                        <div class="mb-2" id="certMetaApplicantName">-</div>
                                         <div class="small text-muted">Last Updated</div>
-                                        <div>March 9, 2026</div>
+                                        <div class="mb-3" id="certMetaUpdatedAt">-</div>
+                                        <div class="small text-muted">Tax Certificate</div>
+                                        <div class="mb-2 d-flex align-items-center gap-2">
+                                            <span class="ldss-chip ldss-chip-neutral" id="certTaxStatusChip">Not loaded</span>
+                                            <a class="small d-none" id="certTaxFileLink" target="_blank" rel="noopener">Open PDF</a>
+                                        </div>
+                                        <div class="small text-muted">
+                                            Tip: use query params like <code>?id=&lt;application_uuid&gt;</code> or <code>?application_no=LDSS-2026-00001</code> for direct loading.
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                             <div class="col-lg-8">
-                                <div class="card h-100">
-                                    <div class="card-header">Preview Area</div>
+                                <div class="card">
+                                    <div class="card-header">Print Preview</div>
                                     <div class="card-body">
-                                        <div class="ldss-shell-placeholder">
-                                            <p class="mb-1 fw-600">Certification preview placeholder</p>
-                                            <p class="small mb-2">Final implementation will render printable content and PDF output here.</p>
-                                            <ul class="small mb-0">
-                                                <li>Template merge for scholar name and scholarship details</li>
-                                                <li>Signature block and issue date</li>
-                                                <li>Download and release status tracking</li>
-                                            </ul>
+                                        <div class="ldss-print-zone">
+                                            <section class="ldss-print-sheet" id="certPrintableSheet">
+                                                <div class="ldss-print-top">
+                                                    <div>
+                                                        <div class="ldss-print-org">LOCAL GOVERNMENT UNIT OF DAET</div>
+                                                        <div class="ldss-print-org-sub">Local Scholarship Distribution System</div>
+                                                        <div class="ldss-print-title">Scholarship Application Form</div>
+                                                    </div>
+                                                    <div class="ldss-photo-1x1-wrap">
+                                                        <div class="ldss-photo-1x1">
+                                                            <img class="d-none" id="certApplicantPhoto" alt="Applicant 1x1 photo" />
+                                                            <div class="ldss-photo-1x1-placeholder" id="certApplicantPhotoPlaceholder">1x1 Photo</div>
+                                                        </div>
+                                                        <div class="small text-muted text-center mt-1">Applicant 1x1</div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="ldss-print-section">Application Details</div>
+                                                <table class="ldss-print-table">
+                                                    <tbody>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Application No.</td>
+                                                            <td id="certApplicationNo">-</td>
+                                                            <td class="ldss-print-label">Submission Date</td>
+                                                            <td id="certSubmittedAt">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Application Type</td>
+                                                            <td id="certApplicationType">-</td>
+                                                            <td class="ldss-print-label">Current Status</td>
+                                                            <td id="certApplicationStatus">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Scholarship Type</td>
+                                                            <td id="certScholarshipType">-</td>
+                                                            <td class="ldss-print-label">School Year</td>
+                                                            <td id="certSchoolYear">-</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+
+                                                <div class="ldss-print-section">Applicant Information</div>
+                                                <table class="ldss-print-table">
+                                                    <tbody>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Full Name</td>
+                                                            <td id="certFullName">-</td>
+                                                            <td class="ldss-print-label">Date of Birth</td>
+                                                            <td id="certDateOfBirth">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Sex</td>
+                                                            <td id="certSex">-</td>
+                                                            <td class="ldss-print-label">Civil Status</td>
+                                                            <td id="certCivilStatus">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Email</td>
+                                                            <td id="certEmail">-</td>
+                                                            <td class="ldss-print-label">Mobile Number</td>
+                                                            <td id="certMobileNumber">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Address</td>
+                                                            <td colspan="3" id="certAddress">-</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+
+                                                <div class="ldss-print-section">Education and Family Background</div>
+                                                <table class="ldss-print-table">
+                                                    <tbody>
+                                                        <tr>
+                                                            <td class="ldss-print-label">School</td>
+                                                            <td id="certSchoolName">-</td>
+                                                            <td class="ldss-print-label">Student Number</td>
+                                                            <td id="certStudentNumber">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Course / Strand</td>
+                                                            <td id="certCourse">-</td>
+                                                            <td class="ldss-print-label">Year Level</td>
+                                                            <td id="certYearLevel">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Guardian Name</td>
+                                                            <td id="certGuardianName">-</td>
+                                                            <td class="ldss-print-label">Guardian Occupation</td>
+                                                            <td id="certGuardianOccupation">-</td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Monthly Income</td>
+                                                            <td id="certMonthlyIncome">-</td>
+                                                            <td class="ldss-print-label">Barangay</td>
+                                                            <td id="certBarangay">-</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+
+                                                <div class="ldss-print-section">Uploaded Requirement</div>
+                                                <table class="ldss-print-table">
+                                                    <tbody>
+                                                        <tr>
+                                                            <td class="ldss-print-label">Tax Exemption Certificate (PDF)</td>
+                                                            <td id="certTaxRequirementValue">Not uploaded</td>
+                                                            <td class="ldss-print-label">Verification</td>
+                                                            <td id="certTaxRequirementStatus">Pending</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+
+                                                <p class="ldss-print-note mt-3 mb-4">
+                                                    I hereby certify that the information in this application form and all submitted supporting documents are true and correct.
+                                                </p>
+
+                                                <div class="ldss-print-signature">
+                                                    <div>
+                                                        <div class="ldss-sign-line"></div>
+                                                        <div class="small text-muted text-center">Applicant Signature Over Printed Name</div>
+                                                    </div>
+                                                    <div>
+                                                        <div class="ldss-sign-line"></div>
+                                                        <div class="small text-muted text-center">Date Signed</div>
+                                                    </div>
+                                                </div>
+                                            </section>
                                         </div>
                                     </div>
                                 </div>
@@ -137,21 +267,11 @@
             </div>
         </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-                <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-admin-certification.js"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-

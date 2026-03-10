@@ -495,6 +495,368 @@ body {
     max-width: 260px;
 }
 
+.ldss-paper-form {
+    position: relative;
+    background: #fff;
+    border: 1px solid #d4dbe4;
+    border-radius: 0.6rem;
+    box-shadow: 0 0.18rem 0.9rem rgba(15, 23, 42, 0.06);
+    padding: 1.15rem 1.15rem 1.25rem;
+}
+
+.ldss-paper-form-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.1rem;
+    border-bottom: 1px solid #d6dde6;
+    padding-bottom: 0.7rem;
+    margin-bottom: 0.85rem;
+}
+
+.ldss-paper-brand {
+    flex: 1 1 auto;
+    text-align: center;
+}
+
+.ldss-paper-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+}
+
+.ldss-paper-head-center {
+    text-align: center;
+}
+
+.ldss-paper-logo {
+    width: 3.2rem;
+    height: 3.2rem;
+    object-fit: contain;
+}
+
+.ldss-paper-brand-line {
+    font-size: 0.72rem;
+    line-height: 1.2;
+    color: #334155;
+}
+
+.ldss-paper-title {
+    font-size: 0.86rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-weight: 700;
+}
+
+.ldss-paper-subtitle {
+    font-size: 0.74rem;
+    color: #4b5563;
+}
+
+.ldss-paper-form-name {
+    font-size: 0.8rem;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.ldss-paper-photo-panel {
+    width: 160px;
+    flex: 0 0 auto;
+    text-align: center;
+}
+
+.ldss-paper-photo-box {
+    width: 110px;
+    height: 110px;
+    border: 1px solid #6b7280;
+    margin-left: 0;
+    margin-right: auto;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.ldss-paper-photo-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ldss-paper-photo-box div {
+    font-size: 0.8rem;
+    color: #475569;
+    font-weight: 600;
+}
+
+.ldss-paper-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.2rem;
+    justify-content: space-between;
+    margin-bottom: 0.65rem;
+}
+
+.ldss-paper-action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.8rem 1rem;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+    margin-bottom: 0.6rem;
+}
+
+.ldss-paper-action-instruction {
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
+.ldss-paper-block {
+    border-top: 1px solid #cbd5e1;
+    padding-top: 0.55rem;
+    margin-top: 0.45rem;
+}
+
+.ldss-paper-block-title {
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.45rem;
+    color: #1f2937;
+}
+
+.ldss-paper-fields label {
+    font-size: 0.7rem;
+    color: #475569;
+    font-weight: 600;
+}
+
+.ldss-paper-fields .form-control,
+.ldss-paper-fields .form-select {
+    border: 0;
+    border-bottom: 1px solid #7b8794;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0.2rem 0.1rem;
+    min-height: 30px;
+    font-size: 0.86rem;
+}
+
+.ldss-paper-fields .form-control:focus,
+.ldss-paper-fields .form-select:focus {
+    border-color: #111827;
+    box-shadow: none;
+}
+
+.ldss-paper-fields textarea.form-control {
+    border: 1px solid #94a3b8;
+    border-radius: 0.3rem;
+    padding: 0.35rem 0.45rem;
+}
+
+.ldss-paper-fields .form-check-input {
+    border-color: #64748b;
+}
+
+.ldss-print-zone {
+    display: flex;
+    justify-content: center;
+    overflow-x: auto;
+    background: #f6f7f9;
+    border-radius: 0.8rem;
+    padding: 0.75rem;
+}
+
+.ldss-print-sheet {
+    width: 8.5in;
+    min-height: 11in;
+    background: #ffffff;
+    border: 1px solid #d6dde6;
+    box-shadow: 0 0.3rem 1rem rgba(15, 23, 42, 0.08);
+    padding: 0.5in;
+    color: #111827;
+}
+
+.ldss-print-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.9rem;
+}
+
+.ldss-print-letter-head {
+    position: relative;
+    text-align: center;
+    padding-right: 1.45in;
+    margin-bottom: 0.9rem;
+}
+
+.ldss-print-head-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
+}
+
+.ldss-print-head-logo {
+    width: 0.78in;
+    height: 0.78in;
+    object-fit: contain;
+}
+
+.ldss-print-photo-slot {
+    position: absolute;
+    top: 0;
+    right: 0;
+    text-align: center;
+}
+
+.ldss-print-photo-box {
+    width: 1in;
+    height: 1in;
+    border: 1px solid #6b7280;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.ldss-print-photo-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ldss-print-photo-placeholder {
+    font-size: 0.66rem;
+    color: #6b7280;
+}
+
+.ldss-print-center-lines {
+    font-size: 0.73rem;
+    line-height: 1.25;
+    color: #1f2937;
+}
+
+.ldss-print-program-title {
+    margin-top: 0.18rem;
+    font-size: 0.86rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+.ldss-print-form-label {
+    margin-top: 0.24rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.ldss-print-org {
+    font-size: 0.92rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.ldss-print-org-sub {
+    font-size: 0.78rem;
+    color: #4b5563;
+}
+
+.ldss-print-title {
+    margin-top: 0.3rem;
+    font-size: 1.08rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.ldss-photo-1x1-wrap {
+    flex: 0 0 auto;
+}
+
+.ldss-photo-1x1 {
+    width: 1in;
+    height: 1in;
+    border: 1px solid #9ca3af;
+    border-radius: 0.1rem;
+    background: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.ldss-photo-1x1 img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ldss-photo-1x1-placeholder {
+    font-size: 0.65rem;
+    color: #6b7280;
+    text-align: center;
+}
+
+.ldss-print-section {
+    margin-top: 0.85rem;
+    margin-bottom: 0.25rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #1f2937;
+}
+
+.ldss-print-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.76rem;
+}
+
+.ldss-print-table td {
+    border: 1px solid #cbd5e1;
+    padding: 0.24rem 0.3rem;
+    vertical-align: top;
+    word-break: break-word;
+}
+
+.ldss-print-label {
+    width: 20%;
+    background: #f3f4f6;
+    font-weight: 600;
+    color: #374151;
+}
+
+.ldss-print-note {
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: #374151;
+}
+
+.ldss-print-signature {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.ldss-sign-line {
+    border-bottom: 1px solid #334155;
+    height: 2rem;
+}
+
 #layoutSidenav #layoutSidenav_nav,
 #layoutSidenav #layoutSidenav_content {
     transition: transform 0.2s var(--ldss-ease), margin-left 0.2s var(--ldss-ease);
@@ -580,6 +942,27 @@ body.ldss-ready .ldss-auth-card {
     .ldss-quick-actions .btn {
         flex: 1 1 100%;
     }
+
+    .ldss-paper-form {
+        padding: 0.95rem;
+    }
+
+    .ldss-paper-form-header {
+        flex-direction: column;
+    }
+
+    .ldss-paper-photo-panel {
+        width: 100%;
+    }
+
+    .ldss-paper-photo-box {
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .ldss-paper-action-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 767.98px) {
@@ -611,6 +994,46 @@ body.ldss-ready .ldss-auth-card {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
+    }
+}
+
+@media print {
+    body {
+        background: #ffffff !important;
+    }
+
+    .topnav,
+    #layoutSidenav_nav,
+    .page-header,
+    .footer-admin,
+    .ldss-print-hide {
+        display: none !important;
+    }
+
+    #layoutSidenav,
+    #layoutSidenav_content,
+    .container-xl,
+    .card,
+    .card-body {
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        background: transparent !important;
+    }
+
+    .ldss-print-zone {
+        padding: 0 !important;
+        background: transparent !important;
+    }
+
+    .ldss-print-sheet {
+        width: 100% !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        padding: 0.35in !important;
     }
 }
 

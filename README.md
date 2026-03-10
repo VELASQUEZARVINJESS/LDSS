@@ -33,13 +33,24 @@ This project is now standalone (no nested SB Admin folder) and deploy-ready for 
 - Secretary live integrations now in:
   - `js/supabase-secretary-dashboard.js`
   - `js/supabase-secretary-applications.js`
+  - `js/supabase-secretary-exam-batches.js`
+  - `js/supabase-secretary-exam-results.js`
   - `js/supabase-secretary-verification.js`
   - `js/supabase-secretary-interview.js`
-- Applicant notifications page now supports live list, filter, pagination, mark read/unread, and mark all read.
-- Secretary verification now supports document status updates, interview scheduling, verified photo upload, return-for-correction, recommend-to-admin, and auto applicant notifications.
-- Secretary interview module now supports live interview queue filtering, row-level schedule/venue/status updates, batch scheduling for filtered rows, and quick links to verification.
-- Next implementation focus: Admin modules (`admin-dashboard`, `admin-approval-queue`, `admin-notifications`) and remaining Secretary/Admin/Super Admin TODO pages.
-- UI pages still include `TODO(Supabase)` markers for remaining modules.
+- Admin live integrations now in:
+  - `js/supabase-admin-dashboard.js`
+  - `js/supabase-admin-approval-queue.js`
+- Super Admin settings integration shell:
+  - `js/supabase-superadmin-scholarship-settings.js`
+- Applicant notifications page supports live list, filter, pagination, mark read/unread, and mark all read.
+- Secretary verification supports document status updates, interview scheduling, hard-copy verification state, verified photo upload, recommend-to-admin, and applicant notifications.
+- Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
+- Admin approval queue supports ranking view, special endorsement action, approve/reject/waitlist decisions, and batch decision handling.
+- Scholarship workflow status model:
+  - `draft`, `submitted`, `pending_exam`, `exam_scheduled`, `exam_completed`, `passed_exam`, `failed_exam`, `special_endorsement_review`, `for_interview`, `interview_scheduled`, `interview_completed`, `hard_copy_verified`, `for_approval`, `approved`, `waitlisted`, `rejected`, `for_release`, `released`
+- SQL bootstrap now includes integration-ready workflow tables:
+  - `exam_batches`, `exam_records`, `interview_records`, `approval_records`, `ranking_settings`
+- UI pages still include targeted `TODO(Supabase)` markers for remaining server-side integrations (ranking engine, PDF generation, report exports).
 - Storage bucket/policies for requirement uploads are included in the same SQL bootstrap (`ldss-documents` bucket).
 
 ## Live Login Setup (Supabase)

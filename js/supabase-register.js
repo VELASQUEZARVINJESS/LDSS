@@ -115,7 +115,6 @@
                 options: {
                     emailRedirectTo: emailRedirectTo,
                     data: {
-                        role: "applicant",
                         first_name: firstName,
                         last_name: lastName,
                         mobile_number: mobileE164
@@ -133,7 +132,6 @@
                 await client.from("profiles").upsert(
                     {
                         id: data.user.id,
-                        role: "applicant",
                         email: email,
                         first_name: firstName,
                         last_name: lastName,

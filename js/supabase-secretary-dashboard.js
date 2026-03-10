@@ -1,19 +1,15 @@
-﻿(function () {
+(function () {
     "use strict";
-
-    const STATUS_META = {
-        submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
-        interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
-        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
-        approved: { label: "Approved", chipClass: "ldss-chip-success" },
-        waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
-        rejected: { label: "Rejected", chipClass: "ldss-chip-danger" }
-    };
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function workflow() {
+        return window.LDSS_WORKFLOW || {
+            normalizeStatus: function (status) { return (status || "").toString().trim().toLowerCase(); },
+            statusMeta: function (status) { return { label: (status || "-").toString(), chipClass: "ldss-chip-neutral" }; }
+        };
     }
 
     function escapeHtml(value) {
@@ -22,7 +18,7 @@
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
+            .replace(/\"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
 
@@ -41,7 +37,11 @@
     }
 
     function statusMeta(status) {
-        return STATUS_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
+        return workflow().statusMeta(status || "");
+    }
+
+    function normalizeStatus(status) {
+        return workflow().normalizeStatus(status || "");
     }
 
     function buildApplicantName(profile) {
@@ -77,11 +77,47 @@
         }
     }
 
+    function isExamStage(status) {
+        const normalized = normalizeStatus(status);
+        return ["pending_exam", "exam_scheduled", "exam_completed", "failed_exam", "passed_exam", "special_endorsement_review"].includes(normalized);
+    }
+
+    function isInterviewStage(status) {
+        const normalized = normalizeStatus(status);
+        return ["for_interview", "interview_scheduled", "interview_completed", "hard_copy_verified"].includes(normalized);
+    }
+
     function renderMetrics(rows) {
-        setMetric("secretaryDashboardNewSubmissions", rows.filter(function (row) { return row.status === "submitted"; }).length);
-        setMetric("secretaryDashboardForValidation", rows.filter(function (row) { return ["submitted", "under_secretary_review", "returned_for_correction"].includes(row.status); }).length);
-        setMetric("secretaryDashboardInterviewStage", rows.filter(function (row) { return row.status === "interview_scheduled"; }).length);
-        setMetric("secretaryDashboardForAdmin", rows.filter(function (row) { return row.status === "for_admin_approval"; }).length);
+        setMetric("secretaryDashboardNewSubmissions", rows.filter(function (row) { return normalizeStatus(row.status) === "submitted"; }).length);
+        setMetric("secretaryDashboardForValidation", rows.filter(function (row) { return isExamStage(row.status); }).length);
+        setMetric("secretaryDashboardInterviewStage", rows.filter(function (row) { return isInterviewStage(row.status); }).length);
+        setMetric("secretaryDashboardForAdmin", rows.filter(function (row) { return normalizeStatus(row.status) === "for_approval"; }).length);
+    }
+
+    function queueAction(row) {
+        const normalized = normalizeStatus(row.status);
+        if (normalized === "for_approval") {
+            return {
+                label: "View",
+                href: "../ADMIN/admin-approval-queue.html"
+            };
+        }
+        if (isInterviewStage(normalized) || normalized === "passed_exam") {
+            return {
+                label: "Verify",
+                href: "secretary-interview-verification.html?id=" + encodeURIComponent(row.id)
+            };
+        }
+        if (isExamStage(normalized) || normalized === "submitted") {
+            return {
+                label: "Exam",
+                href: "secretary-exam-batches.html"
+            };
+        }
+        return {
+            label: "Open",
+            href: "secretary-applications.html"
+        };
     }
 
     function renderQueue(rows) {
@@ -97,14 +133,14 @@
 
         tbody.innerHTML = rows.slice(0, 8).map(function (row) {
             const meta = statusMeta(row.status);
-            const actionLabel = row.status === "for_admin_approval" ? "View" : "Open";
+            const action = queueAction(row);
             return (
                 "<tr>" +
                 "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
                 "<td>" + escapeHtml(row.applicant_name || "Unknown") + "</td>" +
                 '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
                 "<td>" + escapeHtml(formatDate(row.updated_at || row.created_at)) + "</td>" +
-                '<td><a class="btn btn-outline-dark btn-sm" href="secretary-interview-verification.html?id=' + encodeURIComponent(row.id) + '">' + actionLabel + "</a></td>" +
+                '<td><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
                 "</tr>"
             );
         }).join("");

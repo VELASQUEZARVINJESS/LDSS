@@ -7,24 +7,27 @@
 
     const APPLICATION_STATUS_META = {
         submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
+        pending_exam: { label: "Pending Exam", chipClass: "ldss-chip-accent" },
+        exam_scheduled: { label: "Exam Scheduled", chipClass: "ldss-chip-accent" },
+        exam_completed: { label: "Exam Completed", chipClass: "ldss-chip-accent" },
+        passed_exam: { label: "Passed Exam", chipClass: "ldss-chip-success" },
+        failed_exam: { label: "Failed Exam", chipClass: "ldss-chip-danger" },
+        special_endorsement_review: { label: "Special Endorsement Review", chipClass: "ldss-chip-accent" },
+        for_interview: { label: "For Interview", chipClass: "ldss-chip-accent" },
         interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        recommended: { label: "Recommended", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
+        interview_completed: { label: "Interview Completed", chipClass: "ldss-chip-accent" },
+        hard_copy_verified: { label: "Hard Copy Verified", chipClass: "ldss-chip-success" },
+        for_approval: { label: "For Approval", chipClass: "ldss-chip-accent" },
         returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
         approved: { label: "Approved", chipClass: "ldss-chip-success" },
         waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
         rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
-        certification_ready: { label: "Certification Ready", chipClass: "ldss-chip-success" },
-        release_scheduled: { label: "Release Scheduled", chipClass: "ldss-chip-accent" },
+        for_release: { label: "For Release", chipClass: "ldss-chip-accent" },
         released: { label: "Released", chipClass: "ldss-chip-success" }
     };
 
     const REQUIRED_DOCUMENTS = [
-        { type: "proof_of_enrollment", label: "Proof of Enrollment" },
-        { type: "report_card", label: "Latest Report Card" },
-        { type: "barangay_certificate", label: "Barangay Certificate" },
-        { type: "income_certificate", label: "Income Certificate" }
+        { type: "income_certificate", label: "Tax Exemption Certificate (PDF)" }
     ];
 
     const DOCUMENT_STATUS_META = {
@@ -560,14 +563,31 @@
     }
 
     async function fetchInterview(applicationId) {
-        const result = await authContext.client
-            .from("interviews")
-            .select("id, application_id, scheduled_at, venue, status, result, exam_score, remarks, verified_photo_path")
+        let result = await authContext.client
+            .from("interview_records")
+            .select("id, application_id, scheduled_at, venue, status, result, exam_score, remarks, verified_photo_path, hard_copy_verified, hard_copy_verified_at")
             .eq("application_id", applicationId)
             .maybeSingle();
 
         if (result.error) {
+            if (!/does not exist|relation/i.test(result.error.message || "")) {
+                return null;
+            }
+
+            result = await authContext.client
+                .from("interviews")
+                .select("id, application_id, scheduled_at, venue, status, result, exam_score, remarks, verified_photo_path")
+                .eq("application_id", applicationId)
+                .maybeSingle();
+        }
+
+        if (result.error) {
             return null;
+        }
+
+        if (result.data && typeof result.data.hard_copy_verified === "undefined") {
+            result.data.hard_copy_verified = false;
+            result.data.hard_copy_verified_at = null;
         }
         return result.data || null;
     }
@@ -913,7 +933,7 @@
         }
     }
 
-    async function upsertInterview(formValues, verifiedPhotoPath) {
+    async function upsertInterview(formValues, verifiedPhotoPath, hardCopyVerified) {
         const payload = {
             application_id: currentApplication.id,
             scheduled_at: formValues.interviewDateTimeIso,
@@ -922,7 +942,9 @@
             result: formValues.interviewResult,
             exam_score: formValues.examScore,
             remarks: formValues.remarksWithSectorMeta || null,
-            encoded_by: authContext.user.id
+            encoded_by: authContext.user.id,
+            hard_copy_verified: Boolean(hardCopyVerified),
+            hard_copy_verified_at: hardCopyVerified ? new Date().toISOString() : null
         };
 
         const finalVerifiedPath = verifiedPhotoPath
@@ -933,11 +955,19 @@
             payload.verified_photo_path = finalVerifiedPath;
         }
 
-        const result = await authContext.client
-            .from("interviews")
+        let result = await authContext.client
+            .from("interview_records")
             .upsert(payload, { onConflict: "application_id" })
-            .select("id, application_id, scheduled_at, venue, status, result, exam_score, remarks, verified_photo_path")
+            .select("id, application_id, scheduled_at, venue, status, result, exam_score, remarks, verified_photo_path, hard_copy_verified, hard_copy_verified_at")
             .single();
+
+        if (result.error) {
+            result = await authContext.client
+                .from("interviews")
+                .upsert(payload, { onConflict: "application_id" })
+                .select("id, application_id, scheduled_at, venue, status, result, exam_score, remarks, verified_photo_path")
+                .single();
+        }
 
         if (result.error) {
             throw new Error("Failed to save interview details: " + result.error.message);
@@ -982,15 +1012,30 @@
         const payload = {
             application_id: currentApplication.id,
             priority: formValues.queuePriority,
-            secretary_recommendation: formValues.recommendationDecision,
+            recommendation_status: formValues.recommendationDecision,
             recommendation_notes: formValues.remarks || null,
             queued_at: new Date().toISOString(),
             decision_status: "pending"
         };
 
-        const result = await authContext.client
-            .from("approval_queue")
+        // TODO(Supabase): fully migrate secretary endorsements from approval_queue to approval_records.
+        let result = await authContext.client
+            .from("approval_records")
             .upsert(payload, { onConflict: "application_id" });
+
+        if (result.error) {
+            const fallbackPayload = {
+                application_id: currentApplication.id,
+                priority: formValues.queuePriority,
+                secretary_recommendation: formValues.recommendationDecision,
+                recommendation_notes: formValues.remarks || null,
+                queued_at: new Date().toISOString(),
+                decision_status: "pending"
+            };
+            result = await authContext.client
+                .from("approval_queue")
+                .upsert(fallbackPayload, { onConflict: "application_id" });
+        }
 
         if (result.error) {
             throw new Error("Failed to queue recommendation for admin: " + result.error.message);
@@ -1017,14 +1062,22 @@
         }
     }
 
-    function deriveSaveStatus(interviewStatus) {
+    function allRequiredDocsVerified(docStates) {
+        if (!Array.isArray(docStates) || docStates.length === 0) {
+            return false;
+        }
+        return docStates.every(function (row) {
+            return row.exists && row.status === "verified";
+        });
+    }
+
+    function deriveSaveStatus(interviewStatus, docStates) {
         const lockedStatuses = [
-            "for_admin_approval",
+            "for_approval",
             "approved",
             "waitlisted",
             "rejected",
-            "certification_ready",
-            "release_scheduled",
+            "for_release",
             "released"
         ];
 
@@ -1032,11 +1085,18 @@
             return currentApplication.status;
         }
 
-        if (["scheduled", "rescheduled", "completed"].includes(interviewStatus)) {
+        if (["scheduled", "rescheduled"].includes(interviewStatus)) {
             return "interview_scheduled";
         }
 
-        return "under_secretary_review";
+        if (interviewStatus === "completed") {
+            if (allRequiredDocsVerified(docStates)) {
+                return "hard_copy_verified";
+            }
+            return "interview_completed";
+        }
+
+        return "for_interview";
     }
 
     async function persistVerification(targetStatus, lockState, includeQueue) {
@@ -1047,9 +1107,10 @@
 
         const docStates = documentVerificationState();
         const uploadedPhotoPath = await maybeUploadVerifiedPhoto();
+        const hardCopyVerified = formValues.interviewStatus === "completed" && allRequiredDocsVerified(docStates);
 
         await persistDocumentUpdates(docStates);
-        currentInterview = await upsertInterview(formValues, uploadedPhotoPath);
+        currentInterview = await upsertInterview(formValues, uploadedPhotoPath, hardCopyVerified);
         await updateApplication(targetStatus, formValues.remarks, lockState);
 
         if (includeQueue) {
@@ -1083,7 +1144,8 @@
             return;
         }
 
-        const targetStatus = deriveSaveStatus(formValues.interviewStatus);
+        const docStates = documentVerificationState();
+        const targetStatus = deriveSaveStatus(formValues.interviewStatus, docStates);
         const result = await persistVerification(targetStatus, null, false);
 
         if (result.formValues.interviewDateTimeIso && ["scheduled", "rescheduled", "completed"].includes(result.formValues.interviewStatus)) {
@@ -1110,7 +1172,7 @@
             return;
         }
 
-        await persistVerification("returned_for_correction", false, false);
+        await persistVerification("submitted", false, false);
         await notifyApplicant(
             "application",
             "Application Returned for Correction",
@@ -1148,7 +1210,7 @@
             return;
         }
 
-        await persistVerification("for_admin_approval", true, true);
+        await persistVerification("for_approval", true, true);
 
         const recommendationText = formValues.recommendationDecision === "approved"
             ? "approved"
@@ -1188,6 +1250,7 @@
     }
 
     function bindActions() {
+        const printBtn = byId("verificationPrintBtn");
         const saveBtn = byId("verificationSaveBtn");
         const returnBtn = byId("verificationReturnBtn");
         const recommendBtn = byId("verificationRecommendBtn");
@@ -1198,6 +1261,16 @@
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
         const cameraStopBtn = byId("verificationStopCameraBtn");
+
+        if (printBtn) {
+            printBtn.addEventListener("click", function () {
+                if (!currentApplication || !currentApplication.id) {
+                    showStatus("No application is loaded yet.", "alert-warning");
+                    return;
+                }
+                window.location.href = "secretary-print-form.html?id=" + encodeURIComponent(currentApplication.id);
+            });
+        }
 
         if (saveBtn) {
             saveBtn.addEventListener("click", function () {

@@ -1,32 +1,34 @@
 (function () {
     "use strict";
 
-    const STATUS_META = {
-        draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
-        submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
-        interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        recommended: { label: "Recommended", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
-        approved: { label: "Approved", chipClass: "ldss-chip-success" },
-        waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
-        rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
-        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
-        certification_ready: { label: "Certification Ready", chipClass: "ldss-chip-success" },
-        release_scheduled: { label: "Release Scheduled", chipClass: "ldss-chip-accent" },
-        released: { label: "Released", chipClass: "ldss-chip-success" }
-    };
-
     const EDITABLE_STATUSES = ["draft", "returned_for_correction"];
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const PAGE_SIZE = 10;
 
     let applicationRows = [];
     let currentPage = 1;
-    let filteredApplicationRows = [];
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function workflow() {
+        return window.LDSS_WORKFLOW || {
+            statusMeta: function (status) {
+                return { label: (status || "-").toString(), chipClass: "ldss-chip-neutral", nextStep: "Wait for update." };
+            },
+            nextStepForApplicant: function () {
+                return "Wait for update.";
+            },
+            examSummaryFromRecord: function () {
+                return {
+                    scoreText: "-",
+                    percentageText: "-",
+                    resultLabel: "Pending",
+                    resultChipClass: "ldss-chip-neutral"
+                };
+            }
+        };
     }
 
     function showStatus(message, type) {
@@ -66,80 +68,7 @@
     }
 
     function statusMeta(status) {
-        return STATUS_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
-    }
-
-    function fillFilters(rows) {
-        const statusFilter = byId("applicationsStatusFilter");
-        const yearFilter = byId("applicationsYearFilter");
-        if (!statusFilter || !yearFilter) {
-            return;
-        }
-
-        const selectedStatus = statusFilter.value || "all";
-        const selectedYear = yearFilter.value || "all";
-
-        const uniqueStatuses = Array.from(
-            new Set(
-                rows
-                    .map(function (row) {
-                        return row.status || "";
-                    })
-                    .filter(function (value) {
-                        return value.length > 0;
-                    })
-            )
-        );
-
-        const uniqueYears = Array.from(
-            new Set(
-                rows
-                    .map(function (row) {
-                        return row.school_year || "";
-                    })
-                    .filter(function (value) {
-                        return value.length > 0;
-                    })
-            )
-        ).sort().reverse();
-
-        statusFilter.innerHTML = '<option value="all">All</option>';
-        uniqueStatuses.forEach(function (status) {
-            const meta = statusMeta(status);
-            const option = document.createElement("option");
-            option.value = status;
-            option.textContent = meta.label;
-            statusFilter.appendChild(option);
-        });
-        statusFilter.value = uniqueStatuses.includes(selectedStatus) ? selectedStatus : "all";
-
-        yearFilter.innerHTML = '<option value="all">All</option>';
-        uniqueYears.forEach(function (year) {
-            const option = document.createElement("option");
-            option.value = year;
-            option.textContent = year;
-            yearFilter.appendChild(option);
-        });
-        yearFilter.value = uniqueYears.includes(selectedYear) ? selectedYear : "all";
-    }
-
-    function filteredRows() {
-        const searchInput = byId("applicationsSearchInput");
-        const statusFilter = byId("applicationsStatusFilter");
-        const yearFilter = byId("applicationsYearFilter");
-
-        const search = (searchInput ? searchInput.value : "").toLowerCase().trim();
-        const status = statusFilter ? statusFilter.value : "all";
-        const schoolYear = yearFilter ? yearFilter.value : "all";
-
-        return applicationRows.filter(function (row) {
-            const applicationNo = (row.application_no || "").toLowerCase();
-            const scholarshipType = (row.scholarship_type || "").toLowerCase();
-            const matchesSearch = !search || applicationNo.includes(search) || scholarshipType.includes(search);
-            const matchesStatus = status === "all" || row.status === status;
-            const matchesYear = schoolYear === "all" || row.school_year === schoolYear;
-            return matchesSearch && matchesStatus && matchesYear;
-        });
+        return workflow().statusMeta(status);
     }
 
     function dropdownId(rowId) {
@@ -202,19 +131,27 @@
             return;
         }
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No application records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No application records found.</td></tr>';
             return;
         }
 
         tbody.innerHTML = rows
             .map(function (row) {
                 const meta = statusMeta(row.status);
+                const examSummary = workflow().examSummaryFromRecord(row.exam_record || null);
+                const hasExamValue = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
+                const examText = hasExamValue
+                    ? ("Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText)
+                    : "No score yet";
+
                 return (
                     "<tr>" +
                     "<td>" + escapeHtml(row.application_no) + "</td>" +
                     "<td>" + escapeHtml(row.scholarship_type || "-") + "</td>" +
                     "<td>" + escapeHtml(formatDate(row.submitted_at || row.created_at)) + "</td>" +
                     '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
+                    '<td><div class="small">' + escapeHtml(examText) + '</div><span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span></td>" +
+                    '<td><div class="small">' + escapeHtml(workflow().nextStepForApplicant(row.status)) + "</div></td>" +
                     "<td>" + actionButtonMarkup(row) + "</td>" +
                     "</tr>"
                 );
@@ -276,15 +213,11 @@
         pagination.innerHTML = items.join("");
     }
 
-    function applyFilterAndRender(resetPage) {
-        if (resetPage) {
-            currentPage = 1;
-        }
-        filteredApplicationRows = filteredRows();
-        const currentRows = getCurrentPageRows(filteredApplicationRows);
+    function renderRows() {
+        const currentRows = getCurrentPageRows(applicationRows);
         renderTable(currentRows);
-        renderPaginationInfo(filteredApplicationRows.length);
-        renderPaginationControls(filteredApplicationRows.length);
+        renderPaginationInfo(applicationRows.length);
+        renderPaginationControls(applicationRows.length);
     }
 
     function setDeleteButtonLoading(button, isLoading) {
@@ -349,10 +282,6 @@
                 return;
             }
 
-            const currentPageHasOnlyOneRow = filteredApplicationRows.length > 0 && getCurrentPageRows(filteredApplicationRows).length === 1;
-            if (currentPage > 1 && currentPageHasOnlyOneRow) {
-                currentPage -= 1;
-            }
             await loadApplications(context);
             showStatus("Draft deleted successfully." + storageWarning, storageWarning ? "alert-warning" : "alert-success");
         } catch (error) {
@@ -360,6 +289,67 @@
         } finally {
             setDeleteButtonLoading(triggerButton, false);
         }
+    }
+
+    function latestRowByApplication(rows) {
+        const map = {};
+        (rows || []).forEach(function (row) {
+            const appId = row.application_id;
+            if (!appId) {
+                return;
+            }
+            const existing = map[appId];
+            if (!existing) {
+                map[appId] = row;
+                return;
+            }
+            const a = new Date(existing.updated_at || existing.created_at || 0).getTime();
+            const b = new Date(row.updated_at || row.created_at || 0).getTime();
+            if (b > a) {
+                map[appId] = row;
+            }
+        });
+        return map;
+    }
+
+    async function loadExamMap(context, applicationIds) {
+        if (!applicationIds.length) {
+            return {};
+        }
+
+        const primary = await context.client
+            .from("exam_records")
+            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, created_at, updated_at")
+            .in("application_id", applicationIds);
+
+        if (!primary.error) {
+            return latestRowByApplication(primary.data || []);
+        }
+
+        // TODO(Supabase): remove fallback once exam_records is deployed in production.
+        const fallback = await context.client
+            .from("interviews")
+            .select("application_id, exam_score, updated_at, created_at")
+            .in("application_id", applicationIds);
+
+        if (fallback.error || !fallback.data) {
+            return {};
+        }
+
+        const transformed = fallback.data.map(function (row) {
+            return {
+                application_id: row.application_id,
+                exam_control_no: null,
+                raw_score: row.exam_score,
+                percentage_score: row.exam_score,
+                result: "pending",
+                status: "encoded",
+                created_at: row.created_at,
+                updated_at: row.updated_at
+            };
+        });
+
+        return latestRowByApplication(transformed);
     }
 
     async function loadApplications(context) {
@@ -375,42 +365,24 @@
             return;
         }
 
-        applicationRows = result.data || [];
-        fillFilters(applicationRows);
-        applyFilterAndRender(false);
+        const rows = result.data || [];
+        const appIds = rows.map(function (row) { return row.id; }).filter(Boolean);
+        const examMap = await loadExamMap(context, appIds);
+
+        applicationRows = rows.map(function (row) {
+            return Object.assign({}, row, {
+                exam_record: examMap[row.id] || null
+            });
+        });
+
+        currentPage = 1;
+        renderRows();
     }
 
-    function bindFilterEvents(context) {
-        const applyBtn = byId("applicationsApplyFilterBtn");
-        const search = byId("applicationsSearchInput");
-        const status = byId("applicationsStatusFilter");
-        const year = byId("applicationsYearFilter");
+    function bindEvents(context) {
         const tableBody = byId("applicationsTableBody");
         const pagination = byId("applicationsPagination");
 
-        if (applyBtn) {
-            applyBtn.addEventListener("click", function () {
-                applyFilterAndRender(true);
-            });
-        }
-        if (search) {
-            search.addEventListener("keydown", function (event) {
-                if (event.key === "Enter") {
-                    event.preventDefault();
-                    applyFilterAndRender(true);
-                }
-            });
-        }
-        if (status) {
-            status.addEventListener("change", function () {
-                applyFilterAndRender(true);
-            });
-        }
-        if (year) {
-            year.addEventListener("change", function () {
-                applyFilterAndRender(true);
-            });
-        }
         if (pagination) {
             pagination.addEventListener("click", function (event) {
                 const button = event.target.closest("button[data-page]");
@@ -418,14 +390,15 @@
                     return;
                 }
                 const nextPage = Number(button.getAttribute("data-page"));
-                const pageCount = getPageCount(filteredApplicationRows.length);
+                const pageCount = getPageCount(applicationRows.length);
                 if (Number.isNaN(nextPage) || nextPage < 1 || nextPage > pageCount) {
                     return;
                 }
                 currentPage = nextPage;
-                applyFilterAndRender(false);
+                renderRows();
             });
         }
+
         if (tableBody) {
             tableBody.addEventListener("click", function (event) {
                 const trigger = event.target.closest('button[data-action="delete-draft"]');
@@ -446,7 +419,7 @@
         if (!context || !context.client) {
             return;
         }
-        bindFilterEvents(context);
+        bindEvents(context);
         await loadApplications(context);
     }
 

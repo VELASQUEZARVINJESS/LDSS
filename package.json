@@ -1,0 +1,26 @@
+{
+  "name": "ldss",
+  "version": "1.0.0",
+  "description": "This project is now standalone (no nested SB Admin folder) and deploy-ready for static hosting.",
+  "main": "index.js",
+  "scripts": {
+    "start": "serve -l 3000 .",
+    "host": "serve -l 3000 .",
+    "test": "echo \"No tests configured\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VELASQUEZARVINJESS/LDSS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/VELASQUEZARVINJESS/LDSS/issues"
+  },
+  "homepage": "https://github.com/VELASQUEZARVINJESS/LDSS#readme",
+  "devDependencies": {
+    "serve": "^14.2.6"
+  }
+}

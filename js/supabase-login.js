@@ -59,18 +59,29 @@
     async function fetchRoleAndRedirect(client, userId) {
         const { data, error } = await client
             .from("profiles")
-            .select("role")
+            .select("role,is_active")
             .eq("id", userId)
             .single();
 
-        if (error) {
-            setStatus("Login succeeded, but profile role lookup failed. Contact administrator.", "alert-warning");
+        if (error || !data || !data.role) {
+            await client.auth.signOut();
+            setStatus("Login failed: account role lookup failed. Contact administrator.", "alert-danger");
+            return;
+        }
+        if (data.is_active === false) {
+            await client.auth.signOut();
+            setStatus("This account is inactive. Contact administrator.", "alert-danger");
             return;
         }
 
-        const role = (data && data.role) || "applicant";
-        const route = ROLE_ROUTES[role] || ROLE_ROUTES.applicant;
-        window.location.href = route;
+        const role = data.role;
+        const route = ROLE_ROUTES[role];
+        if (!route) {
+            await client.auth.signOut();
+            setStatus("Login failed: account role is not recognized.", "alert-danger");
+            return;
+        }
+        window.location.replace(route);
     }
 
     async function onSubmitLogin(client, event) {

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8" />
@@ -83,28 +83,150 @@
                                 <div class="row align-items-center justify-content-between pt-3">
                                     <div class="col-auto mb-3">
                                         <h1 class="page-header-title">
-                                            <div class="page-header-icon"><i data-feather="layers"></i></div>
-                                            System Administrator Scholarship Settings
+                                            <div class="page-header-icon"><i data-feather="sliders"></i></div>
+                                            Scholarship Settings
                                         </h1>
-                                        <div class="small ldss-muted">Scholarship cycle, criteria, and policy configuration shell.</div>
+                                        <div class="small ldss-muted">Configure quota, passing score, ranking basis, and approval control settings.</div>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3">
-                                        <a class="btn btn-dark btn-sm me-2" href="super-admin-master-data.html">Open Master Data</a>
-                                        <a class="btn btn-outline-dark btn-sm" href="super-admin-dashboard.html">Back to Dashboard</a>
+                                        <button class="btn btn-outline-dark btn-sm me-2" id="superSettingsLoadBtn" type="button">Load Active</button>
+                                        <button class="btn btn-dark btn-sm" id="superSettingsSaveBtn" type="button">Save Settings</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </header>
+
                     <div class="container-xl px-4 mt-4">
-                        <!-- TODO(Supabase): configure scholarship windows, limits, and eligibility rules -->
-                        <div class="card">
-                            <div class="card-header">Module Placeholder</div>
-                            <div class="card-body">
-                                <div class="ldss-shell-placeholder">
-                                    <div class="fw-700 mb-1">System Administrator Scholarship Settings</div>
-                                    <p class="small mb-2">This static page is intentionally included so role navigation works end-to-end in Phase 1.</p>
-                                    <p class="small mb-0">Replace this with connected Supabase-backed UI in the next implementation pass.</p>
+                        <div class="alert d-none" id="superSettingsStatus" role="alert"></div>
+
+                        <div class="row g-3 mb-4">
+                            <div class="col-sm-4">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Active School Year</div>
+                                    <div class="h4 mt-2 mb-0" id="superSettingsActiveYear">-</div>
+                                    <div class="small mt-2">Current policy baseline</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Quota Slots</div>
+                                    <div class="h4 mt-2 mb-0" id="superSettingsActiveQuota">0</div>
+                                    <div class="small mt-2">Slots available for approval cycle</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="ldss-kpi h-100">
+                                    <div class="small">Passing Score</div>
+                                    <div class="h4 mt-2 mb-0" id="superSettingsActivePassing">0%</div>
+                                    <div class="small mt-2">Minimum exam percentage to pass</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row g-4">
+                            <div class="col-xl-6">
+                                <div class="card h-100">
+                                    <div class="card-header">Quota and Cycle Controls</div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsSchoolYear">School Year</label>
+                                                <input class="form-control" id="superSettingsSchoolYear" type="text" placeholder="2026-2027" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsQuotaSlots">Quota Slots</label>
+                                                <input class="form-control" id="superSettingsQuotaSlots" type="number" min="0" step="1" placeholder="500" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsWaitlistSlots">Waitlist Buffer Slots</label>
+                                                <input class="form-control" id="superSettingsWaitlistSlots" type="number" min="0" step="1" placeholder="50" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsExamItems">Exam Total Items</label>
+                                                <input class="form-control" id="superSettingsExamItems" type="number" min="1" step="1" placeholder="100" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsCycleOpen">Application Open</label>
+                                                <input class="form-control" id="superSettingsCycleOpen" type="date" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsCycleClose">Application Close</label>
+                                                <input class="form-control" id="superSettingsCycleClose" type="date" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-xl-6">
+                                <div class="card h-100">
+                                    <div class="card-header">Passing Score and Ranking Basis</div>
+                                    <div class="card-body">
+                                        <div class="mb-3">
+                                            <label class="small mb-1" for="superSettingsPassingScore">Passing Score (%)</label>
+                                            <input class="form-control" id="superSettingsPassingScore" type="number" min="0" max="100" step="0.01" placeholder="75" />
+                                        </div>
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <label class="small mb-1" for="superSettingsWeightExam">Exam Weight (%)</label>
+                                                <input class="form-control" id="superSettingsWeightExam" type="number" min="0" max="100" step="0.01" placeholder="60" />
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="small mb-1" for="superSettingsWeightInterview">Interview Weight (%)</label>
+                                                <input class="form-control" id="superSettingsWeightInterview" type="number" min="0" max="100" step="0.01" placeholder="25" />
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="small mb-1" for="superSettingsWeightIncome">Income Priority Weight (%)</label>
+                                                <input class="form-control" id="superSettingsWeightIncome" type="number" min="0" max="100" step="0.01" placeholder="10" />
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="small mb-1" for="superSettingsWeightRequirements">Requirements Weight (%)</label>
+                                                <input class="form-control" id="superSettingsWeightRequirements" type="number" min="0" max="100" step="0.01" placeholder="5" />
+                                            </div>
+                                        </div>
+                                        <div class="small text-muted mt-2">Weight total: <span id="superSettingsWeightTotal">0.00</span>%</div>
+                                        <div class="mt-3">
+                                            <label class="small mb-1" for="superSettingsRankingNotes">Ranking Notes / Basis Description</label>
+                                            <textarea class="form-control" id="superSettingsRankingNotes" rows="3" placeholder="Document official ranking policy basis"></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row g-4 mt-1">
+                            <div class="col-xl-7">
+                                <div class="card h-100">
+                                    <div class="card-header">System Control Flags</div>
+                                    <div class="card-body">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" id="superSettingsRequireRemarks" type="checkbox" />
+                                            <label class="form-check-label small" for="superSettingsRequireRemarks">Require admin decision remarks for approve/reject/waitlist</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" id="superSettingsLockRankingAfterDecision" type="checkbox" />
+                                            <label class="form-check-label small" for="superSettingsLockRankingAfterDecision">Lock ranking score after final admin decision</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" id="superSettingsAllowSpecialEndorsement" type="checkbox" />
+                                            <label class="form-check-label small" for="superSettingsAllowSpecialEndorsement">Allow Special Endorsement workflow for failed exam records</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" id="superSettingsAutoSetForInterview" type="checkbox" />
+                                            <label class="form-check-label small" for="superSettingsAutoSetForInterview">Auto-allow interview scheduling for Passed Exam status</label>
+                                        </div>
+                                        <div class="small text-muted mt-3">These controls prepare policy hooks for role permissions, ranking pipeline, and status flow enforcement.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-xl-5">
+                                <div class="card h-100">
+                                    <div class="card-header">Saved Setting Snapshot</div>
+                                    <div class="card-body">
+                                        <div class="small text-muted mb-2">Latest persisted record</div>
+                                        <div id="superSettingsSnapshot" class="small text-muted">No saved settings loaded yet.</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -121,17 +243,11 @@
             </div>
         </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-                <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
-
-
-
-
-
-
-

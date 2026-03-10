@@ -1,30 +1,13 @@
 (function () {
     "use strict";
 
-    const STATUS_META = {
-        draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
-        submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
-        interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        recommended: { label: "Recommended", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
-        approved: { label: "Approved", chipClass: "ldss-chip-success" },
-        waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
-        rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
-        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
-        certification_ready: { label: "Certification Ready", chipClass: "ldss-chip-success" },
-        release_scheduled: { label: "Release Scheduled", chipClass: "ldss-chip-accent" },
-        released: { label: "Released", chipClass: "ldss-chip-success" }
-    };
+    const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
 
     const DOC_LABELS = {
-        proof_of_enrollment: "Proof of Enrollment",
-        report_card: "Latest Report Card",
-        barangay_certificate: "Barangay Certificate",
-        income_certificate: "Income Certificate"
+        income_certificate: "Tax Exemption Certificate (PDF)"
     };
 
-    const DOC_ORDER = ["proof_of_enrollment", "report_card", "barangay_certificate", "income_certificate"];
+    const DOC_ORDER = ["income_certificate"];
 
     const DOC_STATUS_META = {
         pending: { label: "For Review", chipClass: "ldss-chip-accent" },
@@ -42,10 +25,34 @@
         no_show: { label: "No Show", chipClass: "ldss-chip-danger" },
         cancelled: { label: "Cancelled", chipClass: "ldss-chip-danger" }
     };
-    const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function workflow() {
+        return window.LDSS_WORKFLOW || {
+            normalizeStatus: function (status) { return (status || "").toString().trim().toLowerCase(); },
+            statusMeta: function (status) {
+                return {
+                    label: (status || "-").toString(),
+                    chipClass: "ldss-chip-neutral",
+                    nextStep: "Wait for an update from the scholarship office."
+                };
+            },
+            nextStepForApplicant: function () {
+                return "Wait for an update from the scholarship office.";
+            },
+            examSummaryFromRecord: function () {
+                return {
+                    controlNo: "-",
+                    scoreText: "-",
+                    percentageText: "-",
+                    resultLabel: "Pending",
+                    resultChipClass: "ldss-chip-neutral"
+                };
+            }
+        };
     }
 
     function profileCacheKey(userId) {
@@ -63,7 +70,7 @@
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
+            .replace(/\"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
 
@@ -130,7 +137,7 @@
     }
 
     function statusMeta(status) {
-        return STATUS_META[status] || { label: valueOrDash(status), chipClass: "ldss-chip-neutral" };
+        return workflow().statusMeta(status);
     }
 
     function interviewMeta(status) {
@@ -210,7 +217,7 @@
         });
     }
 
-    function buildDashboardEvents(application, interview, approval, notifications) {
+    function buildDashboardEvents(application, examRecord, interviewRecord, approvalRecord, notifications) {
         const events = [];
         if (application) {
             events.push({ label: "Draft created", at: application.created_at });
@@ -221,17 +228,20 @@
                 events.push({ label: "Current status: " + statusMeta(application.status).label, at: application.updated_at });
             }
         }
-        if (interview && interview.scheduled_at) {
-            events.push({ label: "Interview scheduled", at: interview.scheduled_at });
+
+        if (examRecord && examRecord.updated_at) {
+            const examSummary = workflow().examSummaryFromRecord(examRecord);
+            events.push({ label: "Exam result: " + examSummary.resultLabel, at: examRecord.updated_at });
         }
-        if (interview && interview.status === "completed" && interview.updated_at) {
-            const resultLabel = interview.result ? " (" + interview.result.replace(/_/g, " ") + ")" : "";
-            events.push({ label: "Interview completed" + resultLabel, at: interview.updated_at });
+
+        if (interviewRecord && interviewRecord.scheduled_at) {
+            events.push({ label: "Interview scheduled", at: interviewRecord.scheduled_at });
         }
-        if (approval && approval.decided_at && approval.decision_status) {
+
+        if (approvalRecord && approvalRecord.decided_at && approvalRecord.decision_status) {
             events.push({
-                label: "Admin decision: " + approval.decision_status.replace(/_/g, " "),
-                at: approval.decided_at
+                label: "Final decision: " + approvalRecord.decision_status.replace(/_/g, " "),
+                at: approvalRecord.decided_at
             });
         }
 
@@ -359,59 +369,72 @@
         }).join("");
     }
 
-    function renderCards(application, interview, approval) {
+    function renderCards(application, examRecord, interviewRecord, approvalRecord) {
         if (!application) {
             setText("dashboardCurrentApplicationValue", "No Application");
             setChip("dashboardCurrentApplicationChip", "Start New Application", "ldss-chip-neutral");
 
+            setText("dashboardExamValue", "No Exam Record");
+            setChip("dashboardExamChip", "Pending", "ldss-chip-neutral");
+
             setText("dashboardInterviewValue", "Not Scheduled");
-            setChip("dashboardInterviewChip", "No Active Application", "ldss-chip-neutral");
+            setChip("dashboardInterviewChip", "Pending", "ldss-chip-neutral");
 
-            setText("dashboardCertificationValue", "Not Available");
-            setChip("dashboardCertificationChip", "Pending Application", "ldss-chip-neutral");
-
-            setText("dashboardReleaseValue", "No Batch Yet");
-            setChip("dashboardReleaseChip", "Awaiting Approval", "ldss-chip-neutral");
+            setText("dashboardNextStepValue", "Create Application");
+            setChip("dashboardNextStepChip", "Draft", "ldss-chip-neutral");
             return;
         }
 
         const appMeta = statusMeta(application.status);
+        const normalizedStatus = workflow().normalizeStatus(application.status);
+
         setText("dashboardCurrentApplicationValue", appMeta.label);
         setChip("dashboardCurrentApplicationChip", application.application_no || "Active Application", appMeta.chipClass);
 
-        if (interview && interview.scheduled_at) {
-            const iMeta = interviewMeta(interview.status);
-            setText("dashboardInterviewValue", formatDateOnly(interview.scheduled_at));
+        const examSummary = workflow().examSummaryFromRecord(examRecord);
+        const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
+        const examValue = hasNumericExam
+            ? ("Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText)
+            : (normalizedStatus === "pending_exam" || normalizedStatus === "exam_scheduled" || normalizedStatus === "exam_completed"
+                ? "Exam processing"
+                : "No score yet");
+
+        setText("dashboardExamValue", examValue);
+        setChip("dashboardExamChip", examSummary.resultLabel, examSummary.resultChipClass);
+
+        if (interviewRecord && interviewRecord.scheduled_at) {
+            const iMeta = interviewMeta(interviewRecord.status);
+            setText("dashboardInterviewValue", formatDateOnly(interviewRecord.scheduled_at));
             setChip("dashboardInterviewChip", iMeta.label, iMeta.chipClass);
         } else {
-            setText("dashboardInterviewValue", "Not Scheduled");
-            setChip("dashboardInterviewChip", "Waiting Secretary Schedule", "ldss-chip-neutral");
+            const waitingInterview = ["for_interview", "interview_scheduled", "interview_completed", "hard_copy_verified", "for_approval", "approved", "waitlisted", "for_release", "released"].includes(normalizedStatus);
+            setText("dashboardInterviewValue", waitingInterview ? "Awaiting/Processed" : "Not Scheduled");
+            setChip("dashboardInterviewChip", waitingInterview ? "Follow Tracking" : "Pending", waitingInterview ? "ldss-chip-accent" : "ldss-chip-neutral");
         }
 
-        if (application.status === "certification_ready") {
-            setText("dashboardCertificationValue", "Ready for Claim");
-            setChip("dashboardCertificationChip", "Certification Ready", "ldss-chip-success");
-        } else if (application.status === "release_scheduled" || application.status === "released") {
-            setText("dashboardCertificationValue", "Approved");
-            setChip("dashboardCertificationChip", "Certification Completed", "ldss-chip-success");
-        } else if (approval && approval.decision_status === "rejected") {
-            setText("dashboardCertificationValue", "Not Available");
-            setChip("dashboardCertificationChip", "Application Rejected", "ldss-chip-danger");
-        } else {
-            setText("dashboardCertificationValue", "Not Available");
-            setChip("dashboardCertificationChip", "Pending Approval", "ldss-chip-neutral");
+        let nextStep = workflow().nextStepForApplicant(application.status);
+        let nextChipLabel = appMeta.label;
+        let nextChipClass = appMeta.chipClass;
+
+        if (approvalRecord && approvalRecord.decision_status) {
+            const decision = approvalRecord.decision_status;
+            if (decision === "approved") {
+                nextStep = "You are approved. Wait for release schedule.";
+                nextChipLabel = "Approved";
+                nextChipClass = "ldss-chip-success";
+            } else if (decision === "waitlisted") {
+                nextStep = "You are waitlisted. Monitor slot availability updates.";
+                nextChipLabel = "Waitlisted";
+                nextChipClass = "ldss-chip-accent";
+            } else if (decision === "rejected") {
+                nextStep = "Application closed for this cycle.";
+                nextChipLabel = "Rejected";
+                nextChipClass = "ldss-chip-danger";
+            }
         }
 
-        if (application.status === "release_scheduled") {
-            setText("dashboardReleaseValue", "Scheduled");
-            setChip("dashboardReleaseChip", "Waiting Release Date", "ldss-chip-accent");
-        } else if (application.status === "released") {
-            setText("dashboardReleaseValue", "Released");
-            setChip("dashboardReleaseChip", "Completed", "ldss-chip-success");
-        } else {
-            setText("dashboardReleaseValue", "No Batch Yet");
-            setChip("dashboardReleaseChip", "Awaiting Admin", "ldss-chip-neutral");
-        }
+        setText("dashboardNextStepValue", nextStep);
+        setChip("dashboardNextStepChip", nextChipLabel, nextChipClass);
     }
 
     function formatProfileName(profile) {
@@ -451,7 +474,7 @@
         try {
             localStorage.setItem(profileCacheKey(userId), JSON.stringify(profile));
         } catch (error) {
-            // Non-fatal: browser storage may be disabled.
+            // Non-fatal.
         }
     }
 
@@ -499,19 +522,22 @@
     }
 
     async function loadNotifications(context) {
-        const [countResult, listResult] = await Promise.all([
-            context.client
-                .from("notifications")
-                .select("id", { count: "exact", head: true })
-                .eq("recipient_user_id", context.user.id)
-                .eq("is_read", false),
-            context.client
-                .from("notifications")
-                .select("id, title, message, related_application_id, related_url, is_read, created_at")
-                .eq("recipient_user_id", context.user.id)
-                .order("created_at", { ascending: false })
-                .limit(5)
-        ]);
+        const countPromise = context.client
+            .from("notifications")
+            .select("id", { count: "exact", head: true })
+            .eq("recipient_user_id", context.user.id)
+            .eq("is_read", false);
+
+        const listPromise = context.client
+            .from("notifications")
+            .select("id, title, message, related_application_id, related_url, is_read, created_at")
+            .eq("recipient_user_id", context.user.id)
+            .order("created_at", { ascending: false })
+            .limit(5);
+
+        const results = await Promise.all([countPromise, listPromise]);
+        const countResult = results[0];
+        const listResult = results[1];
 
         return {
             unreadCount: countResult && !countResult.error ? (countResult.count || 0) : 0,
@@ -531,6 +557,95 @@
             return result.data;
         }
         return readProfileCache(context.user.id);
+    }
+
+    async function loadExamRecord(context, applicationId, applicationStatus) {
+        const examResult = await context.client
+            .from("exam_records")
+            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (!examResult.error) {
+            return examResult.data || null;
+        }
+
+        // TODO(Supabase): remove fallback once exam_records is deployed in production.
+        const fallback = await context.client
+            .from("interviews")
+            .select("exam_score, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (fallback.error || !fallback.data) {
+            return null;
+        }
+
+        const normalized = workflow().normalizeStatus(applicationStatus);
+        let inferredResult = "pending";
+        if (normalized === "passed_exam") {
+            inferredResult = "passed";
+        } else if (normalized === "failed_exam") {
+            inferredResult = "failed";
+        }
+
+        return {
+            application_id: applicationId,
+            exam_control_no: null,
+            raw_score: fallback.data.exam_score,
+            percentage_score: fallback.data.exam_score,
+            result: inferredResult,
+            status: "encoded",
+            updated_at: fallback.data.updated_at || null
+        };
+    }
+
+    async function loadInterviewRecord(context, applicationId) {
+        const primary = await context.client
+            .from("interview_records")
+            .select("application_id, scheduled_at, venue, status, remarks, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (!primary.error) {
+            return primary.data || null;
+        }
+
+        // TODO(Supabase): remove fallback once interview_records is deployed in production.
+        const fallback = await context.client
+            .from("interviews")
+            .select("scheduled_at, venue, status, remarks, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (fallback.error) {
+            return null;
+        }
+        return fallback.data || null;
+    }
+
+    async function loadApprovalRecord(context, applicationId) {
+        const primary = await context.client
+            .from("approval_records")
+            .select("application_id, decision_status, decided_at, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (!primary.error) {
+            return primary.data || null;
+        }
+
+        // TODO(Supabase): remove fallback once approval_records is deployed in production.
+        const fallback = await context.client
+            .from("approval_queue")
+            .select("decision_status, decided_at, updated_at")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (fallback.error) {
+            return null;
+        }
+        return fallback.data || null;
     }
 
     function renderQuickActions(latestApplication, latestDraft) {
@@ -560,51 +675,51 @@
         showStatus("");
 
         try {
-            const [profileSummary, latestApplication, latestDraft, notificationPayload] = await Promise.all([
+            const headResults = await Promise.all([
                 loadProfileSummary(context),
                 loadLatestApplication(context),
                 loadLatestEditableDraft(context),
                 loadNotifications(context)
             ]);
 
+            const profileSummary = headResults[0];
+            const latestApplication = headResults[1];
+            const latestDraft = headResults[2];
+            const notificationPayload = headResults[3];
+
             renderProfileHeader(profileSummary, context.user.email);
             renderQuickActions(latestApplication, latestDraft);
             renderNotificationDropdown(notificationPayload.rows, notificationPayload.unreadCount);
 
             if (!latestApplication) {
-                renderCards(null, null, null);
+                renderCards(null, null, null, null);
                 renderRequirementSummary([]);
-                const eventsWithoutApp = buildDashboardEvents(null, null, null, notificationPayload.rows);
+                const eventsWithoutApp = buildDashboardEvents(null, null, null, null, notificationPayload.rows);
                 renderRecentActivity(eventsWithoutApp);
                 renderTimeline(eventsWithoutApp);
                 return;
             }
 
-            const [interviewResult, docsResult, approvalResult] = await Promise.all([
-                context.client
-                    .from("interviews")
-                    .select("scheduled_at, status, result, updated_at")
-                    .eq("application_id", latestApplication.id)
-                    .maybeSingle(),
+            const detailResults = await Promise.all([
+                loadExamRecord(context, latestApplication.id, latestApplication.status),
+                loadInterviewRecord(context, latestApplication.id),
+                loadApprovalRecord(context, latestApplication.id),
                 context.client
                     .from("application_documents")
                     .select("document_type, verification_status, created_at")
-                    .eq("application_id", latestApplication.id),
-                context.client
-                    .from("approval_queue")
-                    .select("decision_status, decided_at")
                     .eq("application_id", latestApplication.id)
-                    .maybeSingle()
             ]);
 
-            const interview = interviewResult && !interviewResult.error ? interviewResult.data : null;
+            const examRecord = detailResults[0];
+            const interviewRecord = detailResults[1];
+            const approvalRecord = detailResults[2];
+            const docsResult = detailResults[3];
             const documents = docsResult && !docsResult.error && docsResult.data ? docsResult.data : [];
-            const approval = approvalResult && !approvalResult.error ? approvalResult.data : null;
 
-            renderCards(latestApplication, interview, approval);
+            renderCards(latestApplication, examRecord, interviewRecord, approvalRecord);
             renderRequirementSummary(documents);
 
-            const events = buildDashboardEvents(latestApplication, interview, approval, notificationPayload.rows);
+            const events = buildDashboardEvents(latestApplication, examRecord, interviewRecord, approvalRecord, notificationPayload.rows);
             renderRecentActivity(events);
             renderTimeline(events);
         } catch (error) {

@@ -5,26 +5,41 @@
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
     const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
-    const ALLOWED_FILE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".pdf"];
-    const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "application/pdf"];
+    const MAX_AWARDS = 5;
 
     const DOC_FIELDS = [
-        { inputId: "reqEnrollment", docType: "proof_of_enrollment", label: "Proof of Enrollment" },
-        { inputId: "reqReportCard", docType: "report_card", label: "Latest Report Card" },
-        { inputId: "reqBarangay", docType: "barangay_certificate", label: "Barangay Certificate" },
-        { inputId: "reqIncome", docType: "income_certificate", label: "Income Certificate" }
+        {
+            inputId: "reqApplicantPhoto",
+            docType: "applicant_photo",
+            label: "Applicant 1x1 Photo",
+            allowedExtensions: [".jpg", ".jpeg", ".png"],
+            allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png"],
+            fileTypeHint: "JPG or PNG only",
+            requiredOnSubmit: true,
+            syncToProfilePhoto: true
+        },
+        {
+            inputId: "reqIncomeTaxReturn",
+            docType: "income_certificate",
+            label: "ITR (Income Tax Return)",
+            allowedExtensions: [".pdf"],
+            allowedMimeTypes: ["application/pdf", "application/x-pdf"],
+            fileTypeHint: "PDF only",
+            requiredOnSubmit: false
+        }
     ];
 
     const DOC_LABELS = {
-        proof_of_enrollment: "Proof of Enrollment",
-        report_card: "Latest Report Card",
-        barangay_certificate: "Barangay Certificate",
-        income_certificate: "Income Certificate"
+        applicant_photo: "Applicant 1x1 Photo",
+        income_certificate: "ITR (Income Tax Return)"
     };
 
     let currentApplication = null;
     let isSaving = false;
     let isSubmitting = false;
+    let applicantPhotoPreviewObjectUrl = "";
+    let submittedModalInstance = null;
+    let submittedTrackingUrl = "";
 
     function byId(id) {
         return document.getElementById(id);
@@ -33,6 +48,36 @@
     function nullIfBlank(value) {
         const normalized = (value || "").toString().trim();
         return normalized ? normalized : null;
+    }
+
+    function normalizeMobileForStorage(value) {
+        const raw = (value || "").toString().trim();
+        if (!raw) {
+            return null;
+        }
+        const cleaned = raw.replace(/[\s()-]/g, "");
+        const digits = cleaned.replace(/\D/g, "");
+        if (/^09\d{9}$/.test(digits)) {
+            return "+63" + digits.slice(1);
+        }
+        if (/^9\d{9}$/.test(digits)) {
+            return "+63" + digits;
+        }
+        if (/^63\d{10}$/.test(digits)) {
+            return "+" + digits;
+        }
+        if (/^\+\d{10,15}$/.test(cleaned)) {
+            return cleaned;
+        }
+        return raw;
+    }
+
+    function mobileForInput(value) {
+        const raw = (value || "").toString().trim();
+        if (/^\+639\d{9}$/.test(raw)) {
+            return "0" + raw.slice(3);
+        }
+        return raw;
     }
 
     function setStatus(message, type, isHtml) {
@@ -159,15 +204,310 @@
         }
     }
 
+    function setAgreementValidity(isInvalid) {
+        const checkbox = byId("applicationAgreement");
+        if (!checkbox) {
+            return;
+        }
+        checkbox.classList.toggle("is-invalid", !!isInvalid);
+    }
+
+    function hasAgreement() {
+        const checkbox = byId("applicationAgreement");
+        if (!checkbox) {
+            return true;
+        }
+        return !!checkbox.checked;
+    }
+
+    function requireAgreementOrThrow(actionLabel) {
+        if (hasAgreement()) {
+            setAgreementValidity(false);
+            return;
+        }
+
+        setAgreementValidity(true);
+        const checkbox = byId("applicationAgreement");
+        if (checkbox && typeof checkbox.focus === "function") {
+            checkbox.focus();
+        }
+        throw new Error("Please agree that all information is correct before " + actionLabel + ".");
+    }
+
+    function getSubmittedModal() {
+        const modalEl = byId("applicationSubmittedModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!submittedModalInstance) {
+            submittedModalInstance = new window.bootstrap.Modal(modalEl);
+        }
+        return submittedModalInstance;
+    }
+
+    function showSubmittedModal(submittedApplication, profileWarning) {
+        const submittedId = submittedApplication && submittedApplication.id ? submittedApplication.id : "";
+        const submittedNo = submittedApplication && submittedApplication.application_no ? submittedApplication.application_no : submittedId;
+        submittedTrackingUrl = submittedId ? "application-detail.html?id=" + encodeURIComponent(submittedId) : "";
+
+        const messageEl = byId("applicationSubmittedModalMessage");
+        if (messageEl) {
+            let message = "Application " + submittedNo + " submitted successfully.";
+            if (profileWarning) {
+                message += " Profile warning: " + profileWarning;
+            }
+            messageEl.textContent = message;
+        }
+
+        const openBtn = byId("applicationSubmittedModalOpenBtn");
+        if (openBtn) {
+            openBtn.disabled = !submittedTrackingUrl;
+        }
+
+        const modal = getSubmittedModal();
+        if (modal) {
+            modal.show();
+            return;
+        }
+        if (submittedTrackingUrl) {
+            window.location.href = submittedTrackingUrl;
+        }
+    }
+
+    function normalizeAwardItem(item) {
+        const safeItem = item && typeof item === "object" ? item : {};
+        return {
+            natureDescription: nullIfBlank(
+                safeItem.natureDescription ||
+                    safeItem.awardNatureDescription ||
+                    safeItem.description ||
+                    ""
+            ),
+            schoolName: nullIfBlank(safeItem.schoolName || safeItem.awardSchoolName || ""),
+            yearAwarded: nullIfBlank(safeItem.yearAwarded || safeItem.awardSchoolYear || "")
+        };
+    }
+
+    function normalizeAwardList(awards) {
+        if (!Array.isArray(awards)) {
+            return [];
+        }
+        return awards
+            .map(normalizeAwardItem)
+            .filter(function (award) {
+                return award.natureDescription || award.schoolName || award.yearAwarded;
+            })
+            .slice(0, MAX_AWARDS);
+    }
+
+    function createAwardInputColumn(labelText, field, value) {
+        const col = document.createElement("div");
+        col.className = "col-md-4";
+
+        const label = document.createElement("label");
+        label.className = "small mb-1";
+        label.textContent = labelText;
+
+        const input = document.createElement("input");
+        input.className = "form-control";
+        input.type = "text";
+        input.value = value || "";
+        input.setAttribute("data-award-input", "true");
+        input.setAttribute("data-award-field", field);
+
+        col.appendChild(label);
+        col.appendChild(input);
+        return col;
+    }
+
+    function createAwardRow(award) {
+        const row = document.createElement("div");
+        row.className = "col-12";
+        row.setAttribute("data-award-row", "true");
+
+        const rowFields = document.createElement("div");
+        rowFields.className = "row g-3 align-items-end";
+
+        rowFields.appendChild(
+            createAwardInputColumn(
+                "Nature of Award / Description of Award",
+                "natureDescription",
+                award && award.natureDescription ? award.natureDescription : ""
+            )
+        );
+        rowFields.appendChild(
+            createAwardInputColumn(
+                "What School",
+                "schoolName",
+                award && award.schoolName ? award.schoolName : ""
+            )
+        );
+        rowFields.appendChild(
+            createAwardInputColumn(
+                "Date or Year Awarded",
+                "yearAwarded",
+                award && award.yearAwarded ? award.yearAwarded : ""
+            )
+        );
+
+        const actionCol = document.createElement("div");
+        actionCol.className = "col-12 d-flex justify-content-end";
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn btn-outline-secondary btn-sm";
+        removeBtn.textContent = "Remove";
+        removeBtn.setAttribute("data-award-remove", "true");
+        actionCol.appendChild(removeBtn);
+        rowFields.appendChild(actionCol);
+
+        row.appendChild(rowFields);
+        return row;
+    }
+
+    function collectAwardsFromForm() {
+        const container = byId("awardsRows");
+        if (!container) {
+            return [];
+        }
+
+        const rows = Array.from(container.querySelectorAll("[data-award-row='true']"));
+        return rows
+            .map(function (row) {
+                const natureInput = row.querySelector("[data-award-field='natureDescription']");
+                const schoolInput = row.querySelector("[data-award-field='schoolName']");
+                const yearInput = row.querySelector("[data-award-field='yearAwarded']");
+                const award = normalizeAwardItem({
+                    natureDescription: natureInput ? natureInput.value : "",
+                    schoolName: schoolInput ? schoolInput.value : "",
+                    yearAwarded: yearInput ? yearInput.value : ""
+                });
+                return award;
+            })
+            .filter(function (award) {
+                return award.natureDescription || award.schoolName || award.yearAwarded;
+            })
+            .slice(0, MAX_AWARDS);
+    }
+
+    function isFormCurrentlyEditable() {
+        return isEditable(currentApplication);
+    }
+
+    function updateAwardControlsState(editableOverride) {
+        const container = byId("awardsRows");
+        const addBtn = byId("awardAddBtn");
+        if (!container) {
+            if (addBtn) {
+                const fallbackEditable = typeof editableOverride === "boolean" ? editableOverride : isFormCurrentlyEditable();
+                addBtn.disabled = !fallbackEditable;
+            }
+            return;
+        }
+
+        const rows = Array.from(container.querySelectorAll("[data-award-row='true']"));
+        const editable = typeof editableOverride === "boolean" ? editableOverride : isFormCurrentlyEditable();
+        if (addBtn) {
+            addBtn.disabled = !editable || rows.length >= MAX_AWARDS;
+        }
+
+        rows.forEach(function (row) {
+            const removeBtn = row.querySelector("[data-award-remove='true']");
+            if (!removeBtn) {
+                return;
+            }
+            removeBtn.disabled = !editable || rows.length <= 1;
+        });
+    }
+
+    function renderAwardRows(awards) {
+        const container = byId("awardsRows");
+        if (!container) {
+            return;
+        }
+        container.innerHTML = "";
+        const normalized = normalizeAwardList(awards);
+        const rows = normalized.length > 0 ? normalized : [{}];
+        rows.forEach(function (award) {
+            container.appendChild(createAwardRow(award));
+        });
+        updateAwardControlsState();
+    }
+
+    function addAwardRow() {
+        const container = byId("awardsRows");
+        if (!container) {
+            return;
+        }
+        const currentRows = container.querySelectorAll("[data-award-row='true']").length;
+        if (currentRows >= MAX_AWARDS) {
+            return;
+        }
+        container.appendChild(createAwardRow({}));
+        updateAwardControlsState();
+    }
+
+    function removeAwardRow(targetButton) {
+        const container = byId("awardsRows");
+        if (!container || !targetButton) {
+            return;
+        }
+        const row = targetButton.closest("[data-award-row='true']");
+        if (!row) {
+            return;
+        }
+
+        const allRows = Array.from(container.querySelectorAll("[data-award-row='true']"));
+        if (allRows.length <= 1) {
+            row.querySelectorAll("[data-award-input='true']").forEach(function (input) {
+                input.value = "";
+                input.classList.remove("is-invalid");
+            });
+            updateAwardControlsState();
+            return;
+        }
+
+        row.remove();
+        updateAwardControlsState();
+    }
+
     function writeAuxMeta(userId, applicationId) {
         if (!userId || !applicationId) {
             return;
         }
         // TODO(Supabase): move these auxiliary fields to a dedicated application details table.
         const payload = {
+            religion: nullIfBlank(byId("religion") ? byId("religion").value : ""),
+            placeOfBirth: nullIfBlank(byId("placeOfBirth") ? byId("placeOfBirth").value : ""),
+            highestEducationAttainment: nullIfBlank(byId("highestEducationAttainment") ? byId("highestEducationAttainment").value : ""),
+            highestGradeYearLevel: nullIfBlank(byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value : ""),
+            schoolType: nullIfBlank(byId("schoolType") ? byId("schoolType").value : ""),
+            awards: collectAwardsFromForm(),
+            fatherStatus: nullIfBlank(byId("fatherStatus") ? byId("fatherStatus").value : ""),
+            fatherFirstName: nullIfBlank(byId("fatherFirstName") ? byId("fatherFirstName").value : ""),
+            fatherMiddleName: nullIfBlank(byId("fatherMiddleName") ? byId("fatherMiddleName").value : ""),
+            fatherLastName: nullIfBlank(byId("fatherLastName") ? byId("fatherLastName").value : ""),
+            motherStatus: nullIfBlank(byId("motherStatus") ? byId("motherStatus").value : ""),
+            motherFirstName: nullIfBlank(byId("motherFirstName") ? byId("motherFirstName").value : ""),
+            motherMiddleName: nullIfBlank(byId("motherMiddleName") ? byId("motherMiddleName").value : ""),
+            motherMaidenName: nullIfBlank(byId("motherMaidenName") ? byId("motherMaidenName").value : ""),
+            fatherAddress: nullIfBlank(byId("fatherAddress") ? byId("fatherAddress").value : ""),
+            motherAddress: nullIfBlank(byId("motherAddress") ? byId("motherAddress").value : ""),
+            fatherOccupation: nullIfBlank(byId("fatherOccupation") ? byId("fatherOccupation").value : ""),
+            fatherEducationAttainment: nullIfBlank(byId("fatherEducationAttainment") ? byId("fatherEducationAttainment").value : ""),
             gwa: nullIfBlank(byId("gwa") ? byId("gwa").value : ""),
-            addressSchool: nullIfBlank(byId("addressSchool") ? byId("addressSchool").value : ""),
-            financialNotes: nullIfBlank(byId("financialNotes") ? byId("financialNotes").value : "")
+            motherOccupation: nullIfBlank(byId("motherOccupation") ? byId("motherOccupation").value : ""),
+            motherEducationAttainment: nullIfBlank(byId("motherEducationAttainment") ? byId("motherEducationAttainment").value : ""),
+            totalParentsGrossIncome: nullIfBlank(byId("totalParentsGrossIncome") ? byId("totalParentsGrossIncome").value : ""),
+            childrenInFamily: nullIfBlank(byId("childrenInFamily") ? byId("childrenInFamily").value : ""),
+            brotherCount: nullIfBlank(byId("brotherCount") ? byId("brotherCount").value : ""),
+            sisterCount: nullIfBlank(byId("sisterCount") ? byId("sisterCount").value : ""),
+            isMarriedApplicant: !!(byId("isMarriedApplicant") && byId("isMarriedApplicant").checked),
+            spouseName: nullIfBlank(byId("spouseName") ? byId("spouseName").value : ""),
+            spouseChildrenCount: nullIfBlank(byId("spouseChildrenCount") ? byId("spouseChildrenCount").value : ""),
+            spouseOccupation: nullIfBlank(byId("spouseOccupation") ? byId("spouseOccupation").value : ""),
+            spouseEducation: nullIfBlank(byId("spouseEducation") ? byId("spouseEducation").value : ""),
+            intendedSchool: nullIfBlank(byId("intendedSchool") ? byId("intendedSchool").value : ""),
+            degreeProgramCourse: nullIfBlank(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "")
         };
         try {
             localStorage.setItem(auxMetaKey(userId, applicationId), JSON.stringify(payload));
@@ -178,14 +518,109 @@
 
     function applyAuxMeta(userId, applicationId) {
         const payload = readAuxMeta(userId, applicationId);
+        if (byId("religion")) {
+            setSelectValue("religion", payload.religion || "");
+        }
+        if (byId("placeOfBirth")) {
+            byId("placeOfBirth").value = payload.placeOfBirth || "";
+        }
+        if (byId("highestEducationAttainment")) {
+            setSelectValue("highestEducationAttainment", payload.highestEducationAttainment || "");
+        }
+        if (byId("highestGradeYearLevel")) {
+            byId("highestGradeYearLevel").value = payload.highestGradeYearLevel || "";
+        }
+        if (byId("schoolType")) {
+            setSelectValue("schoolType", payload.schoolType || "");
+        }
+        let awards = normalizeAwardList(payload.awards);
+        if (awards.length === 0) {
+            awards = normalizeAwardList([
+                {
+                    awardNatureDescription: payload.awardNatureDescription || "",
+                    awardSchoolName: payload.awardSchoolName || "",
+                    awardSchoolYear: payload.awardSchoolYear || ""
+                }
+            ]);
+        }
+        renderAwardRows(awards);
+        if (byId("fatherStatus")) {
+            setSelectValue("fatherStatus", payload.fatherStatus || "");
+        }
+        if (byId("fatherFirstName")) {
+            byId("fatherFirstName").value = payload.fatherFirstName || "";
+        }
+        if (byId("fatherMiddleName")) {
+            byId("fatherMiddleName").value = payload.fatherMiddleName || "";
+        }
+        if (byId("fatherLastName")) {
+            byId("fatherLastName").value = payload.fatherLastName || "";
+        }
+        if (byId("motherStatus")) {
+            setSelectValue("motherStatus", payload.motherStatus || "");
+        }
+        if (byId("motherFirstName")) {
+            byId("motherFirstName").value = payload.motherFirstName || "";
+        }
+        if (byId("motherMiddleName")) {
+            byId("motherMiddleName").value = payload.motherMiddleName || "";
+        }
+        if (byId("motherMaidenName")) {
+            byId("motherMaidenName").value = payload.motherMaidenName || "";
+        }
+        if (byId("fatherAddress")) {
+            byId("fatherAddress").value = payload.fatherAddress || "";
+        }
+        if (byId("motherAddress")) {
+            byId("motherAddress").value = payload.motherAddress || "";
+        }
+        if (byId("fatherOccupation")) {
+            byId("fatherOccupation").value = payload.fatherOccupation || "";
+        }
+        if (byId("fatherEducationAttainment")) {
+            byId("fatherEducationAttainment").value = payload.fatherEducationAttainment || "";
+        }
         if (byId("gwa")) {
             byId("gwa").value = payload.gwa || "";
         }
-        if (byId("addressSchool")) {
-            byId("addressSchool").value = payload.addressSchool || "";
+        if (byId("motherOccupation")) {
+            byId("motherOccupation").value = payload.motherOccupation || "";
         }
-        if (byId("financialNotes")) {
-            byId("financialNotes").value = payload.financialNotes || "";
+        if (byId("motherEducationAttainment")) {
+            byId("motherEducationAttainment").value = payload.motherEducationAttainment || "";
+        }
+        if (byId("totalParentsGrossIncome")) {
+            byId("totalParentsGrossIncome").value = payload.totalParentsGrossIncome || "";
+        }
+        if (byId("childrenInFamily")) {
+            byId("childrenInFamily").value = payload.childrenInFamily || "";
+        }
+        if (byId("brotherCount")) {
+            byId("brotherCount").value = payload.brotherCount || "";
+        }
+        if (byId("sisterCount")) {
+            byId("sisterCount").value = payload.sisterCount || "";
+        }
+        if (byId("spouseName")) {
+            byId("spouseName").value = payload.spouseName || "";
+        }
+        if (byId("spouseChildrenCount")) {
+            byId("spouseChildrenCount").value = payload.spouseChildrenCount || "";
+        }
+        if (byId("spouseOccupation")) {
+            byId("spouseOccupation").value = payload.spouseOccupation || "";
+        }
+        if (byId("spouseEducation")) {
+            byId("spouseEducation").value = payload.spouseEducation || "";
+        }
+        if (byId("intendedSchool")) {
+            byId("intendedSchool").value = payload.intendedSchool || "";
+        }
+        if (byId("degreeProgramCourse")) {
+            byId("degreeProgramCourse").value = payload.degreeProgramCourse || "";
+        }
+        if (byId("isMarriedApplicant")) {
+            byId("isMarriedApplicant").checked = !!payload.isMarriedApplicant;
         }
     }
 
@@ -198,14 +633,35 @@
     }
 
     function collectProfilePayload() {
-        const monthlyIncomeRaw = byId("monthlyIncome") ? byId("monthlyIncome").value : "";
+        const monthlyIncomeRaw = byId("totalParentsGrossIncome") ? byId("totalParentsGrossIncome").value : "";
         const monthlyIncomeParsed = monthlyIncomeRaw === "" ? null : Number(monthlyIncomeRaw);
+        const fatherNameParts = [
+            byId("fatherFirstName") ? byId("fatherFirstName").value : "",
+            byId("fatherMiddleName") ? byId("fatherMiddleName").value : "",
+            byId("fatherLastName") ? byId("fatherLastName").value : ""
+        ]
+            .map(function (value) {
+                return (value || "").toString().trim();
+            })
+            .filter(function (value) {
+                return value.length > 0;
+            });
+
         return {
+            first_name: nullIfBlank(byId("firstName") ? byId("firstName").value : ""),
+            middle_name: nullIfBlank(byId("middleName") ? byId("middleName").value : ""),
+            last_name: nullIfBlank(byId("lastName") ? byId("lastName").value : ""),
+            sex: nullIfBlank(byId("sex") ? byId("sex").value : ""),
+            civil_status: nullIfBlank(byId("civilStatus") ? byId("civilStatus").value : ""),
+            date_of_birth: nullIfBlank(byId("dateOfBirth") ? byId("dateOfBirth").value : ""),
+            address: nullIfBlank(byId("permanentAddress") ? byId("permanentAddress").value : ""),
+            mobile_number: normalizeMobileForStorage(byId("contactNumber") ? byId("contactNumber").value : ""),
+            email: nullIfBlank(byId("emailAddress") ? byId("emailAddress").value.toLowerCase() : ""),
             school_name: nullIfBlank(byId("schoolName") ? byId("schoolName").value : ""),
-            course_or_strand: nullIfBlank(byId("course") ? byId("course").value : ""),
-            year_level: nullIfBlank(byId("yearLevel") ? byId("yearLevel").value : ""),
-            guardian_name: nullIfBlank(byId("guardianName") ? byId("guardianName").value : ""),
-            guardian_occupation: nullIfBlank(byId("guardianOccupation") ? byId("guardianOccupation").value : ""),
+            course_or_strand: nullIfBlank(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : ""),
+            year_level: nullIfBlank(byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value : ""),
+            guardian_name: fatherNameParts.length > 0 ? fatherNameParts.join(" ") : null,
+            guardian_occupation: nullIfBlank(byId("fatherOccupation") ? byId("fatherOccupation").value : ""),
             monthly_income: Number.isNaN(monthlyIncomeParsed) ? null : monthlyIncomeParsed
         };
     }
@@ -242,6 +698,70 @@
         return text.slice(index);
     }
 
+    function setApplicantPhotoPreviewUrl(url) {
+        const image = byId("reqApplicantPhotoPreview");
+        const placeholder = byId("reqApplicantPhotoPlaceholder");
+        if (!image || !placeholder) {
+            return;
+        }
+
+        if (!url) {
+            image.src = "";
+            image.classList.add("d-none");
+            placeholder.classList.remove("d-none");
+            return;
+        }
+
+        image.src = url;
+        image.classList.remove("d-none");
+        placeholder.classList.add("d-none");
+    }
+
+    function clearApplicantPhotoPreviewObjectUrl() {
+        if (!applicantPhotoPreviewObjectUrl) {
+            return;
+        }
+        try {
+            URL.revokeObjectURL(applicantPhotoPreviewObjectUrl);
+        } catch (error) {
+            // Ignore URL cleanup errors.
+        }
+        applicantPhotoPreviewObjectUrl = "";
+    }
+
+    function setApplicantPhotoPreview(file) {
+        if (!file) {
+            clearApplicantPhotoPreviewObjectUrl();
+            setApplicantPhotoPreviewUrl("");
+            return;
+        }
+
+        clearApplicantPhotoPreviewObjectUrl();
+        try {
+            applicantPhotoPreviewObjectUrl = URL.createObjectURL(file);
+            setApplicantPhotoPreviewUrl(applicantPhotoPreviewObjectUrl);
+        } catch (error) {
+            setApplicantPhotoPreviewUrl("");
+        }
+    }
+
+    async function loadStoredApplicantPhotoPreview(context, storagePath) {
+        if (!context || !context.client || !storagePath) {
+            return;
+        }
+
+        const signed = await context.client.storage
+            .from(STORAGE_BUCKET)
+            .createSignedUrl(storagePath, 60 * 30);
+
+        if (signed.error || !signed.data || !signed.data.signedUrl) {
+            return;
+        }
+
+        clearApplicantPhotoPreviewObjectUrl();
+        setApplicantPhotoPreviewUrl(signed.data.signedUrl);
+    }
+
     function validateSelectedFiles() {
         const errors = [];
         clearFileFeedback();
@@ -259,17 +779,18 @@
 
             const extension = fileExtension(file.name);
             const type = (file.type || "").toLowerCase();
-            const extensionAllowed = ALLOWED_FILE_EXTENSIONS.includes(extension);
-            const mimeAllowed = !type || ALLOWED_MIME_TYPES.includes(type);
+            const extensionAllowed = !doc.allowedExtensions || doc.allowedExtensions.includes(extension);
+            const mimeAllowed = !type || !doc.allowedMimeTypes || doc.allowedMimeTypes.includes(type);
 
             if (!extensionAllowed || !mimeAllowed) {
-                const typeMessage = "Invalid file type. Use JPG, PNG, or PDF only.";
+                const typeMessage = "Invalid file type. Use " + (doc.fileTypeHint || "supported file format") + ".";
                 setFileFeedback(doc.inputId, typeMessage, true);
                 errors.push(doc.label + ": " + typeMessage);
                 return;
             }
 
-            if (file.size > MAX_FILE_SIZE_BYTES) {
+            const maxBytes = doc.maxSizeBytes || MAX_FILE_SIZE_BYTES;
+            if (file.size > maxBytes) {
                 const sizeMessage = "File exceeds 10MB limit.";
                 setFileFeedback(doc.inputId, sizeMessage, true);
                 errors.push(doc.label + ": " + sizeMessage);
@@ -288,13 +809,45 @@
 
         const schoolYear = byId("schoolYear") ? byId("schoolYear").value.trim() : "";
         const scholarshipType = byId("scholarshipType") ? byId("scholarshipType").value.trim() : "";
+        const lastName = byId("lastName") ? byId("lastName").value.trim() : "";
+        const firstName = byId("firstName") ? byId("firstName").value.trim() : "";
+        const middleName = byId("middleName") ? byId("middleName").value.trim() : "";
+        const sex = byId("sex") ? byId("sex").value.trim() : "";
+        const civilStatus = byId("civilStatus") ? byId("civilStatus").value.trim() : "";
+        const religion = byId("religion") ? byId("religion").value.trim() : "";
+        const dateOfBirth = byId("dateOfBirth") ? byId("dateOfBirth").value.trim() : "";
+        const placeOfBirth = byId("placeOfBirth") ? byId("placeOfBirth").value.trim() : "";
+        const permanentAddress = byId("permanentAddress") ? byId("permanentAddress").value.trim() : "";
+        const contactNumber = byId("contactNumber") ? byId("contactNumber").value.trim() : "";
+        const emailAddress = byId("emailAddress") ? byId("emailAddress").value.trim() : "";
+        const highestEducationAttainment = byId("highestEducationAttainment") ? byId("highestEducationAttainment").value.trim() : "";
+        const highestGradeYearLevel = byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value.trim() : "";
         const schoolName = byId("schoolName") ? byId("schoolName").value.trim() : "";
-        const course = byId("course") ? byId("course").value.trim() : "";
-        const yearLevel = byId("yearLevel") ? byId("yearLevel").value.trim() : "";
-        const guardianName = byId("guardianName") ? byId("guardianName").value.trim() : "";
-        const guardianOccupation = byId("guardianOccupation") ? byId("guardianOccupation").value.trim() : "";
-        const monthlyIncomeRaw = byId("monthlyIncome") ? byId("monthlyIncome").value.trim() : "";
+        const schoolType = byId("schoolType") ? byId("schoolType").value.trim() : "";
+        const fatherFirstName = byId("fatherFirstName") ? byId("fatherFirstName").value.trim() : "";
+        const fatherMiddleName = byId("fatherMiddleName") ? byId("fatherMiddleName").value.trim() : "";
+        const fatherLastName = byId("fatherLastName") ? byId("fatherLastName").value.trim() : "";
+        const motherFirstName = byId("motherFirstName") ? byId("motherFirstName").value.trim() : "";
+        const motherMiddleName = byId("motherMiddleName") ? byId("motherMiddleName").value.trim() : "";
+        const motherMaidenName = byId("motherMaidenName") ? byId("motherMaidenName").value.trim() : "";
+        const fatherAddress = byId("fatherAddress") ? byId("fatherAddress").value.trim() : "";
+        const motherAddress = byId("motherAddress") ? byId("motherAddress").value.trim() : "";
+        const fatherOccupation = byId("fatherOccupation") ? byId("fatherOccupation").value.trim() : "";
+        const motherOccupation = byId("motherOccupation") ? byId("motherOccupation").value.trim() : "";
+        const fatherEducationAttainment = byId("fatherEducationAttainment") ? byId("fatherEducationAttainment").value.trim() : "";
+        const motherEducationAttainment = byId("motherEducationAttainment") ? byId("motherEducationAttainment").value.trim() : "";
+        const monthlyIncomeRaw = byId("totalParentsGrossIncome") ? byId("totalParentsGrossIncome").value.trim() : "";
+        const childrenInFamilyRaw = byId("childrenInFamily") ? byId("childrenInFamily").value.trim() : "";
+        const brotherCountRaw = byId("brotherCount") ? byId("brotherCount").value.trim() : "";
+        const sisterCountRaw = byId("sisterCount") ? byId("sisterCount").value.trim() : "";
         const gwaRaw = byId("gwa") ? byId("gwa").value.trim() : "";
+        const isMarriedApplicant = !!(byId("isMarriedApplicant") && byId("isMarriedApplicant").checked);
+        const spouseName = byId("spouseName") ? byId("spouseName").value.trim() : "";
+        const spouseChildrenCount = byId("spouseChildrenCount") ? byId("spouseChildrenCount").value.trim() : "";
+        const spouseOccupation = byId("spouseOccupation") ? byId("spouseOccupation").value.trim() : "";
+        const spouseEducation = byId("spouseEducation") ? byId("spouseEducation").value.trim() : "";
+        const intendedSchool = byId("intendedSchool") ? byId("intendedSchool").value.trim() : "";
+        const degreeProgramCourse = byId("degreeProgramCourse") ? byId("degreeProgramCourse").value.trim() : "";
 
         setInputValidity("schoolYear", !schoolYear);
         setInputValidity("scholarshipType", !scholarshipType);
@@ -312,11 +865,40 @@
 
         const submitting = mode === "submit";
         const requiredChecks = [
+            { id: "lastName", label: "Last Name", value: lastName },
+            { id: "firstName", label: "First Name", value: firstName },
+            { id: "middleName", label: "Middle Name", value: middleName },
+            { id: "sex", label: "Sex", value: sex },
+            { id: "civilStatus", label: "Status", value: civilStatus },
+            { id: "religion", label: "Religion", value: religion },
+            { id: "dateOfBirth", label: "Date of Birth", value: dateOfBirth },
+            { id: "placeOfBirth", label: "Place of Birth", value: placeOfBirth },
+            { id: "permanentAddress", label: "Permanent Address", value: permanentAddress },
+            { id: "contactNumber", label: "Contact Number", value: contactNumber },
+            { id: "emailAddress", label: "Email Address", value: emailAddress },
+            { id: "highestEducationAttainment", label: "Highest Educational Attainment", value: highestEducationAttainment },
+            { id: "highestGradeYearLevel", label: "Highest Grade/Year", value: highestGradeYearLevel },
+            { id: "gwa", label: "General Weighted Average", value: gwaRaw },
             { id: "schoolName", label: "School Name", value: schoolName },
-            { id: "course", label: "Course / Strand", value: course },
-            { id: "yearLevel", label: "Year Level", value: yearLevel },
-            { id: "guardianName", label: "Guardian Name", value: guardianName },
-            { id: "guardianOccupation", label: "Guardian Occupation", value: guardianOccupation }
+            { id: "schoolType", label: "School Type", value: schoolType },
+            { id: "fatherStatus", label: "Father Status", value: byId("fatherStatus") ? byId("fatherStatus").value.trim() : "" },
+            { id: "motherStatus", label: "Mother Status", value: byId("motherStatus") ? byId("motherStatus").value.trim() : "" },
+            { id: "fatherFirstName", label: "Father First Name", value: fatherFirstName },
+            { id: "fatherMiddleName", label: "Father Middle Name", value: fatherMiddleName },
+            { id: "fatherLastName", label: "Father Surname", value: fatherLastName },
+            { id: "motherFirstName", label: "Mother First Name", value: motherFirstName },
+            { id: "motherMiddleName", label: "Mother Middle Name", value: motherMiddleName },
+            { id: "motherMaidenName", label: "Mother Maiden Name", value: motherMaidenName },
+            { id: "fatherAddress", label: "Father Address", value: fatherAddress },
+            { id: "motherAddress", label: "Mother Address", value: motherAddress },
+            { id: "fatherOccupation", label: "Father Occupation", value: fatherOccupation },
+            { id: "motherOccupation", label: "Mother Occupation", value: motherOccupation },
+            { id: "fatherEducationAttainment", label: "Father Educational Attainment", value: fatherEducationAttainment },
+            { id: "motherEducationAttainment", label: "Mother Educational Attainment", value: motherEducationAttainment },
+            { id: "totalParentsGrossIncome", label: "Total Parents Gross Income", value: monthlyIncomeRaw },
+            { id: "childrenInFamily", label: "No. of Children in Family", value: childrenInFamilyRaw },
+            { id: "brotherCount", label: "No. of Brothers", value: brotherCountRaw },
+            { id: "sisterCount", label: "No. of Sisters", value: sisterCountRaw }
         ];
 
         requiredChecks.forEach(function (item) {
@@ -327,18 +909,35 @@
             }
         });
 
+        if (contactNumber) {
+            const normalizedMobile = normalizeMobileForStorage(contactNumber) || "";
+            const validMobile = /^\+?\d{10,15}$/.test(normalizedMobile.replace(/\s+/g, ""));
+            setInputValidity("contactNumber", !validMobile);
+            if (!validMobile) {
+                errors.push("Contact Number is invalid.");
+            }
+        }
+
+        if (emailAddress) {
+            const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddress);
+            setInputValidity("emailAddress", !validEmail);
+            if (!validEmail) {
+                errors.push("Email Address is invalid.");
+            }
+        }
+
         if (submitting && !monthlyIncomeRaw) {
-            setInputValidity("monthlyIncome", true);
-            errors.push("Monthly Income is required before submission.");
+            setInputValidity("totalParentsGrossIncome", true);
+            errors.push("Total Parents Gross Income is required before submission.");
         } else if (monthlyIncomeRaw) {
             const income = Number(monthlyIncomeRaw);
             const invalidIncome = Number.isNaN(income) || income < 0;
-            setInputValidity("monthlyIncome", invalidIncome);
+            setInputValidity("totalParentsGrossIncome", invalidIncome);
             if (invalidIncome) {
-                errors.push("Monthly Income must be a valid non-negative number.");
+                errors.push("Total Parents Gross Income must be a valid non-negative number.");
             }
         } else {
-            setInputValidity("monthlyIncome", false);
+            setInputValidity("totalParentsGrossIncome", false);
         }
 
         if (gwaRaw) {
@@ -352,6 +951,59 @@
             setInputValidity("gwa", false);
         }
 
+        const childrenInFamily = childrenInFamilyRaw === "" ? null : Number(childrenInFamilyRaw);
+        const brotherCount = brotherCountRaw === "" ? null : Number(brotherCountRaw);
+        const sisterCount = sisterCountRaw === "" ? null : Number(sisterCountRaw);
+        const childrenInvalid =
+            (childrenInFamily !== null && (Number.isNaN(childrenInFamily) || childrenInFamily < 0)) ||
+            (brotherCount !== null && (Number.isNaN(brotherCount) || brotherCount < 0)) ||
+            (sisterCount !== null && (Number.isNaN(sisterCount) || sisterCount < 0));
+
+        if (childrenInvalid) {
+            errors.push("Children/Brother/Sister counts must be valid non-negative numbers.");
+        } else if (
+            submitting &&
+            childrenInFamily !== null &&
+            brotherCount !== null &&
+            sisterCount !== null &&
+            childrenInFamily !== brotherCount + sisterCount
+        ) {
+            errors.push("No. of Children in Family must equal Brothers + Sisters.");
+            setInputValidity("childrenInFamily", true);
+            setInputValidity("brotherCount", true);
+            setInputValidity("sisterCount", true);
+        }
+
+        if (isMarriedApplicant) {
+            const spouseRequired = [
+                { id: "spouseName", label: "Name of Husband / Wife", value: spouseName },
+                { id: "spouseChildrenCount", label: "No. of Children", value: spouseChildrenCount },
+                { id: "spouseOccupation", label: "Spouse Occupation", value: spouseOccupation },
+                { id: "spouseEducation", label: "Spouse Educational Attainment", value: spouseEducation },
+                { id: "intendedSchool", label: "School Intended to Enroll In", value: intendedSchool },
+                { id: "degreeProgramCourse", label: "Degree Program Course", value: degreeProgramCourse }
+            ];
+            spouseRequired.forEach(function (item) {
+                const missing = submitting && !item.value;
+                setInputValidity(item.id, missing);
+                if (missing) {
+                    errors.push(item.label + " is required when married/living together is checked.");
+                }
+            });
+
+            if (spouseChildrenCount) {
+                const spouseChildren = Number(spouseChildrenCount);
+                if (Number.isNaN(spouseChildren) || spouseChildren < 0) {
+                    errors.push("Spouse No. of Children must be a valid non-negative number.");
+                    setInputValidity("spouseChildrenCount", true);
+                }
+            }
+        } else {
+            ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool", "degreeProgramCourse"].forEach(function (id) {
+                setInputValidity(id, false);
+            });
+        }
+
         return errors;
     }
 
@@ -359,23 +1011,47 @@
         if (!profile) {
             return;
         }
+        if (byId("lastName")) {
+            byId("lastName").value = profile.last_name || "";
+        }
+        if (byId("firstName")) {
+            byId("firstName").value = profile.first_name || "";
+        }
+        if (byId("middleName")) {
+            byId("middleName").value = profile.middle_name || "";
+        }
+        if (byId("sex")) {
+            setSelectValue("sex", profile.sex || "");
+        }
+        if (byId("civilStatus")) {
+            setSelectValue("civilStatus", profile.civil_status || "");
+        }
+        if (byId("dateOfBirth")) {
+            byId("dateOfBirth").value = profile.date_of_birth || "";
+        }
+        if (byId("permanentAddress")) {
+            byId("permanentAddress").value = profile.address || "";
+        }
+        if (byId("contactNumber")) {
+            byId("contactNumber").value = mobileForInput(profile.mobile_number || "");
+        }
+        if (byId("emailAddress")) {
+            byId("emailAddress").value = profile.email || "";
+        }
         if (byId("schoolName")) {
             byId("schoolName").value = profile.school_name || "";
         }
-        if (byId("course")) {
-            byId("course").value = profile.course_or_strand || "";
+        if (byId("highestGradeYearLevel")) {
+            byId("highestGradeYearLevel").value = profile.year_level || "";
         }
-        if (byId("yearLevel")) {
-            setSelectValue("yearLevel", profile.year_level || "");
+        if (byId("fatherOccupation")) {
+            byId("fatherOccupation").value = profile.guardian_occupation || "";
         }
-        if (byId("guardianName")) {
-            byId("guardianName").value = profile.guardian_name || "";
+        if (byId("degreeProgramCourse")) {
+            byId("degreeProgramCourse").value = profile.course_or_strand || "";
         }
-        if (byId("guardianOccupation")) {
-            byId("guardianOccupation").value = profile.guardian_occupation || "";
-        }
-        if (byId("monthlyIncome")) {
-            byId("monthlyIncome").value = profile.monthly_income || "";
+        if (byId("totalParentsGrossIncome")) {
+            byId("totalParentsGrossIncome").value = profile.monthly_income || "";
         }
     }
 
@@ -384,7 +1060,9 @@
             return;
         }
         setSelectValue("schoolYear", application.school_year || "");
-        setSelectValue("scholarshipType", application.scholarship_type || "");
+        if (byId("scholarshipType")) {
+            byId("scholarshipType").value = application.scholarship_type || "Revised Daet Expanded Scholarship Program";
+        }
         setSelectValue("applicantCategory", application.application_type || "new");
         setApplicationIdDisplay(application.application_no || "");
     }
@@ -404,20 +1082,51 @@
             "schoolYear",
             "scholarshipType",
             "applicantCategory",
+            "lastName",
+            "firstName",
+            "middleName",
+            "sex",
+            "civilStatus",
+            "religion",
+            "dateOfBirth",
+            "placeOfBirth",
+            "permanentAddress",
+            "contactNumber",
+            "emailAddress",
+            "highestEducationAttainment",
+            "highestGradeYearLevel",
             "schoolName",
-            "course",
-            "yearLevel",
+            "schoolType",
+            "fatherStatus",
+            "fatherFirstName",
+            "fatherMiddleName",
+            "fatherLastName",
+            "motherStatus",
+            "motherFirstName",
+            "motherMiddleName",
+            "motherMaidenName",
+            "fatherAddress",
+            "motherAddress",
+            "fatherOccupation",
+            "fatherEducationAttainment",
             "gwa",
-            "addressSchool",
-            "guardianName",
-            "guardianOccupation",
-            "monthlyIncome",
-            "financialNotes",
-            "reqEnrollment",
-            "reqReportCard",
-            "reqBarangay",
-            "reqIncome",
-            "declaration",
+            "motherOccupation",
+            "motherEducationAttainment",
+            "totalParentsGrossIncome",
+            "reqIncomeTaxReturn",
+            "childrenInFamily",
+            "brotherCount",
+            "sisterCount",
+            "isMarriedApplicant",
+            "spouseName",
+            "spouseChildrenCount",
+            "spouseOccupation",
+            "spouseEducation",
+            "intendedSchool",
+            "degreeProgramCourse",
+            "reqApplicantPhoto",
+            "applicationAgreement",
+            "awardAddBtn",
             "saveDraftBtn",
             "submitApplicationBtn"
         ];
@@ -427,6 +1136,10 @@
                 el.disabled = !editable;
             }
         });
+        document.querySelectorAll("#awardsRows [data-award-input='true']").forEach(function (input) {
+            input.disabled = !editable;
+        });
+        updateAwardControlsState(editable);
     }
 
     function setActionLoading(mode, isLoading) {
@@ -458,7 +1171,7 @@
     async function loadProfile(context) {
         const result = await context.client
             .from("profiles")
-            .select("school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income")
+            .select("first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
             .eq("id", context.user.id)
             .single();
 
@@ -504,7 +1217,7 @@
             .from("profiles")
             .update(patch)
             .eq("id", context.user.id)
-            .select("school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income")
+            .select("first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
             .single();
 
         if (result.error) {
@@ -513,6 +1226,29 @@
         if (result.data) {
             writeProfileCache(context.user.id, result.data);
         }
+        return "";
+    }
+
+    async function saveApplicantPhotoPath(context, storagePath) {
+        if (!storagePath) {
+            return "";
+        }
+
+        const result = await context.client
+            .from("profiles")
+            .update({ applicant_photo_path: storagePath })
+            .eq("id", context.user.id)
+            .select("first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
+            .single();
+
+        if (result.error) {
+            return result.error.message || "Failed to sync applicant photo path.";
+        }
+
+        if (result.data) {
+            writeProfileCache(context.user.id, result.data);
+        }
+
         return "";
     }
 
@@ -650,7 +1386,8 @@
             if (!file) {
                 continue;
             }
-            if (file.size > MAX_FILE_SIZE_BYTES) {
+            const maxBytes = doc.maxSizeBytes || MAX_FILE_SIZE_BYTES;
+            if (file.size > maxBytes) {
                 errors.push(doc.label + ": file exceeds 10MB limit.");
                 continue;
             }
@@ -682,6 +1419,14 @@
                 continue;
             }
 
+            if (doc.syncToProfilePhoto) {
+                const profilePhotoError = await saveApplicantPhotoPath(context, path);
+                if (profilePhotoError) {
+                    errors.push(doc.label + ": " + profilePhotoError);
+                    continue;
+                }
+            }
+
             uploaded.push(doc.label);
             input.value = "";
         }
@@ -706,6 +1451,9 @@
         const present = new Set((result.data || []).map(function (row) { return row.document_type; }));
         return DOC_FIELDS
             .filter(function (doc) {
+                if (doc.requiredOnSubmit === false) {
+                    return false;
+                }
                 return !present.has(doc.docType);
             })
             .map(function (doc) {
@@ -717,6 +1465,13 @@
         if (isSaving || isSubmitting) {
             return;
         }
+        try {
+            requireAgreementOrThrow("saving draft");
+        } catch (error) {
+            setStatus(error.message || "Please agree before saving draft.", "alert-warning");
+            return;
+        }
+
         isSaving = true;
         setStatus("", "");
         setActionLoading("draft", true);
@@ -771,6 +1526,13 @@
         if (isSubmitting || isSaving) {
             return;
         }
+        try {
+            requireAgreementOrThrow("submitting");
+        } catch (error) {
+            setStatus(error.message || "Please agree before submission.", "alert-warning");
+            return;
+        }
+
         isSubmitting = true;
         setStatus("", "");
         setActionLoading("submit", true);
@@ -781,11 +1543,6 @@
             const validationErrors = fieldErrors.concat(fileErrors);
             if (validationErrors.length > 0) {
                 throw new Error(validationErrors.join(" | "));
-            }
-
-            const declarationChecked = !!(byId("declaration") && byId("declaration").checked);
-            if (!declarationChecked) {
-                throw new Error("Please confirm the declaration checkbox before submitting.");
             }
 
             const application = await saveOrCreateDraft(context);
@@ -825,12 +1582,9 @@
                     "alert-warning"
                 );
             } else {
-                setStatus("Application submitted (" + (submitted.application_no || submitted.id) + "). Redirecting to tracking page...", "alert-success");
+                setStatus("Application submitted (" + (submitted.application_no || submitted.id) + ").", "alert-success");
             }
-
-            window.setTimeout(function () {
-                window.location.href = "application-detail.html?id=" + encodeURIComponent(submitted.id);
-            }, 1200);
+            showSubmittedModal(submitted, profileErrorMessage);
         } catch (error) {
             setStatus("Submission failed: " + (error.message || "Unknown error"), "alert-danger");
         } finally {
@@ -839,8 +1593,70 @@
         }
     }
 
+    function toggleMarriedFields() {
+        const enabled = !!(byId("isMarriedApplicant") && byId("isMarriedApplicant").checked);
+        const fieldset = byId("marriedFieldsGroup");
+        if (fieldset) {
+            fieldset.disabled = !enabled;
+        }
+        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool", "degreeProgramCourse"];
+        spouseFieldIds.forEach(function (id) {
+            const input = byId(id);
+            if (!input) {
+                return;
+            }
+            input.disabled = !enabled;
+            if (!enabled) {
+                input.classList.remove("is-invalid");
+            }
+        });
+    }
+
     function bindInlineValidation() {
-        const inputIds = ["schoolYear", "scholarshipType", "schoolName", "course", "yearLevel", "guardianName", "guardianOccupation", "monthlyIncome", "gwa"];
+        const inputIds = [
+            "schoolYear",
+            "scholarshipType",
+            "lastName",
+            "firstName",
+            "middleName",
+            "sex",
+            "civilStatus",
+            "religion",
+            "dateOfBirth",
+            "placeOfBirth",
+            "permanentAddress",
+            "contactNumber",
+            "emailAddress",
+            "highestEducationAttainment",
+            "highestGradeYearLevel",
+            "schoolName",
+            "schoolType",
+            "fatherStatus",
+            "fatherFirstName",
+            "fatherMiddleName",
+            "fatherLastName",
+            "motherStatus",
+            "motherFirstName",
+            "motherMiddleName",
+            "motherMaidenName",
+            "fatherAddress",
+            "motherAddress",
+            "fatherOccupation",
+            "fatherEducationAttainment",
+            "motherOccupation",
+            "motherEducationAttainment",
+            "totalParentsGrossIncome",
+            "childrenInFamily",
+            "brotherCount",
+            "sisterCount",
+            "spouseName",
+            "spouseChildrenCount",
+            "spouseOccupation",
+            "spouseEducation",
+            "intendedSchool",
+            "degreeProgramCourse",
+            "gwa"
+        ];
         inputIds.forEach(function (id) {
             const input = byId(id);
             if (!input) {
@@ -861,8 +1677,70 @@
             }
             input.addEventListener("change", function () {
                 validateSelectedFiles();
+                if (doc.inputId === "reqApplicantPhoto") {
+                    const selected = input.files && input.files[0] ? input.files[0] : null;
+                    setApplicantPhotoPreview(selected);
+                }
             });
         });
+
+        const marriedCheckbox = byId("isMarriedApplicant");
+        if (marriedCheckbox) {
+            marriedCheckbox.addEventListener("change", function () {
+                toggleMarriedFields();
+            });
+        }
+
+        const agreementCheckbox = byId("applicationAgreement");
+        if (agreementCheckbox) {
+            agreementCheckbox.addEventListener("change", function () {
+                setAgreementValidity(!agreementCheckbox.checked);
+            });
+        }
+
+        const awardsContainer = byId("awardsRows");
+        if (awardsContainer) {
+            awardsContainer.addEventListener("input", function (event) {
+                const target = event.target;
+                if (target && target.matches("[data-award-input='true']")) {
+                    target.classList.remove("is-invalid");
+                }
+            });
+            awardsContainer.addEventListener("change", function (event) {
+                const target = event.target;
+                if (target && target.matches("[data-award-input='true']")) {
+                    target.classList.remove("is-invalid");
+                }
+            });
+            awardsContainer.addEventListener("click", function (event) {
+                const target = event.target;
+                if (!target || !target.closest) {
+                    return;
+                }
+                const removeBtn = target.closest("[data-award-remove='true']");
+                if (!removeBtn) {
+                    return;
+                }
+                removeAwardRow(removeBtn);
+            });
+        }
+
+        const awardAddBtn = byId("awardAddBtn");
+        if (awardAddBtn) {
+            awardAddBtn.addEventListener("click", function () {
+                addAwardRow();
+            });
+        }
+
+        const openTrackingBtn = byId("applicationSubmittedModalOpenBtn");
+        if (openTrackingBtn) {
+            openTrackingBtn.addEventListener("click", function () {
+                if (!submittedTrackingUrl) {
+                    return;
+                }
+                window.location.href = submittedTrackingUrl;
+            });
+        }
     }
 
     async function init() {
@@ -871,8 +1749,20 @@
             return;
         }
 
+        submittedTrackingUrl = "";
+        setAgreementValidity(false);
+        const openTrackingBtn = byId("applicationSubmittedModalOpenBtn");
+        if (openTrackingBtn) {
+            openTrackingBtn.disabled = true;
+        }
+
+        renderAwardRows([]);
+
         const profile = await loadProfile(context);
         applyProfileToForm(profile);
+        if (profile && profile.applicant_photo_path) {
+            await loadStoredApplicantPhotoPreview(context, profile.applicant_photo_path);
+        }
 
         const query = parseQuery();
         if (query.applicationId) {
@@ -907,6 +1797,8 @@
             }
             applyAuxMeta(context.user.id, "new");
         }
+
+        toggleMarriedFields();
 
         const saveBtn = byId("saveDraftBtn");
         if (saveBtn) {

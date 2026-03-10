@@ -30,18 +30,29 @@
         box.textContent = message;
     }
 
+    async function failClosed(client, message) {
+        showGuardError(message);
+        try {
+            if (client && client.auth && typeof client.auth.signOut === "function") {
+                await client.auth.signOut();
+            }
+        } catch (error) {
+            // Ignore signout failure and continue redirect.
+        }
+        window.location.replace("../login.html");
+        return null;
+    }
+
     async function guardApplicant() {
         const requiredRole = window.LDSS_REQUIRED_ROLE || "applicant";
         const url = window.LDSS_SUPABASE_URL || "";
         const anonKey = window.LDSS_SUPABASE_ANON_KEY || "";
 
         if (!window.supabase || typeof window.supabase.createClient !== "function") {
-            showGuardError("Supabase library failed to load.");
-            return null;
+            return failClosed(null, "Supabase library failed to load.");
         }
         if (!url || !anonKey || hasPlaceholderConfig(url, anonKey)) {
-            showGuardError("Supabase config is missing. Update js/supabase-config.js.");
-            return null;
+            return failClosed(null, "Supabase config is missing. Update js/supabase-config.js.");
         }
 
         const client = window.supabase.createClient(url, anonKey);
@@ -49,26 +60,30 @@
         const session = sessionResult && sessionResult.data ? sessionResult.data.session : null;
 
         if (!session || !session.user) {
-            window.location.href = "../login.html";
-            return null;
+            return failClosed(client, "No active session found.");
         }
 
         const roleResult = await client
             .from("profiles")
-            .select("role")
+            .select("role,is_active")
             .eq("id", session.user.id)
             .single();
 
-        if (roleResult.error || !roleResult.data || !roleResult.data.role) {
-            await client.auth.signOut();
-            window.location.href = "../login.html";
-            return null;
+        if (
+            roleResult.error ||
+            !roleResult.data ||
+            !roleResult.data.role
+        ) {
+            return failClosed(client, "Profile role lookup failed.");
+        }
+        if (roleResult.data.is_active === false) {
+            return failClosed(client, "Account is inactive.");
         }
 
         const role = roleResult.data.role;
         if (role !== requiredRole) {
             const redirect = ROLE_ROUTES[role] || "../login.html";
-            window.location.href = redirect;
+            window.location.replace(redirect);
             return null;
         }
 
@@ -89,7 +104,7 @@
             return context;
         })
         .catch(function () {
-            showGuardError("Authentication guard failed. Please refresh.");
+            window.location.replace("../login.html");
             return null;
         });
 })();

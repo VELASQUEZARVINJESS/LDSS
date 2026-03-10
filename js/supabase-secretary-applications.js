@@ -1,22 +1,7 @@
-﻿(function () {
+(function () {
     "use strict";
 
     const PAGE_SIZE = 10;
-
-    const STATUS_META = {
-        submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
-        under_secretary_review: { label: "Under Secretary Review", chipClass: "ldss-chip-accent" },
-        interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
-        recommended: { label: "Recommended", chipClass: "ldss-chip-accent" },
-        for_admin_approval: { label: "For Admin Approval", chipClass: "ldss-chip-accent" },
-        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
-        approved: { label: "Approved", chipClass: "ldss-chip-success" },
-        waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
-        rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
-        certification_ready: { label: "Certification Ready", chipClass: "ldss-chip-success" },
-        release_scheduled: { label: "Release Scheduled", chipClass: "ldss-chip-accent" },
-        released: { label: "Released", chipClass: "ldss-chip-success" }
-    };
 
     let allRows = [];
     let filteredRows = [];
@@ -26,13 +11,28 @@
         return document.getElementById(id);
     }
 
+    function workflow() {
+        return window.LDSS_WORKFLOW || {
+            normalizeStatus: function (status) { return (status || "").toString().trim().toLowerCase(); },
+            statusMeta: function (status) { return { label: status || "-", chipClass: "ldss-chip-neutral" }; }
+        };
+    }
+
+    function normalizeStatus(status) {
+        return workflow().normalizeStatus(status || "");
+    }
+
+    function statusMeta(status) {
+        return workflow().statusMeta(status || "");
+    }
+
     function escapeHtml(value) {
         return (value || "")
             .toString()
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
+            .replace(/\"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
 
@@ -48,10 +48,6 @@
         }
         alert.className = "alert " + (type || "alert-info");
         alert.textContent = message;
-    }
-
-    function statusMeta(status) {
-        return STATUS_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
     }
 
     function formatDate(value) {
@@ -104,7 +100,7 @@
             new Set(
                 rows
                     .map(function (row) {
-                        return row.status || "";
+                        return normalizeStatus(row.status || "");
                     })
                     .filter(Boolean)
             )
@@ -139,16 +135,26 @@
         yearFilter.value = years.includes(selectedYear) ? selectedYear : "all";
     }
 
+    function isExamStage(status) {
+        const normalized = normalizeStatus(status);
+        return ["submitted", "pending_exam", "exam_scheduled", "exam_completed", "passed_exam", "failed_exam", "special_endorsement_review"].includes(normalized);
+    }
+
+    function isInterviewStage(status) {
+        const normalized = normalizeStatus(status);
+        return ["for_interview", "interview_scheduled", "interview_completed", "hard_copy_verified"].includes(normalized);
+    }
+
     function updateKpis(rows) {
         const queueTotal = rows.length;
         const forVerification = rows.filter(function (row) {
-            return ["submitted", "under_secretary_review", "returned_for_correction"].includes(row.status);
+            return isExamStage(row.status);
         }).length;
         const interviewStage = rows.filter(function (row) {
-            return row.status === "interview_scheduled";
+            return isInterviewStage(row.status);
         }).length;
         const forwarded = rows.filter(function (row) {
-            return row.status === "for_admin_approval";
+            return normalizeStatus(row.status) === "for_approval";
         }).length;
 
         const queueEl = byId("secretaryApplicationsQueueTotal");
@@ -179,8 +185,9 @@
             const appNo = (row.application_no || "").toLowerCase();
             const scholarship = (row.scholarship_type || "").toLowerCase();
             const applicant = (row.applicant_name || "").toLowerCase();
+            const normalized = normalizeStatus(row.status);
             const matchesSearch = !search || appNo.includes(search) || scholarship.includes(search) || applicant.includes(search);
-            const matchesStatus = status === "all" || row.status === status;
+            const matchesStatus = status === "all" || normalized === status;
             const matchesYear = schoolYear === "all" || row.school_year === schoolYear;
             return matchesSearch && matchesStatus && matchesYear;
         });
@@ -238,6 +245,20 @@
         pagination.innerHTML = items.join("");
     }
 
+    function actionForStatus(status, appId) {
+        const normalized = normalizeStatus(status);
+        if (normalized === "for_approval") {
+            return { label: "View", href: "../ADMIN/admin-approval-queue.html" };
+        }
+        if (isInterviewStage(normalized) || normalized === "passed_exam") {
+            return { label: "Verify", href: "secretary-interview-verification.html?id=" + encodeURIComponent(appId) };
+        }
+        if (isExamStage(normalized)) {
+            return { label: "Exam", href: "secretary-exam-batches.html" };
+        }
+        return { label: "Open", href: "secretary-interview-verification.html?id=" + encodeURIComponent(appId) };
+    }
+
     function renderTable(rows) {
         const tbody = byId("secretaryApplicationsTableBody");
         if (!tbody) {
@@ -250,9 +271,11 @@
         }
 
         tbody.innerHTML = rows.map(function (row) {
-            const meta = statusMeta(row.status);
+            const normalized = normalizeStatus(row.status);
+            const meta = statusMeta(normalized);
             const submitted = row.submitted_at || row.created_at;
-            const actionLabel = row.status === "for_admin_approval" ? "View" : "Open";
+            const action = actionForStatus(normalized, row.id);
+
             return (
                 "<tr>" +
                 "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
@@ -263,7 +286,7 @@
                 "<td>" + escapeHtml(row.scholarship_type || "-") + "</td>" +
                 "<td>" + escapeHtml(formatDate(submitted)) + "</td>" +
                 '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
-                '<td><a class="btn btn-outline-dark btn-sm" href="secretary-interview-verification.html?id=' + encodeURIComponent(row.id) + '">' + actionLabel + "</a></td>" +
+                '<td><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
                 "</tr>"
             );
         }).join("");

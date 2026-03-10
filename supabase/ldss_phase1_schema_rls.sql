@@ -42,8 +42,20 @@ begin
         create type public.application_status as enum (
             'draft',
             'submitted',
-            'under_secretary_review',
+            'pending_exam',
+            'exam_scheduled',
+            'exam_completed',
+            'passed_exam',
+            'failed_exam',
+            'special_endorsement_review',
+            'for_interview',
             'interview_scheduled',
+            'interview_completed',
+            'hard_copy_verified',
+            'for_approval',
+            'for_release',
+            -- legacy values retained for backward compatibility:
+            'under_secretary_review',
             'recommended',
             'for_admin_approval',
             'approved',
@@ -365,7 +377,8 @@ set search_path = public
 as $$
     select p.role
     from public.profiles p
-    where p.id = auth.uid();
+    where p.id = auth.uid()
+      and p.is_active = true;
 $$;
 
 create or replace function public.is_staff()
@@ -436,20 +449,11 @@ security definer
 set search_path = public
 as $$
 declare
-    requested_role text;
     final_role public.app_role := 'applicant';
 begin
-    requested_role := lower(coalesce(new.raw_user_meta_data ->> 'role', ''));
-
-    if requested_role = 'secretary' then
-        final_role := 'secretary';
-    elsif requested_role = 'admin' then
-        final_role := 'admin';
-    elsif requested_role = 'super_admin' then
-        final_role := 'super_admin';
-    else
-        final_role := 'applicant';
-    end if;
+    -- Never trust client metadata for privileged roles.
+    -- Staff roles must be assigned by a super admin or server-side admin process.
+    final_role := 'applicant';
 
     insert into public.profiles (
         id,
@@ -498,7 +502,10 @@ create policy profiles_insert_self_or_super_admin
 on public.profiles
 for insert
 to authenticated
-with check (id = auth.uid() or public.is_super_admin());
+with check (
+    (id = auth.uid() and role = 'applicant')
+    or public.is_super_admin()
+);
 
 drop policy if exists profiles_update_self_or_super_admin on public.profiles;
 create policy profiles_update_self_or_super_admin
@@ -506,7 +513,13 @@ on public.profiles
 for update
 to authenticated
 using (id = auth.uid() or public.is_super_admin())
-with check (id = auth.uid() or public.is_super_admin());
+with check (
+    public.is_super_admin()
+    or (
+        id = auth.uid()
+        and role = public.current_user_role()
+    )
+);
 
 drop policy if exists profiles_delete_super_admin on public.profiles;
 create policy profiles_delete_super_admin
@@ -797,3 +810,343 @@ using (
         or (storage.foldername(name))[2] = auth.uid()::text
     )
 );
+
+-- ============================================
+-- Phase 1.2 Workflow Extension (Exam-Interview-Approval)
+-- ============================================
+
+alter type public.application_status add value if not exists 'pending_exam';
+alter type public.application_status add value if not exists 'exam_scheduled';
+alter type public.application_status add value if not exists 'exam_completed';
+alter type public.application_status add value if not exists 'passed_exam';
+alter type public.application_status add value if not exists 'failed_exam';
+alter type public.application_status add value if not exists 'special_endorsement_review';
+alter type public.application_status add value if not exists 'for_interview';
+alter type public.application_status add value if not exists 'interview_completed';
+alter type public.application_status add value if not exists 'hard_copy_verified';
+alter type public.application_status add value if not exists 'for_approval';
+alter type public.application_status add value if not exists 'for_release';
+
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where t.typname = 'exam_batch_status'
+          and n.nspname = 'public'
+    ) then
+        create type public.exam_batch_status as enum ('open', 'closed', 'archived');
+    end if;
+end $$;
+
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where t.typname = 'exam_record_status'
+          and n.nspname = 'public'
+    ) then
+        create type public.exam_record_status as enum ('scheduled', 'completed', 'encoded');
+    end if;
+end $$;
+
+do $$
+begin
+    if not exists (
+        select 1
+        from pg_type t
+        join pg_namespace n on n.oid = t.typnamespace
+        where t.typname = 'exam_result_status'
+          and n.nspname = 'public'
+    ) then
+        create type public.exam_result_status as enum ('pending', 'passed', 'failed');
+    end if;
+end $$;
+
+create table if not exists public.exam_batches (
+    id uuid primary key default gen_random_uuid(),
+    batch_label text not null,
+    exam_datetime timestamptz not null,
+    venue text not null,
+    capacity integer,
+    notes text,
+    status public.exam_batch_status not null default 'open',
+    created_by uuid references public.profiles (id) on delete set null,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    constraint exam_batches_capacity_positive check (capacity is null or capacity > 0)
+);
+
+create table if not exists public.exam_records (
+    id uuid primary key default gen_random_uuid(),
+    application_id uuid not null unique references public.applications (id) on delete cascade,
+    batch_id uuid references public.exam_batches (id) on delete set null,
+    exam_control_no text unique,
+    scheduled_at timestamptz,
+    raw_score numeric(7, 2),
+    percentage_score numeric(5, 2),
+    result public.exam_result_status not null default 'pending',
+    status public.exam_record_status not null default 'scheduled',
+    checked_by uuid references public.profiles (id) on delete set null,
+    encoded_by uuid references public.profiles (id) on delete set null,
+    checked_at timestamptz,
+    encoded_at timestamptz,
+    remarks text,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    constraint exam_records_raw_score_non_negative check (raw_score is null or raw_score >= 0),
+    constraint exam_records_percentage_range check (percentage_score is null or (percentage_score >= 0 and percentage_score <= 100))
+);
+
+create table if not exists public.interview_records (
+    id uuid primary key default gen_random_uuid(),
+    application_id uuid not null unique references public.applications (id) on delete cascade,
+    batch_label text,
+    scheduled_at timestamptz,
+    venue text,
+    status public.interview_status not null default 'not_scheduled',
+    result public.interview_result not null default 'pending',
+    exam_score numeric(5, 2),
+    remarks text,
+    verified_photo_path text,
+    hard_copy_verified boolean not null default false,
+    hard_copy_verified_at timestamptz,
+    encoded_by uuid references public.profiles (id) on delete set null,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    constraint interview_records_exam_score_range check (exam_score is null or (exam_score >= 0 and exam_score <= 100))
+);
+
+create table if not exists public.approval_records (
+    id uuid primary key default gen_random_uuid(),
+    application_id uuid not null unique references public.applications (id) on delete cascade,
+    priority public.approval_priority not null default 'medium',
+    recommendation_status text not null default 'pending',
+    recommendation_notes text,
+    queued_at timestamptz not null default timezone('utc', now()),
+    decision_status public.decision_status not null default 'pending',
+    decision_notes text,
+    special_endorsement boolean not null default false,
+    ranking_score numeric(8, 2),
+    ranking_basis jsonb,
+    decided_by uuid references public.profiles (id) on delete set null,
+    decided_at timestamptz,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    constraint approval_records_ranking_non_negative check (ranking_score is null or ranking_score >= 0)
+);
+
+create table if not exists public.ranking_settings (
+    id uuid primary key default gen_random_uuid(),
+    school_year text not null unique,
+    quota_slots integer not null default 0,
+    waitlist_slots integer not null default 0,
+    passing_score numeric(5, 2) not null default 75,
+    exam_total_items integer not null default 100,
+    application_open_date date,
+    application_close_date date,
+    ranking_basis jsonb not null default '{}'::jsonb,
+    is_active boolean not null default true,
+    managed_by uuid references public.profiles (id) on delete set null,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now()),
+    constraint ranking_settings_school_year_format check (school_year ~ '^[0-9]{4}-[0-9]{4}$'),
+    constraint ranking_settings_quota_non_negative check (quota_slots >= 0 and waitlist_slots >= 0),
+    constraint ranking_settings_passing_range check (passing_score >= 0 and passing_score <= 100),
+    constraint ranking_settings_exam_items_positive check (exam_total_items > 0),
+    constraint ranking_settings_window_order check (application_open_date is null or application_close_date is null or application_close_date >= application_open_date)
+);
+
+create index if not exists idx_exam_batches_datetime on public.exam_batches (exam_datetime desc);
+create index if not exists idx_exam_batches_status on public.exam_batches (status, exam_datetime desc);
+create index if not exists idx_exam_records_batch_status on public.exam_records (batch_id, status, updated_at desc);
+create index if not exists idx_exam_records_result on public.exam_records (result, updated_at desc);
+create index if not exists idx_interview_records_status_schedule on public.interview_records (status, scheduled_at);
+create index if not exists idx_approval_records_decision_status on public.approval_records (decision_status, queued_at desc);
+create index if not exists idx_approval_records_ranking on public.approval_records (ranking_score desc nulls last);
+create index if not exists idx_ranking_settings_active_year on public.ranking_settings (is_active, school_year);
+
+drop trigger if exists trg_exam_batches_updated_at on public.exam_batches;
+create trigger trg_exam_batches_updated_at
+before update on public.exam_batches
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_exam_records_updated_at on public.exam_records;
+create trigger trg_exam_records_updated_at
+before update on public.exam_records
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_interview_records_updated_at on public.interview_records;
+create trigger trg_interview_records_updated_at
+before update on public.interview_records
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_approval_records_updated_at on public.approval_records;
+create trigger trg_approval_records_updated_at
+before update on public.approval_records
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_ranking_settings_updated_at on public.ranking_settings;
+create trigger trg_ranking_settings_updated_at
+before update on public.ranking_settings
+for each row execute function public.set_updated_at();
+
+alter table public.exam_batches enable row level security;
+alter table public.exam_records enable row level security;
+alter table public.interview_records enable row level security;
+alter table public.approval_records enable row level security;
+alter table public.ranking_settings enable row level security;
+
+drop policy if exists exam_batches_select_staff on public.exam_batches;
+create policy exam_batches_select_staff
+on public.exam_batches
+for select
+to authenticated
+using (public.is_staff());
+
+drop policy if exists exam_batches_insert_staff on public.exam_batches;
+create policy exam_batches_insert_staff
+on public.exam_batches
+for insert
+to authenticated
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists exam_batches_update_staff on public.exam_batches;
+create policy exam_batches_update_staff
+on public.exam_batches
+for update
+to authenticated
+using (public.current_user_role() in ('secretary', 'admin', 'super_admin'))
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists exam_batches_delete_super_admin on public.exam_batches;
+create policy exam_batches_delete_super_admin
+on public.exam_batches
+for delete
+to authenticated
+using (public.is_super_admin());
+
+drop policy if exists exam_records_select_owner_or_staff on public.exam_records;
+create policy exam_records_select_owner_or_staff
+on public.exam_records
+for select
+to authenticated
+using (public.application_owned_by_current_user(application_id) or public.is_staff());
+
+drop policy if exists exam_records_insert_staff on public.exam_records;
+create policy exam_records_insert_staff
+on public.exam_records
+for insert
+to authenticated
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists exam_records_update_staff on public.exam_records;
+create policy exam_records_update_staff
+on public.exam_records
+for update
+to authenticated
+using (public.current_user_role() in ('secretary', 'admin', 'super_admin'))
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists exam_records_delete_super_admin on public.exam_records;
+create policy exam_records_delete_super_admin
+on public.exam_records
+for delete
+to authenticated
+using (public.is_super_admin());
+
+drop policy if exists interview_records_select_owner_or_staff on public.interview_records;
+create policy interview_records_select_owner_or_staff
+on public.interview_records
+for select
+to authenticated
+using (public.application_owned_by_current_user(application_id) or public.is_staff());
+
+drop policy if exists interview_records_insert_staff on public.interview_records;
+create policy interview_records_insert_staff
+on public.interview_records
+for insert
+to authenticated
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists interview_records_update_staff on public.interview_records;
+create policy interview_records_update_staff
+on public.interview_records
+for update
+to authenticated
+using (public.current_user_role() in ('secretary', 'admin', 'super_admin'))
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists interview_records_delete_super_admin on public.interview_records;
+create policy interview_records_delete_super_admin
+on public.interview_records
+for delete
+to authenticated
+using (public.is_super_admin());
+
+drop policy if exists approval_records_select_admin_or_higher on public.approval_records;
+create policy approval_records_select_admin_or_higher
+on public.approval_records
+for select
+to authenticated
+using (public.is_admin_or_higher());
+
+drop policy if exists approval_records_insert_staff on public.approval_records;
+create policy approval_records_insert_staff
+on public.approval_records
+for insert
+to authenticated
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists approval_records_update_staff on public.approval_records;
+create policy approval_records_update_staff
+on public.approval_records
+for update
+to authenticated
+using (public.current_user_role() in ('secretary', 'admin', 'super_admin'))
+with check (public.current_user_role() in ('secretary', 'admin', 'super_admin'));
+
+drop policy if exists approval_records_delete_super_admin on public.approval_records;
+create policy approval_records_delete_super_admin
+on public.approval_records
+for delete
+to authenticated
+using (public.is_super_admin());
+
+drop policy if exists ranking_settings_select_admin_or_higher on public.ranking_settings;
+create policy ranking_settings_select_admin_or_higher
+on public.ranking_settings
+for select
+to authenticated
+using (public.is_admin_or_higher());
+
+drop policy if exists ranking_settings_insert_super_admin on public.ranking_settings;
+create policy ranking_settings_insert_super_admin
+on public.ranking_settings
+for insert
+to authenticated
+with check (public.is_super_admin());
+
+drop policy if exists ranking_settings_update_super_admin on public.ranking_settings;
+create policy ranking_settings_update_super_admin
+on public.ranking_settings
+for update
+to authenticated
+using (public.is_super_admin())
+with check (public.is_super_admin());
+
+drop policy if exists ranking_settings_delete_super_admin on public.ranking_settings;
+create policy ranking_settings_delete_super_admin
+on public.ranking_settings
+for delete
+to authenticated
+using (public.is_super_admin());
+
+grant select, insert, update, delete on public.exam_batches to authenticated;
+grant select, insert, update, delete on public.exam_records to authenticated;
+grant select, insert, update, delete on public.interview_records to authenticated;
+grant select, insert, update, delete on public.approval_records to authenticated;
+grant select, insert, update, delete on public.ranking_settings to authenticated;
