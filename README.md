@@ -1,6 +1,6 @@
-# LDSP Frontend + Node Upload Server
+# LDSP Frontend
 
-This project now runs as a Node-hosted site with private file uploads stored on the hosting server and application metadata still stored in Supabase.
+This project is deployable as a static frontend. Application data stays in Supabase, and new file uploads default to Supabase Storage so applicant submission still works on static hosting.
 
 ## Main URLs
 - `https://daet-scholarship.gt.tc/` -> Login
@@ -60,10 +60,16 @@ This project now runs as a Node-hosted site with private file uploads stored on 
 - UI pages still include targeted `TODO(Supabase)` markers for remaining server-side integrations (ranking engine, PDF generation, report exports).
 - Legacy Supabase Storage bucket/policies for requirement uploads are still included in the SQL bootstrap (`ldss-documents` bucket) for backward compatibility with older uploaded files.
 
-## Hosting Uploads (Node)
-This project now stores new uploads in your hosting storage through the Node server instead of sending new files to Supabase Storage.
+## File Uploads
+New uploads now default to Supabase Storage for static hosting compatibility.
 
-New hosted path format:
+Optional hosted upload mode still exists for Node deployments, but it must be explicitly enabled with `window.LDSS_USE_HOSTED_UPLOADS = true` before `js/ldss-upload-api.js` loads.
+
+Supabase upload path format:
+- `<document_type>/<user_id>/<application_id>/<filename>`
+- Staff verified photo: `verified_interview_photo/staff/<staff_user_id>/<application_id>/<filename>`
+
+Optional hosted path format:
 - `uploads/<document_type>/<user_id>/<application_id>/<filename>`
 - Verified interview photo: `uploads/verified_interview_photo/staff/<staff_user_id>/<application_id>/<filename>`
 
@@ -72,22 +78,10 @@ What remains in Supabase:
 - `profiles.applicant_photo_path`
 - `profiles.verified_interview_photo_path`
 
-Required setup:
-1. Run `npm install`
-2. Start the app with `npm start`
-3. Make sure your Node host serves this project through `server.js`
-4. Keep these environment values available to Node:
-   - `PORT`
-   - `LDSS_UPLOAD_DIR` (default: `uploads`)
-   - `LDSS_SUPABASE_URL`
-   - `LDSS_SUPABASE_ANON_KEY`
-
-Optional:
-- Copy `.env.example` to `.env` for local/server setup
-
 Important:
-- New uploads use hosting storage.
-- Older file paths that still point to Supabase Storage remain readable through the frontend fallback until they are replaced or reuploaded.
+- Static hosting works for applicant submission as long as the `ldss-documents` bucket and storage RLS are applied in Supabase.
+- Older hosted file paths that start with `uploads/` still need the Node upload server to read/delete them.
+- Older Supabase Storage file paths remain readable through signed URLs.
 
 ## Live Login Setup (Supabase)
 1. Open `js/supabase-config.js`.
@@ -95,8 +89,8 @@ Important:
    - `LDSS_SUPABASE_URL`
    - `LDSS_SUPABASE_ANON_KEY`
    - `LDSS_STORAGE_BUCKET` (default: `ldss-documents`)
-3. For Node hosting, deploy the full project and run `npm start`.
-4. For local static file references, keep the app behind the Node server so `/api/uploads` is available.
+3. Static hosting is supported.
+4. Node hosting is optional unless you still rely on older hosted file paths that start with `uploads/`.
 
 Login behavior now:
 - Uses Supabase `signInWithPassword` (email or mobile/phone).

@@ -246,6 +246,34 @@
         return "Barangay " + cleaned + ", Daet";
     }
 
+    function buildFullAddress(profile) {
+        const address = textValue(profile && profile.address, "");
+        const barangay = normalizeBarangayLabel(profile && profile.barangay);
+
+        if (!address && !barangay) {
+            return "-";
+        }
+        if (!address) {
+            return barangay || "-";
+        }
+        if (!barangay) {
+            return address;
+        }
+
+        const addressLower = address.toLowerCase();
+        const rawBarangay = textValue(profile && profile.barangay, "").toLowerCase();
+        const normalizedBarangay = barangay.toLowerCase();
+        if (
+            (rawBarangay && addressLower.includes(rawBarangay)) ||
+            addressLower.includes(normalizedBarangay) ||
+            addressLower.includes(normalizedBarangay.replace(", daet", ""))
+        ) {
+            return address;
+        }
+
+        return address + ", " + barangay;
+    }
+
     function parseBarangayText(text) {
         if (!text) {
             return [];
@@ -363,31 +391,12 @@
         if (latest.error || !latest.data || latest.data.length === 0) {
             setText("profileLatestApplicationNo", "-");
             setText("profileLatestScholarshipType", "DEGREE COURSE");
-            setText("profileSectorClassificationDisplay", "-");
-            setText("profileFatherNameDisplay", profile ? profile.guardian_name : "-");
-            setText("profileMotherNameDisplay", "-");
             return;
         }
 
         const row = latest.data[0];
-        const auxMeta = readAuxMeta(context.user.id, row.id);
         setText("profileLatestApplicationNo", row.application_no);
         setText("profileLatestScholarshipType", "DEGREE COURSE");
-        setText("profileSectorClassificationDisplay", row.sector_classification || auxMeta.additionalData || "-");
-        setText(
-            "profileFatherNameDisplay",
-            buildPersonName(
-                [auxMeta.fatherFirstName, auxMeta.fatherMiddleName, auxMeta.fatherLastName],
-                profile ? profile.guardian_name : ""
-            )
-        );
-        setText(
-            "profileMotherNameDisplay",
-            buildPersonName(
-                [auxMeta.motherFirstName, auxMeta.motherMiddleName, auxMeta.motherMaidenName],
-                ""
-            )
-        );
     }
 
     function fillProfileDisplay(profile) {
@@ -396,24 +405,10 @@
         setText("profileDobDisplay", formatDateDisplay(profile.date_of_birth));
         setText("profileCivilStatusDisplay", profile.civil_status);
         setText("profileSexDisplay", profile.sex);
-        setText("profileBarangayDisplay", normalizeBarangayLabel(profile.barangay) || profile.barangay);
+        setText("profileBarangayDisplay", normalizeBarangayLabel(profile.barangay) || profile.barangay || "-");
         setText("profileEmailDisplay", profile.email);
         setText("profileMobileDisplay", formatMobileDisplay(profile.mobile_number));
-        setText("profileAddressDisplay", profile.address);
-        setText("profileSchoolDisplay", profile.school_name);
-
-        const course = textValue(profile.course_or_strand, "");
-        const yearLevel = textValue(profile.year_level, "");
-        const courseYear = [course, yearLevel]
-            .filter(function (value) {
-                return value && value !== "-";
-            })
-            .join(" - ");
-        setText("profileCourseYearDisplay", courseYear || "-");
-        setText("profileFatherNameDisplay", profile.guardian_name);
-        setText("profileMotherNameDisplay", "-");
-        setText("profileSectorClassificationDisplay", "-");
-        setText("profileIncomeDisplay", formatIncomeDisplay(profile.monthly_income));
+        setText("profileAddressDisplay", buildFullAddress(profile));
     }
 
     function contextUserEmailFallback(profile) {

@@ -146,7 +146,7 @@
                                         </div>
                                         <div class="ldss-profile-field">
                                             <div class="ldss-profile-field-label">Barangay</div>
-                                            <div class="ldss-profile-field-value" id="profileBarangayDisplay">Barangay Alawihao, Daet</div>
+                                            <div class="ldss-profile-field-value" id="profileBarangayDisplay">-</div>
                                         </div>
                                     </div>
                                 </div>
@@ -167,49 +167,8 @@
                                             <div class="ldss-profile-field-value" id="profileMobileDisplay">0917 123 4567</div>
                                         </div>
                                         <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">Address</div>
+                                            <div class="ldss-profile-field-label">Full Address</div>
                                             <div class="ldss-profile-field-value" id="profileAddressDisplay">Purok 4, Barangay Alawihao, Daet, Camarines Norte</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-lg-6">
-                                <div class="card h-100 ldss-profile-detail-card">
-                                    <div class="card-header d-flex align-items-center justify-content-between">
-                                        <span>Educational Information</span>
-                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditEducation">Edit</button>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">School</div>
-                                            <div class="ldss-profile-field-value" id="profileSchoolDisplay">Camarines Norte State College</div>
-                                        </div>
-                                        <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">Course / Year</div>
-                                            <div class="ldss-profile-field-value" id="profileCourseYearDisplay">BS Information Technology - 1st Year</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-lg-6">
-                                <div class="card h-100 ldss-profile-detail-card">
-                                    <div class="card-header">Family Background</div>
-                                    <div class="card-body">
-                                        <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">Father Name</div>
-                                            <div class="ldss-profile-field-value" id="profileFatherNameDisplay">-</div>
-                                        </div>
-                                        <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">Mother Name</div>
-                                            <div class="ldss-profile-field-value" id="profileMotherNameDisplay">-</div>
-                                        </div>
-                                        <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">Sector Classification</div>
-                                            <div class="ldss-profile-field-value" id="profileSectorClassificationDisplay">-</div>
-                                        </div>
-                                        <div class="ldss-profile-field">
-                                            <div class="ldss-profile-field-label">Combined Monthly Income</div>
-                                            <div class="ldss-profile-field-value" id="profileIncomeDisplay">PHP 15,000.00</div>
                                         </div>
                                     </div>
                                 </div>
@@ -296,7 +255,7 @@
                                 <input class="form-control" id="modalMobile" type="text" value="0917 123 4567" />
                             </div>
                             <div class="col-12">
-                                <label class="small mb-1" for="modalAddress">Address</label>
+                                <label class="small mb-1" for="modalAddress">Full Address</label>
                                 <textarea class="form-control" id="modalAddress" rows="3">Purok 4, Barangay Alawihao, Daet, Camarines Norte</textarea>
                             </div>
                         </form>
@@ -304,73 +263,6 @@
                     <div class="modal-footer">
                         <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
                         <button class="btn btn-dark" type="button" id="saveContactBtn">Save</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="modal fade" id="modalEditEducation" tabindex="-1" aria-labelledby="modalEditEducationLabel" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="modalEditEducationLabel">Edit Educational Information</h5>
-                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <form class="row g-3">
-                            <div class="col-12">
-                                <label class="small mb-1" for="modalSchool">School</label>
-                                <input class="form-control" id="modalSchool" type="text" value="Camarines Norte State College" />
-                            </div>
-                            <div class="col-md-7">
-                                <label class="small mb-1" for="modalCourse">Course</label>
-                                <input class="form-control" id="modalCourse" type="text" value="BS Information Technology" />
-                            </div>
-                            <div class="col-md-5">
-                                <label class="small mb-1" for="modalYearLevel">Year Level</label>
-                                <select class="form-select" id="modalYearLevel">
-                                    <option selected>1st Year</option>
-                                    <option>2nd Year</option>
-                                    <option>3rd Year</option>
-                                    <option>4th Year</option>
-                                </select>
-                            </div>
-                        </form>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
-                        <button class="btn btn-dark" type="button" id="saveEducationBtn">Save</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="modal fade" id="modalEditFamily" tabindex="-1" aria-labelledby="modalEditFamilyLabel" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="modalEditFamilyLabel">Edit Family Background</h5>
-                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <form class="row g-3">
-                            <div class="col-12">
-                                <label class="small mb-1" for="modalGuardian">Guardian Name</label>
-                                <input class="form-control" id="modalGuardian" type="text" value="Maria Dela Cruz" />
-                            </div>
-                            <div class="col-12">
-                                <label class="small mb-1" for="modalOccupation">Guardian Occupation</label>
-                                <input class="form-control" id="modalOccupation" type="text" value="Vendor" />
-                            </div>
-                            <div class="col-12">
-                                <label class="small mb-1" for="modalIncome">Combined Monthly Income (PHP)</label>
-                                <input class="form-control" id="modalIncome" type="number" value="15000" />
-                            </div>
-                        </form>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Cancel</button>
-                        <button class="btn btn-dark" type="button" id="saveFamilyBtn">Save</button>
                     </div>
                 </div>
             </div>

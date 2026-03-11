@@ -1,6 +1,11 @@
 (function () {
     "use strict";
 
+    const QUEUE_PAGE_SIZE = 8;
+
+    let queueRows = [];
+    let queueCurrentPage = 1;
+
     function byId(id) {
         return document.getElementById(id);
     }
@@ -77,6 +82,64 @@
         }
     }
 
+    function getPageCount(total) {
+        if (total <= 0) {
+            return 1;
+        }
+        return Math.ceil(total / QUEUE_PAGE_SIZE);
+    }
+
+    function pageItemMarkup(label, targetPage, disabled, active, ariaLabel) {
+        const itemClass = "page-item" + (disabled ? " disabled" : "") + (active ? " active" : "");
+        return (
+            '<li class="' + itemClass + '">' +
+            '<button class="page-link" type="button" data-page="' + targetPage + '" aria-label="' + escapeHtml(ariaLabel || label) + '">' + escapeHtml(label) + "</button>" +
+            "</li>"
+        );
+    }
+
+    function renderQueuePaginationInfo(totalRows) {
+        const info = byId("secretaryDashboardQueuePaginationInfo");
+        if (!info) {
+            return;
+        }
+        if (totalRows <= 0) {
+            info.textContent = "Showing 0 of 0 records";
+            return;
+        }
+        const start = (queueCurrentPage - 1) * QUEUE_PAGE_SIZE + 1;
+        const end = Math.min(queueCurrentPage * QUEUE_PAGE_SIZE, totalRows);
+        info.textContent = "Showing " + start + "-" + end + " of " + totalRows + " records";
+    }
+
+    function renderQueuePagination(totalRows) {
+        const pagination = byId("secretaryDashboardQueuePagination");
+        if (!pagination) {
+            return;
+        }
+        if (totalRows <= 0) {
+            pagination.innerHTML = "";
+            return;
+        }
+
+        const pageCount = getPageCount(totalRows);
+        const items = [];
+        items.push(pageItemMarkup("Previous", queueCurrentPage - 1, queueCurrentPage <= 1, false, "Previous page"));
+
+        let startPage = Math.max(1, queueCurrentPage - 2);
+        let endPage = Math.min(pageCount, startPage + 4);
+        if (endPage - startPage < 4) {
+            startPage = Math.max(1, endPage - 4);
+        }
+
+        for (let page = startPage; page <= endPage; page += 1) {
+            items.push(pageItemMarkup(String(page), page, false, page === queueCurrentPage, "Page " + page));
+        }
+
+        items.push(pageItemMarkup("Next", queueCurrentPage + 1, queueCurrentPage >= pageCount, false, "Next page"));
+        pagination.innerHTML = items.join("");
+    }
+
     function isExamStage(status) {
         const normalized = normalizeStatus(status);
         return ["pending_exam", "exam_scheduled", "exam_completed", "failed_exam", "passed_exam", "special_endorsement_review"].includes(normalized);
@@ -94,32 +157,6 @@
         setMetric("secretaryDashboardForAdmin", rows.filter(function (row) { return normalizeStatus(row.status) === "for_approval"; }).length);
     }
 
-    function queueAction(row) {
-        const normalized = normalizeStatus(row.status);
-        if (normalized === "for_approval") {
-            return {
-                label: "View",
-                href: "../ADMIN/admin-approval-queue.html"
-            };
-        }
-        if (isInterviewStage(normalized) || normalized === "passed_exam") {
-            return {
-                label: "Verify",
-                href: "secretary-interview-verification.html?id=" + encodeURIComponent(row.id)
-            };
-        }
-        if (isExamStage(normalized) || normalized === "submitted") {
-            return {
-                label: "Exam",
-                href: "secretary-exam-batches.html"
-            };
-        }
-        return {
-            label: "Open",
-            href: "secretary-applications.html"
-        };
-    }
-
     function renderQueue(rows) {
         const tbody = byId("secretaryDashboardQueueBody");
         if (!tbody) {
@@ -127,23 +164,65 @@
         }
 
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No queue records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">No queue records found.</td></tr>';
             return;
         }
 
-        tbody.innerHTML = rows.slice(0, 8).map(function (row) {
+        tbody.innerHTML = rows.map(function (row) {
             const meta = statusMeta(row.status);
-            const action = queueAction(row);
             return (
                 "<tr>" +
                 "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
                 "<td>" + escapeHtml(row.applicant_name || "Unknown") + "</td>" +
                 '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
                 "<td>" + escapeHtml(formatDate(row.updated_at || row.created_at)) + "</td>" +
-                '<td><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
                 "</tr>"
             );
         }).join("");
+    }
+
+    function applyQueuePagination(resetPage) {
+        if (resetPage) {
+            queueCurrentPage = 1;
+        }
+
+        const pageCount = getPageCount(queueRows.length);
+        if (queueCurrentPage > pageCount) {
+            queueCurrentPage = pageCount;
+        }
+        if (queueCurrentPage < 1) {
+            queueCurrentPage = 1;
+        }
+
+        const start = (queueCurrentPage - 1) * QUEUE_PAGE_SIZE;
+        const pageRows = queueRows.slice(start, start + QUEUE_PAGE_SIZE);
+
+        renderQueue(pageRows);
+        renderQueuePaginationInfo(queueRows.length);
+        renderQueuePagination(queueRows.length);
+    }
+
+    function bindEvents() {
+        const pagination = byId("secretaryDashboardQueuePagination");
+        if (!pagination) {
+            return;
+        }
+
+        pagination.addEventListener("click", function (event) {
+            const button = event.target.closest("button[data-page]");
+            if (!button || button.closest(".disabled")) {
+                return;
+            }
+
+            const nextPage = Number(button.getAttribute("data-page"));
+            const pageCount = getPageCount(queueRows.length);
+            if (Number.isNaN(nextPage) || nextPage < 1 || nextPage > pageCount) {
+                return;
+            }
+
+            queueCurrentPage = nextPage;
+            applyQueuePagination(false);
+        });
     }
 
     async function loadDashboard(context) {
@@ -185,8 +264,9 @@
             });
         });
 
-        renderMetrics(enriched);
-        renderQueue(enriched);
+        queueRows = enriched;
+        renderMetrics(queueRows);
+        applyQueuePagination(true);
     }
 
     async function init() {
@@ -195,6 +275,7 @@
             return;
         }
 
+        bindEvents();
         await loadDashboard(context);
     }
 

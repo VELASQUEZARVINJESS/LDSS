@@ -1,20 +1,25 @@
 (function () {
     "use strict";
 
-    const EDITABLE_STATUSES = ["draft", "returned_for_correction"];
+    const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
+    const CONTINUABLE_DRAFT_STATUSES = ["draft", "returned_for_correction"];
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
     const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
     const MAX_AWARDS = 5;
+    // Balanced online default: small enough for fast queue loading,
+    // still clear enough for profile display and print preview.
+    const APPLICANT_PHOTO_MAX_DIMENSION = 640;
+    const APPLICANT_PHOTO_WEBP_QUALITY = 0.8;
 
     const DOC_FIELDS = [
         {
             inputId: "reqApplicantPhoto",
             docType: "applicant_photo",
             label: "Applicant 1x1 Photo",
-            allowedExtensions: [".jpg", ".jpeg", ".png"],
-            allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png"],
-            fileTypeHint: "JPG or PNG only",
+            allowedExtensions: [".jpg", ".jpeg", ".png", ".webp"],
+            allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png", "image/webp"],
+            fileTypeHint: "JPG, PNG, or WEBP",
             requiredOnSubmit: true,
             syncToProfilePhoto: true
         }
@@ -34,6 +39,9 @@
     let pendingSubmitContext = null;
     let submittedTrackingUrl = "";
     let applicationsSupportsSectorClassification = true;
+    let profilesSupportsPlaceOfBirth = true;
+    let initialPrivacyModalQueued = false;
+    let formActionsBound = false;
 
     function byId(id) {
         return document.getElementById(id);
@@ -90,6 +98,84 @@
         return raw;
     }
 
+    function replaceFileExtension(name, extension) {
+        const baseName = (name || "applicant-photo")
+            .toString()
+            .replace(/\.[^./\\]+$/, "")
+            .trim() || "applicant-photo";
+        return baseName + extension;
+    }
+
+    function loadImageFromObjectUrl(objectUrl) {
+        return new Promise(function (resolve, reject) {
+            const image = new Image();
+            image.onload = function () {
+                resolve(image);
+            };
+            image.onerror = function () {
+                reject(new Error("Failed to load selected image."));
+            };
+            image.src = objectUrl;
+        });
+    }
+
+    async function optimizeApplicantPhotoForUpload(file) {
+        if (!file || !/^image\//i.test((file.type || "").toString())) {
+            return file;
+        }
+
+        let objectUrl = "";
+        try {
+            objectUrl = URL.createObjectURL(file);
+            const image = await loadImageFromObjectUrl(objectUrl);
+            const naturalWidth = image.naturalWidth || image.width || 0;
+            const naturalHeight = image.naturalHeight || image.height || 0;
+
+            if (!naturalWidth || !naturalHeight) {
+                return file;
+            }
+
+            const scale = Math.min(1, APPLICANT_PHOTO_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+            const targetWidth = Math.max(1, Math.round(naturalWidth * scale));
+            const targetHeight = Math.max(1, Math.round(naturalHeight * scale));
+            const canvas = document.createElement("canvas");
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            const context2d = canvas.getContext("2d", { alpha: false });
+            if (!context2d) {
+                return file;
+            }
+
+            context2d.fillStyle = "#ffffff";
+            context2d.fillRect(0, 0, targetWidth, targetHeight);
+            context2d.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+            const webpBlob = await new Promise(function (resolve) {
+                canvas.toBlob(resolve, "image/webp", APPLICANT_PHOTO_WEBP_QUALITY);
+            });
+
+            if (!webpBlob) {
+                return file;
+            }
+
+            return new File(
+                [webpBlob],
+                replaceFileExtension(file.name, ".webp"),
+                {
+                    type: "image/webp",
+                    lastModified: Date.now()
+                }
+            );
+        } catch (error) {
+            return file;
+        } finally {
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        }
+    }
+
     function setStatus(message, type, isHtml) {
         const target = byId("applicationFormStatus");
         if (!target) {
@@ -128,6 +214,18 @@
     function isUploadAccessDeniedMessage(message) {
         const text = (message || "").toString().toLowerCase();
         return text.includes("access token") || text.includes("authentication") || text.includes("cannot upload") || text.includes("not allowed");
+    }
+
+    function explainMutationSingleRowError(message) {
+        const text = (message || "").toString();
+        const normalized = text.toLowerCase();
+        if (!normalized.includes("cannot coerce the result to a single json object")) {
+            return text;
+        }
+        if (currentApplication && currentApplication.status === "submitted" && currentApplication.is_locked === false) {
+            return "Submitted application edits are blocked by an outdated database policy. Run submitted_application_edit_hotfix_2026_03_12.sql in Supabase, then retry.";
+        }
+        return "The database did not return the updated record. If submitted application editing was enabled recently, run submitted_application_edit_hotfix_2026_03_12.sql in Supabase and retry.";
     }
 
     function shouldUppercaseField(input) {
@@ -233,7 +331,32 @@
         return normalized;
     }
 
+    function profileSelectFields() {
+        const base = "first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path";
+        if (profilesSupportsPlaceOfBirth) {
+            return base + ", place_of_birth";
+        }
+        return base;
+    }
+
+    function profileMutationPayload(payload) {
+        const normalized = payload && typeof payload === "object" ? Object.assign({}, payload) : {};
+        if (!profilesSupportsPlaceOfBirth) {
+            delete normalized.place_of_birth;
+        }
+        return normalized;
+    }
+
     function isMissingApplicationsColumnError(error, columnName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedColumn = (columnName || "").toString().toLowerCase();
+        if (!text || !normalizedColumn) {
+            return false;
+        }
+        return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
+    }
+
+    function isMissingProfilesColumnError(error, columnName) {
         const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
         const normalizedColumn = (columnName || "").toString().toLowerCase();
         if (!text || !normalizedColumn) {
@@ -362,6 +485,18 @@
         modal.show();
     }
 
+    function queueInitialPrivacyNoticeModal() {
+        if (initialPrivacyModalQueued || hasPrivacyNoticeAgreement()) {
+            return;
+        }
+        initialPrivacyModalQueued = true;
+        window.setTimeout(function () {
+            if (!hasPrivacyNoticeAgreement()) {
+                openPrivacyModalForReview();
+            }
+        }, 120);
+    }
+
     function acknowledgePrivacyNotice() {
         const checkbox = byId("privacyNoticeAgreement");
         if (checkbox) {
@@ -416,14 +551,21 @@
         return submittedModalInstance;
     }
 
-    function showSubmittedModal(submittedApplication, profileWarning) {
+    function showSubmittedModal(submittedApplication, profileWarning, mode) {
         const submittedId = submittedApplication && submittedApplication.id ? submittedApplication.id : "";
         const submittedNo = submittedApplication && submittedApplication.application_no ? submittedApplication.application_no : submittedId;
         submittedTrackingUrl = submittedId ? "application-detail.html?id=" + encodeURIComponent(submittedId) : "";
 
+        const titleEl = byId("applicationSubmittedModalLabel");
+        if (titleEl) {
+            titleEl.textContent = mode === "updated" ? "Application Updated" : "Application Submitted";
+        }
+
         const messageEl = byId("applicationSubmittedModalMessage");
         if (messageEl) {
-            let message = "Application " + submittedNo + " submitted successfully.";
+            let message = mode === "updated"
+                ? "Application " + submittedNo + " was updated successfully."
+                : "Application " + submittedNo + " submitted successfully.";
             if (profileWarning) {
                 message += " Profile warning: " + profileWarning;
             }
@@ -843,6 +985,7 @@
             sex: nullIfBlank(byId("sex") ? byId("sex").value : ""),
             civil_status: nullIfBlank(byId("civilStatus") ? byId("civilStatus").value : ""),
             date_of_birth: nullIfBlank(byId("dateOfBirth") ? byId("dateOfBirth").value : ""),
+            place_of_birth: upperTextOrNull(byId("placeOfBirth") ? byId("placeOfBirth").value : ""),
             address: upperTextOrNull(byId("permanentAddress") ? byId("permanentAddress").value : ""),
             mobile_number: normalizeMobileForStorage(byId("contactNumber") ? byId("contactNumber").value : ""),
             email: nullIfBlank(byId("emailAddress") ? byId("emailAddress").value.toLowerCase() : ""),
@@ -997,7 +1140,11 @@
             }
 
             const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-            setFileFeedback(doc.inputId, "Selected: " + file.name + " (" + sizeMb + " MB)", false);
+            let message = "Selected: " + file.name + " (" + sizeMb + " MB)";
+            if (doc.docType === "applicant_photo") {
+                message += " - will be optimized to WEBP on upload.";
+            }
+            setFileFeedback(doc.inputId, message, false);
         });
 
         return errors;
@@ -1213,6 +1360,9 @@
         if (byId("dateOfBirth")) {
             byId("dateOfBirth").value = profile.date_of_birth || "";
         }
+        if (byId("placeOfBirth")) {
+            byId("placeOfBirth").value = profile.place_of_birth || "";
+        }
         if (byId("permanentAddress")) {
             byId("permanentAddress").value = profile.address || "";
         }
@@ -1268,6 +1418,37 @@
             return false;
         }
         return EDITABLE_STATUSES.includes(application.status);
+    }
+
+    function actionLabels(application) {
+        if (application && !application.is_locked && application.status === "submitted") {
+            return {
+                save: "Save Changes",
+                submit: "Update Submitted Application"
+            };
+        }
+        if (application && !application.is_locked && application.status === "returned_for_correction") {
+            return {
+                save: "Save Changes",
+                submit: "Resubmit Application"
+            };
+        }
+        return {
+            save: "Save Draft",
+            submit: "Submit Application"
+        };
+    }
+
+    function applyActionLabels() {
+        const saveBtn = byId("saveDraftBtn");
+        const submitBtn = byId("submitApplicationBtn");
+        const labels = actionLabels(currentApplication);
+        if (saveBtn) {
+            saveBtn.textContent = labels.save;
+        }
+        if (submitBtn) {
+            submitBtn.textContent = labels.submit;
+        }
     }
 
     function setFormEditableState(editable) {
@@ -1345,8 +1526,7 @@
         if (!isLoading) {
             saveBtn.disabled = false;
             submitBtn.disabled = false;
-            saveBtn.textContent = "Save Draft";
-            submitBtn.textContent = "Submit Application";
+            applyActionLabels();
             if (!isEditable(currentApplication)) {
                 setFormEditableState(false);
             }
@@ -1356,18 +1536,29 @@
         saveBtn.disabled = true;
         submitBtn.disabled = true;
         if (mode === "submit") {
-            submitBtn.textContent = "Submitting...";
+            submitBtn.textContent = currentApplication && currentApplication.status === "submitted"
+                ? "Updating..."
+                : "Submitting...";
         } else {
             saveBtn.textContent = "Saving...";
         }
     }
 
     async function loadProfile(context) {
-        const result = await context.client
+        let result = await context.client
             .from("profiles")
-            .select("first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
+            .select(profileSelectFields())
             .eq("id", context.user.id)
             .single();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await context.client
+                .from("profiles")
+                .select(profileSelectFields())
+                .eq("id", context.user.id)
+                .single();
+        }
 
         if (result.error || !result.data) {
             return readProfileCache(context.user.id);
@@ -1405,7 +1596,7 @@
             .from("applications")
             .select("id, application_no, status")
             .eq("applicant_id", context.user.id)
-            .in("status", EDITABLE_STATUSES)
+            .in("status", CONTINUABLE_DRAFT_STATUSES)
             .order("updated_at", { ascending: false })
             .limit(1);
 
@@ -1520,12 +1711,22 @@
 
     async function saveProfile(context) {
         const patch = collectProfilePayload();
-        const result = await context.client
+        let result = await context.client
             .from("profiles")
-            .update(patch)
+            .update(profileMutationPayload(patch))
             .eq("id", context.user.id)
-            .select("first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
+            .select(profileSelectFields())
             .single();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await context.client
+                .from("profiles")
+                .update(profileMutationPayload(patch))
+                .eq("id", context.user.id)
+                .select(profileSelectFields())
+                .single();
+        }
 
         if (result.error) {
             return result.error.message;
@@ -1541,12 +1742,22 @@
             return "";
         }
 
-        const result = await context.client
+        let result = await context.client
             .from("profiles")
             .update({ applicant_photo_path: storagePath })
             .eq("id", context.user.id)
-            .select("first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
+            .select(profileSelectFields())
             .single();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await context.client
+                .from("profiles")
+                .update({ applicant_photo_path: storagePath })
+                .eq("id", context.user.id)
+                .select(profileSelectFields())
+                .single();
+        }
 
         if (result.error) {
             return result.error.message || "Failed to sync applicant photo path.";
@@ -1661,6 +1872,8 @@
             throw new Error("This application is no longer editable.");
         }
 
+        const submittedAt = currentApplication.submitted_at || new Date().toISOString();
+
         await ensureSingleAttemptPerSchoolYear(
             context,
             currentApplication.school_year,
@@ -1671,7 +1884,7 @@
             .from("applications")
             .update({
                 status: "submitted",
-                submitted_at: new Date().toISOString()
+                submitted_at: submittedAt
             })
             .eq("id", currentApplication.id)
             .eq("applicant_id", context.user.id)
@@ -1684,7 +1897,7 @@
                 .from("applications")
                 .update({
                     status: "submitted",
-                    submitted_at: new Date().toISOString()
+                    submitted_at: submittedAt
                 })
                 .eq("id", currentApplication.id)
                 .eq("applicant_id", context.user.id)
@@ -1771,8 +1984,13 @@
             if (!file) {
                 continue;
             }
+            let uploadFile = file;
+            if (doc.docType === "applicant_photo") {
+                uploadFile = await optimizeApplicantPhotoForUpload(file);
+            }
+
             const maxBytes = doc.maxSizeBytes || MAX_FILE_SIZE_BYTES;
-            if (file.size > maxBytes) {
+            if (uploadFile.size > maxBytes) {
                 errors.push(doc.label + ": file exceeds 10MB limit.");
                 continue;
             }
@@ -1782,7 +2000,7 @@
                 if (!window.ldssUploads || typeof window.ldssUploads.uploadFile !== "function") {
                     throw new Error("Upload client is not available.");
                 }
-                const uploadResult = await window.ldssUploads.uploadFile(context, file, {
+                const uploadResult = await window.ldssUploads.uploadFile(context, uploadFile, {
                     applicationId: applicationId,
                     documentType: doc.docType
                 });
@@ -1804,7 +2022,7 @@
                 continue;
             }
 
-            const rowErrorMessage = await upsertDocumentRow(context, applicationId, doc.docType, path, file);
+            const rowErrorMessage = await upsertDocumentRow(context, applicationId, doc.docType, path, uploadFile);
             if (rowErrorMessage) {
                 errors.push(doc.label + ": " + rowErrorMessage);
                 continue;
@@ -1856,10 +2074,11 @@
         if (isSaving || isSubmitting) {
             return;
         }
+        const isSubmittedEdit = !!(currentApplication && currentApplication.status === "submitted");
         try {
-            requireAgreementOrThrow("saving draft");
+            requireAgreementOrThrow(isSubmittedEdit ? "saving changes" : "saving draft");
         } catch (error) {
-            setStatus(error.message || "Please agree before saving draft.", "alert-warning");
+            setStatus(error.message || (isSubmittedEdit ? "Please agree before saving changes." : "Please agree before saving draft."), "alert-warning");
             return;
         }
 
@@ -1875,10 +2094,12 @@
                 throw new Error(validationErrors.join(" | "));
             }
 
+            const wasSubmitted = !!(currentApplication && currentApplication.status === "submitted");
             const application = await saveOrCreateDraft(context);
             writeAuxMeta(context.user.id, application.id);
             const profileErrorMessage = await saveProfile(context);
             const uploadResult = await uploadSelectedDocuments(context, application.id);
+            const successPrefix = wasSubmitted ? "Application changes saved" : "Draft saved";
 
             if (uploadResult.errors.length > 0 || profileErrorMessage) {
                 const details = [];
@@ -1893,20 +2114,21 @@
                         details.push("Check the Node upload server auth/config and try again.");
                     }
                 }
-                setStatus("Draft saved (" + (application.application_no || application.id) + "). " + details.join(" "), "alert-warning");
+                setStatus(successPrefix + " (" + (application.application_no || application.id) + "). " + details.join(" "), "alert-warning");
                 return;
             }
 
             if (uploadResult.uploaded.length > 0) {
                 setStatus(
-                    "Draft saved (" + (application.application_no || application.id) + "). Uploaded: " + uploadResult.uploaded.join(", ") + ".",
+                    successPrefix + " (" + (application.application_no || application.id) + "). Uploaded: " + uploadResult.uploaded.join(", ") + ".",
                     "alert-success"
                 );
             } else {
-                setStatus("Draft saved (" + (application.application_no || application.id) + ").", "alert-success");
+                setStatus(successPrefix + " (" + (application.application_no || application.id) + ").", "alert-success");
             }
         } catch (error) {
-            setStatus("Failed to save draft: " + (error.message || "Unknown error"), "alert-danger");
+            const message = explainMutationSingleRowError(error && error.message ? error.message : "Unknown error");
+            setStatus((isSubmittedEdit ? "Failed to save changes: " : "Failed to save draft: ") + message, "alert-danger");
         } finally {
             isSaving = false;
             setActionLoading("draft", false);
@@ -1924,6 +2146,7 @@
         setActionLoading("submit", true);
 
         try {
+            const wasPreviouslySubmitted = !!(currentApplication && currentApplication.status === "submitted");
             const application = await saveOrCreateDraft(context);
             writeAuxMeta(context.user.id, application.id);
             const profileErrorMessage = await saveProfile(context);
@@ -1952,18 +2175,24 @@
             }
 
             const submitted = await submitApplication(context);
-            setFormEditableState(false);
+            setFormEditableState(isEditable(submitted));
             if (profileErrorMessage) {
                 setStatus(
-                    "Application submitted (" + (submitted.application_no || submitted.id) + "). Profile warning: " + profileErrorMessage,
+                    (wasPreviouslySubmitted ? "Submitted application updated" : "Application submitted") +
+                        " (" + (submitted.application_no || submitted.id) + "). Profile warning: " + profileErrorMessage,
                     "alert-warning"
                 );
             } else {
-                setStatus("Application submitted (" + (submitted.application_no || submitted.id) + ").", "alert-success");
+                setStatus(
+                    (wasPreviouslySubmitted ? "Submitted application updated" : "Application submitted") +
+                        " (" + (submitted.application_no || submitted.id) + ").",
+                    "alert-success"
+                );
             }
-            showSubmittedModal(submitted, profileErrorMessage);
+            showSubmittedModal(submitted, profileErrorMessage, wasPreviouslySubmitted ? "updated" : "submitted");
         } catch (error) {
-            setStatus("Submission failed: " + (error.message || "Unknown error"), "alert-danger");
+            const message = explainMutationSingleRowError(error && error.message ? error.message : "Unknown error");
+            setStatus("Submission failed: " + message, "alert-danger");
         } finally {
             isSubmitting = false;
             setActionLoading("submit", false);
@@ -1995,9 +2224,17 @@
         }
 
         const confirmed = window.confirm(
-            "Only one application submission is allowed per school year.\n\n" +
-                "After you submit this application, please wait for the examination schedule or further notice from the scholarship office.\n\n" +
-                "Do you want to continue?"
+            currentApplication && currentApplication.status === "submitted"
+                ? (
+                    "This application is already submitted.\n\n" +
+                    "Your changes will update the same submitted record for secretary review.\n\n" +
+                    "Do you want to continue?"
+                )
+                : (
+                    "Only one application submission is allowed per school year.\n\n" +
+                    "After you submit this application, please wait for the examination schedule or further notice from the scholarship office.\n\n" +
+                    "Do you want to continue?"
+                )
         );
         if (!confirmed) {
             pendingSubmitContext = null;
@@ -2175,67 +2412,9 @@
         }
     }
 
-    async function init() {
-        const context = await window.ldssAuthReadyPromise;
-        if (!context || !context.client || !context.user) {
+    function bindFormActions(context) {
+        if (formActionsBound || !context || !context.client || !context.user) {
             return;
-        }
-
-        submittedTrackingUrl = "";
-        pendingSubmitContext = null;
-        setAgreementValidity(false);
-        setPrivacyNoticeValidity(false);
-        const openTrackingBtn = byId("applicationSubmittedModalOpenBtn");
-        if (openTrackingBtn) {
-            openTrackingBtn.disabled = true;
-        }
-
-        renderAwardRows([]);
-
-        const profile = await loadProfile(context);
-        applyProfileToForm(profile);
-        if (profile && profile.applicant_photo_path) {
-            await loadStoredApplicantPhotoPreview(context, profile.applicant_photo_path);
-        }
-
-        const query = parseQuery();
-        if (query.applicationId) {
-            const existing = await loadApplication(context, query.applicationId);
-            if (!existing) {
-                setStatus("Requested draft was not found. You can create a new application below.", "alert-warning");
-            } else {
-                currentApplication = existing;
-                applyApplicationToForm(existing);
-                applyAuxMeta(context.user.id, existing.id);
-
-                if (!isEditable(existing)) {
-                    setFormEditableState(false);
-                    const detailLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
-                    setStatus(
-                        "This application is already submitted or locked. Use tracking page instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
-                        "alert-warning",
-                        true
-                    );
-                    return;
-                }
-            }
-        } else {
-            const latestDraft = await findLatestEditableDraft(context);
-            if (latestDraft) {
-                const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
-                setStatus(
-                    "You have an existing draft (" + latestDraft.application_no + "). <a href=\"" + continueLink + "\">Continue Draft</a> or start a new one below.",
-                    "alert-info",
-                    true
-                );
-            } else {
-                const intakePolicy = await loadIntakePolicy(context);
-                if (!intakePolicy.isOpen) {
-                    setFormEditableState(false);
-                    setStatus(describeIntakeClosedReason(intakePolicy), "alert-warning");
-                }
-            }
-            applyAuxMeta(context.user.id, "new");
         }
 
         const saveBtn = byId("saveDraftBtn");
@@ -2253,11 +2432,90 @@
         }
 
         bindInlineValidation();
+        formActionsBound = true;
+    }
 
-        if (!hasPrivacyNoticeAgreement()) {
-            window.setTimeout(function () {
-                openPrivacyModalForReview();
-            }, 120);
+    async function init() {
+        queueInitialPrivacyNoticeModal();
+
+        const context = await window.ldssAuthReadyPromise;
+        if (!context || !context.client || !context.user) {
+            return;
+        }
+
+        submittedTrackingUrl = "";
+        pendingSubmitContext = null;
+        setAgreementValidity(false);
+        setPrivacyNoticeValidity(false);
+        const openTrackingBtn = byId("applicationSubmittedModalOpenBtn");
+        if (openTrackingBtn) {
+            openTrackingBtn.disabled = true;
+        }
+
+        renderAwardRows([]);
+        bindFormActions(context);
+        applyActionLabels();
+
+        try {
+            const profile = await loadProfile(context);
+            applyProfileToForm(profile);
+            if (profile && profile.applicant_photo_path) {
+                await loadStoredApplicantPhotoPreview(context, profile.applicant_photo_path);
+            }
+
+            const query = parseQuery();
+            if (query.applicationId) {
+                const existing = await loadApplication(context, query.applicationId);
+                if (!existing) {
+                    setStatus("Requested application was not found. You can create a new application below.", "alert-warning");
+                } else {
+                    currentApplication = existing;
+                    applyApplicationToForm(existing);
+                    applyAuxMeta(context.user.id, existing.id);
+                    applyActionLabels();
+
+                    if (!isEditable(existing)) {
+                        setFormEditableState(false);
+                        const detailLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
+                        setStatus(
+                            "This application is no longer editable. Use tracking page instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
+                            "alert-warning",
+                            true
+                        );
+                        return;
+                    }
+
+                    if (existing.status === "submitted") {
+                        setStatus(
+                            "This submitted application is still editable until the scholarship office locks it. Save your corrections, then update the same record.",
+                            "alert-info"
+                        );
+                    }
+                }
+            } else {
+                const latestDraft = await findLatestEditableDraft(context);
+                if (latestDraft) {
+                    const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
+                    setStatus(
+                        "You have an existing draft (" + latestDraft.application_no + "). <a href=\"" + continueLink + "\">Continue Draft</a> or start a new one below.",
+                        "alert-info",
+                        true
+                    );
+                } else {
+                    const intakePolicy = await loadIntakePolicy(context);
+                    if (!intakePolicy.isOpen) {
+                        setFormEditableState(false);
+                        setStatus(describeIntakeClosedReason(intakePolicy), "alert-warning");
+                    }
+                }
+                applyAuxMeta(context.user.id, "new");
+            }
+        } catch (error) {
+            setStatus(
+                "Some application data could not be loaded. You can still complete the form manually. Details: " +
+                    (error && error.message ? error.message : "Unknown load error"),
+                "alert-warning"
+            );
         }
     }
 

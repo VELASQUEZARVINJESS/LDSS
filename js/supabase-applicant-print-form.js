@@ -3,6 +3,7 @@
 
     const PHOTO_DOC_TYPE = "applicant_photo";
     let autoPrintTriggered = false;
+    let profilesSupportsPlaceOfBirth = true;
 
     function byId(id) {
         return document.getElementById(id);
@@ -90,7 +91,23 @@
     function buildAddress(profile) {
         const address = profile && profile.address ? profile.address : "";
         const barangay = profile && profile.barangay ? profile.barangay : "";
-        return [address, barangay].filter(Boolean).join(", ") || "-";
+        if (!address && !barangay) {
+            return "-";
+        }
+        if (!address) {
+            return barangay || "-";
+        }
+        if (!barangay) {
+            return address;
+        }
+
+        const addressLower = address.toLowerCase();
+        const barangayLower = barangay.toLowerCase();
+        if (addressLower.includes(barangayLower)) {
+            return address;
+        }
+
+        return [address, barangay].filter(Boolean).join(", ");
     }
 
     function statusLabel(status) {
@@ -164,6 +181,23 @@
             applicationNo: params.get("application_no"),
             download: params.get("download") === "1"
         };
+    }
+
+    function profileSelectFields() {
+        const base = "id, first_name, middle_name, last_name, sex, civil_status, date_of_birth, barangay, address, email, mobile_number, school_name, course_or_strand, year_level, student_number, guardian_name, guardian_occupation, monthly_income, applicant_photo_path";
+        if (profilesSupportsPlaceOfBirth) {
+            return base + ", place_of_birth";
+        }
+        return base;
+    }
+
+    function isMissingProfilesColumnError(error, columnName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedColumn = (columnName || "").toString().toLowerCase();
+        if (!text || !normalizedColumn) {
+            return false;
+        }
+        return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
     }
 
     function setPhoto(url) {
@@ -255,11 +289,20 @@
     }
 
     async function fetchProfile(context) {
-        const result = await context.client
+        let result = await context.client
             .from("profiles")
-            .select("id, first_name, middle_name, last_name, sex, civil_status, date_of_birth, barangay, address, email, mobile_number, school_name, course_or_strand, year_level, student_number, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
+            .select(profileSelectFields())
             .eq("id", context.user.id)
             .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await context.client
+                .from("profiles")
+                .select(profileSelectFields())
+                .eq("id", context.user.id)
+                .maybeSingle();
+        }
 
         if (result.error) {
             return null;
@@ -310,6 +353,7 @@
         setText("appSheetDateOfBirth", profile ? formatDate(profile.date_of_birth) : "-");
         setText("appSheetSex", profile ? profile.sex : "-");
         setText("appSheetCivilStatus", profile ? profile.civil_status : "-");
+        setText("appSheetPlaceOfBirth", (profile && profile.place_of_birth) || safeMeta.placeOfBirth || "");
         setText("appSheetReligion", safeMeta.religion || "");
         setText("appSheetSectorClassification", (application && application.sector_classification) || safeMeta.additionalData || "");
         setText("appSheetAddress", profile ? buildAddress(profile) : "-");

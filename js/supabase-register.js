@@ -3,6 +3,7 @@
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
     const MIN_PASSWORD_LENGTH = 12;
+    let resendController = null;
 
     function setStatus(message, type) {
         const el = document.getElementById("registerStatus");
@@ -140,7 +141,7 @@
 
         setSubmitLoading(true);
         try {
-            const emailRedirectTo = "https://iskolarngdaet.app/login.html";
+            const emailRedirectTo = window.LDSSAuthEmailHelper.resolveEmailConfirmRedirectUrl();
             const { data, error } = await client.auth.signUp({
                 email: email,
                 password: password,
@@ -155,7 +156,8 @@
             });
 
             if (error) {
-                setStatus(error.message || "Registration failed. Please try again.", "alert-danger");
+                resendController.hide();
+                setStatus(window.LDSSAuthEmailHelper.getErrorMessage(error, "Registration failed. Please try again."), "alert-danger");
                 return;
             }
 
@@ -174,12 +176,11 @@
                 await client.auth.signOut();
             }
 
-            setStatus("Registration successful. Check your email for confirmation, then sign in.", "alert-success");
-            setTimeout(function () {
-                window.location.href = "login.html";
-            }, 1400);
+            resendController.show(email);
+            setStatus("Registration successful. Check your email for confirmation. If you do not receive it, use the resend button below.", "alert-success");
         } catch (err) {
-            setStatus("Unexpected registration error. Please try again.", "alert-danger");
+            resendController.hide();
+            setStatus(window.LDSSAuthEmailHelper.getErrorMessage(err, "Unexpected registration error. Please try again."), "alert-danger");
         } finally {
             setSubmitLoading(false);
         }
@@ -203,12 +204,48 @@
             setStatus("Supabase library failed to load. Check internet/CDN access.", "alert-danger");
             return;
         }
+        if (!window.LDSSAuthEmailHelper || !window.LDSSAuthEmailHelper.createResendController) {
+            setStatus("Auth email helper failed to load. Check js/supabase-auth-email-helper.js.", "alert-danger");
+            return;
+        }
         if (!url || !anonKey || hasPlaceholder) {
             setStatus("Supabase config is not set. Update js/supabase-config.js first.", "alert-warning");
             return;
         }
 
         const client = window.supabase.createClient(url, anonKey);
+        resendController = window.LDSSAuthEmailHelper.createResendController({
+            wrapId: "registerResendWrap",
+            buttonId: "registerResendBtn",
+            storagePrefix: "ldss-register-resend",
+            idleLabel: "Resend Confirmation Email",
+            loadingLabel: "Sending Confirmation...",
+            setStatus: setStatus
+        });
+        const resendBtn = resendController.button();
+        if (resendBtn) {
+            resendBtn.addEventListener("click", function () {
+                const email = (resendBtn.dataset.email || document.getElementById("email")?.value || "").trim().toLowerCase();
+                resendController.request(client, email, {
+                    fallbackErrorMessage: "Failed to resend confirmation email.",
+                    onMissingEmail: function () {
+                        setStatus("Enter your email address first.", "alert-warning");
+                    },
+                    onCooldown: function (waitSeconds) {
+                        setStatus(
+                            "A confirmation email was already requested. Check your inbox or wait " + waitSeconds + " seconds before requesting again.",
+                            "alert-warning"
+                        );
+                    },
+                    onError: function (message) {
+                        setStatus(message, "alert-warning");
+                    },
+                    onSuccess: function () {
+                        setStatus("A new confirmation email has been sent. Check your inbox or spam folder, then sign in after confirmation.", "alert-success");
+                    }
+                });
+            });
+        }
         form.addEventListener("submit", function (event) {
             onRegisterSubmit(client, event);
         });

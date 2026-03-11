@@ -1015,6 +1015,142 @@ body {
     text-align: center;
 }
 
+.ldss-queue-applicant {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+}
+
+.ldss-queue-applicant-photo {
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 2.75rem;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 1px solid #d1d5db;
+    background: #f8f9fb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ldss-queue-applicant-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+}
+
+.ldss-queue-applicant-photo-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #4b5563;
+    text-transform: uppercase;
+}
+
+.ldss-queue-applicant-body {
+    min-width: 0;
+}
+
+.ldss-queue-applicant-name {
+    display: block;
+    font-weight: 600;
+    color: #1f2937;
+    line-height: 1.25;
+    word-break: break-word;
+}
+
+.ldss-queue-applicant-contact {
+    display: block;
+    margin-top: 0.15rem;
+    color: #6b7280;
+    word-break: break-word;
+}
+
+.ldss-queue-degree {
+    font-weight: 600;
+    color: #1f2937;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+.ldss-queue-toolbar-search {
+    flex: 1 1 16rem;
+    min-width: min(100%, 14rem);
+    max-width: 22rem;
+}
+
+.ldss-queue-toolbar {
+    display: flex;
+    flex: 1 1 24rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ldss-sector-counter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+}
+
+.ldss-sector-counter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid #dbe4f0;
+    border-radius: 999px;
+    background: #f8f9fb;
+    color: #4b5563;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.ldss-sector-counter-value {
+    font-weight: 700;
+    color: #1f2937;
+}
+
+@media (max-width: 575.98px) {
+    .ldss-queue-applicant {
+        gap: 0.6rem;
+    }
+
+    .ldss-queue-applicant-photo {
+        width: 2.35rem;
+        height: 2.35rem;
+        flex-basis: 2.35rem;
+    }
+
+    .ldss-queue-toolbar-search {
+        min-width: 100%;
+        max-width: none;
+    }
+
+    .ldss-queue-toolbar {
+        width: 100%;
+        justify-content: stretch;
+    }
+
+    .ldss-queue-toolbar > * {
+        width: 100%;
+    }
+
+    .ldss-queue-toolbar .btn {
+        width: 100%;
+    }
+}
+
 .ldss-print-section {
     margin-top: 0.85rem;
     margin-bottom: 0.25rem;

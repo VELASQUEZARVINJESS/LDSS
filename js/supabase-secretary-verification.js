@@ -26,9 +26,7 @@
         released: { label: "Released", chipClass: "ldss-chip-success" }
     };
 
-    const REQUIRED_DOCUMENTS = [
-        { type: "income_certificate", label: "Tax Exemption Certificate (PDF)" }
-    ];
+    const REQUIRED_DOCUMENTS = [];
 
     const DOCUMENT_STATUS_META = {
         pending: { label: "Pending Review", chipClass: "ldss-chip-accent" },
@@ -1017,36 +1015,38 @@
     }
 
     async function upsertApprovalQueue(formValues) {
-        const payload = {
+        const queuedAt = new Date().toISOString();
+        const approvalRecordPayload = {
             application_id: currentApplication.id,
             priority: formValues.queuePriority,
             recommendation_status: formValues.recommendationDecision,
             recommendation_notes: formValues.remarks || null,
-            queued_at: new Date().toISOString(),
+            queued_at: queuedAt,
+            decision_status: "pending"
+        };
+        const queuePayload = {
+            application_id: currentApplication.id,
+            priority: formValues.queuePriority,
+            secretary_recommendation: formValues.recommendationDecision,
+            recommendation_notes: formValues.remarks || null,
+            queued_at: queuedAt,
             decision_status: "pending"
         };
 
-        // TODO(Supabase): fully migrate secretary endorsements from approval_queue to approval_records.
-        let result = await authContext.client
+        const approvalRecordResult = await authContext.client
             .from("approval_records")
-            .upsert(payload, { onConflict: "application_id" });
+            .upsert(approvalRecordPayload, { onConflict: "application_id" });
 
-        if (result.error) {
-            const fallbackPayload = {
-                application_id: currentApplication.id,
-                priority: formValues.queuePriority,
-                secretary_recommendation: formValues.recommendationDecision,
-                recommendation_notes: formValues.remarks || null,
-                queued_at: new Date().toISOString(),
-                decision_status: "pending"
-            };
-            result = await authContext.client
-                .from("approval_queue")
-                .upsert(fallbackPayload, { onConflict: "application_id" });
+        if (approvalRecordResult.error) {
+            throw new Error("Failed to update approval record: " + approvalRecordResult.error.message);
         }
 
-        if (result.error) {
-            throw new Error("Failed to queue recommendation for admin: " + result.error.message);
+        const queueResult = await authContext.client
+            .from("approval_queue")
+            .upsert(queuePayload, { onConflict: "application_id" });
+
+        if (queueResult.error) {
+            throw new Error("Failed to update secretary queue: " + queueResult.error.message);
         }
     }
 
@@ -1072,7 +1072,7 @@
 
     function allRequiredDocsVerified(docStates) {
         if (!Array.isArray(docStates) || docStates.length === 0) {
-            return false;
+            return true;
         }
         return docStates.every(function (row) {
             return row.exists && row.status === "verified";
@@ -1262,9 +1262,6 @@
         const saveBtn = byId("verificationSaveBtn");
         const returnBtn = byId("verificationReturnBtn");
         const recommendBtn = byId("verificationRecommendBtn");
-        const notesModalEl = byId("verificationDocNotesModal");
-        const notesSaveBtn = byId("verificationDocNotesSaveBtn");
-        const tableBody = byId("verificationDocumentsTableBody");
         const sectorTagsWrap = byId("verificationSectorTags");
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
@@ -1295,31 +1292,6 @@
         if (recommendBtn) {
             recommendBtn.addEventListener("click", function () {
                 runAction("verificationRecommendBtn", "Submitting...", handleRecommendToAdmin);
-            });
-        }
-
-        if (window.bootstrap && notesModalEl) {
-            notesModalInstance = new window.bootstrap.Modal(notesModalEl, {
-                backdrop: true,
-                keyboard: true
-            });
-        }
-
-        if (notesSaveBtn) {
-            notesSaveBtn.addEventListener("click", saveNotesFromModal);
-        }
-
-        if (tableBody) {
-            tableBody.addEventListener("click", function (event) {
-                const trigger = event.target.closest("[data-doc-note-open='1']");
-                if (!trigger) {
-                    return;
-                }
-
-                const docId = trigger.getAttribute("data-doc-id") || "";
-                const label = trigger.getAttribute("data-doc-label") || "Requirement";
-                const hasUploadedFile = Boolean(docId);
-                openNotesModal(docId, label, hasUploadedFile);
             });
         }
 
@@ -1412,10 +1384,6 @@
         currentApplication = await fetchApplication(targetApplicationId || queryApplicationId());
         if (!currentApplication) {
             showStatus("No application records are currently available for secretary verification.", "alert-warning");
-            const tbody = byId("verificationDocumentsTableBody");
-            if (tbody) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No record selected.</td></tr>';
-            }
             setSectorSelection([]);
             renderSectorTags();
             return;
@@ -1453,7 +1421,6 @@
         ]);
 
         renderHeaderAndSummary();
-        renderDocumentTable();
         renderInterviewForm();
 
         clearLocalPreviewObjectUrl();

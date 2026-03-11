@@ -1,7 +1,7 @@
 (function () {
     "use strict";
 
-    const EDITABLE_STATUSES = ["draft", "returned_for_correction"];
+    const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const PAGE_SIZE = 10;
 
@@ -144,8 +144,11 @@
         showStatus(message, "alert-warning");
     }
 
-    function canEditApplication(status) {
-        return EDITABLE_STATUSES.includes((status || "").toString());
+    function canEditApplication(application) {
+        if (!application || application.is_locked) {
+            return false;
+        }
+        return EDITABLE_STATUSES.includes((application.status || "").toString());
     }
 
     function canDownloadApplication(status) {
@@ -158,9 +161,9 @@
         const editHref = "applicant-application-form.html?application_id=" + encodedId;
         const trackHref = "application-detail.html?id=" + encodedId;
         const downloadHref = "applicant-print-form.html?id=" + encodedId + "&download=1";
-        const editAction = canEditApplication(row.status)
+        const editAction = canEditApplication(row)
             ? '<a class="dropdown-item" href="' + editHref + '">Edit</a>'
-            : '<span class="dropdown-item disabled" title="Only draft or returned applications can be edited.">Edit</span>';
+            : '<span class="dropdown-item disabled" title="Only draft, submitted, or returned applications can be edited while unlocked.">Edit</span>';
         const downloadAction = canDownloadApplication(row.status)
             ? '<a class="dropdown-item" href="' + downloadHref + '" target="_blank" rel="noopener">Download</a>'
             : '<span class="dropdown-item disabled" title="Submit the application first to download the printable form.">Download</span>';
@@ -458,7 +461,7 @@
         showStatus("");
         const result = await context.client
             .from("applications")
-            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at")
+            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, is_locked")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false });
 

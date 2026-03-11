@@ -4,6 +4,7 @@
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const REMARKS_SECTOR_META_START = "[[LDSS_SECTOR_TAGS]]";
     const REMARKS_SECTOR_META_END = "[[/LDSS_SECTOR_TAGS]]";
+    const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
 
     const DOC_TYPE_LABELS = {
         income_certificate: "Tax Exemption Certificate (PDF)"
@@ -247,7 +248,7 @@
         if (query.id) {
             result = await client
                 .from("applications")
-                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks")
+                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
                 .eq("id", query.id)
                 .eq("applicant_id", context.user.id)
                 .single();
@@ -259,7 +260,7 @@
         if (query.applicationNo) {
             result = await client
                 .from("applications")
-                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks")
+                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
                 .eq("application_no", query.applicationNo)
                 .eq("applicant_id", context.user.id)
                 .single();
@@ -270,7 +271,7 @@
 
         const fallback = await client
             .from("applications")
-            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks")
+            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false })
             .limit(1);
@@ -279,6 +280,10 @@
             return null;
         }
         return fallback.data[0];
+    }
+
+    function canEditApplication(application) {
+        return !!(application && !application.is_locked && EDITABLE_STATUSES.includes((application.status || "").toString()));
     }
 
     async function fetchExamRecord(context, application) {
@@ -373,6 +378,21 @@
 
     function renderHeader(application) {
         setText("detailApplicationIdDisplay", "Application ID: " + application.application_no);
+
+        const editBtn = byId("detailEditApplicationBtn");
+        if (!editBtn) {
+            return;
+        }
+
+        if (!canEditApplication(application)) {
+            editBtn.classList.add("d-none");
+            editBtn.removeAttribute("href");
+            return;
+        }
+
+        editBtn.href = "applicant-application-form.html?application_id=" + encodeURIComponent(application.id);
+        editBtn.textContent = application.status === "submitted" ? "Edit Submitted Application" : "Edit Application";
+        editBtn.classList.remove("d-none");
     }
 
     function renderStatusCards(application, examRecord, interviewRecord, approvalRecord) {

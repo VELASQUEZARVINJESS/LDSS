@@ -5,15 +5,19 @@ window.LDSS_SUPABASE_ANON_KEY = window.LDSS_SUPABASE_ANON_KEY || "sb_publishable
 window.LDSS_STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
 
 (function () {
-    if (window.LDSS_UPLOAD_API_BASE) {
-        return;
-    }
-
     const protocol = window.location.protocol || "http:";
     const hostname = window.location.hostname || "";
     const port = window.location.port || "";
     const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
     const isLocalFile = protocol === "file:";
+
+    if (typeof window.LDSS_USE_HOSTED_UPLOADS !== "boolean") {
+        window.LDSS_USE_HOSTED_UPLOADS = !isLocalHost && !isLocalFile;
+    }
+
+    if (window.LDSS_UPLOAD_API_BASE) {
+        return;
+    }
 
     if ((isLocalHost || isLocalFile) && port !== "3000") {
         const localHost = hostname === "127.0.0.1" ? "127.0.0.1" : "localhost";

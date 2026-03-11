@@ -3,9 +3,78 @@
 
     const API_BASE = (window.LDSS_UPLOAD_API_BASE || "/api/uploads").replace(/\/+$/, "");
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
+    const USE_HOSTED_UPLOADS = window.LDSS_USE_HOSTED_UPLOADS === true;
+    const OBJECT_URL_TTL_MS = 25 * 60 * 1000;
+    const objectUrlCache = new Map();
 
     function isHostedPath(storedPath) {
         return /^uploads\//i.test((storedPath || "").toString().trim());
+    }
+
+    function sanitizeFileName(name) {
+        return (name || "document")
+            .toString()
+            .replace(/[^a-zA-Z0-9.\-_]/g, "_")
+            .replace(/_+/g, "_")
+            .slice(0, 120);
+    }
+
+    function randomSuffix() {
+        return Date.now().toString() + "-" + Math.random().toString(16).slice(2, 10);
+    }
+
+    function getCachedObjectUrl(path) {
+        const entry = objectUrlCache.get(path);
+        if (!entry) {
+            return null;
+        }
+        if (entry.expiresAt <= Date.now()) {
+            objectUrlCache.delete(path);
+            return null;
+        }
+        if (entry.value) {
+            return entry.value;
+        }
+        if (entry.promise) {
+            return entry.promise;
+        }
+        objectUrlCache.delete(path);
+        return null;
+    }
+
+    function cacheObjectUrlPromise(path, promise) {
+        const expiresAt = Date.now() + OBJECT_URL_TTL_MS;
+        objectUrlCache.set(path, {
+            expiresAt: expiresAt,
+            promise: promise
+        });
+
+        promise.then(function (value) {
+            if (!value) {
+                objectUrlCache.delete(path);
+                return;
+            }
+            objectUrlCache.set(path, {
+                expiresAt: expiresAt,
+                value: value
+            });
+        }).catch(function () {
+            objectUrlCache.delete(path);
+        });
+    }
+
+    function buildSupabaseStoragePath(context, metadata, file) {
+        const role = ((((context || {}).profile || {}).role) || "").toString().trim().toLowerCase();
+        const userId = (((context || {}).user || {}).id || "").toString().trim();
+        const applicationId = ((metadata && metadata.applicationId) || "").toString().trim();
+        const documentType = ((metadata && metadata.documentType) || "other").toString().trim() || "other";
+        const safeName = randomSuffix() + "-" + sanitizeFileName(file && file.name ? file.name : "document");
+
+        if (documentType === "verified_interview_photo" && userId && role && role !== "applicant") {
+            return ["verified_interview_photo", "staff", userId, applicationId || "pending", safeName].join("/");
+        }
+
+        return [documentType, userId || "anonymous", applicationId || "pending", safeName].join("/");
     }
 
     async function getAccessToken(context) {
@@ -66,17 +135,59 @@
         throw new Error(message);
     }
 
+    async function uploadFileToSupabaseStorage(context, file, metadata) {
+        if (!context || !context.client || !context.client.storage) {
+            throw new Error("Supabase storage client is not available.");
+        }
+
+        const storagePath = buildSupabaseStoragePath(context, metadata, file);
+        const result = await context.client.storage
+            .from(STORAGE_BUCKET)
+            .upload(storagePath, file, {
+                upsert: false,
+                cacheControl: "3600",
+                contentType: (file && file.type) || "application/octet-stream"
+            });
+
+        if (result.error) {
+            throw new Error(result.error.message || "Supabase Storage upload failed.");
+        }
+
+        return {
+            path: result.data && result.data.path ? result.data.path : storagePath
+        };
+    }
+
     async function uploadFile(context, file, metadata) {
+        if (!USE_HOSTED_UPLOADS) {
+            return uploadFileToSupabaseStorage(context, file, metadata);
+        }
+
         const formData = new FormData();
         formData.append("file", file);
         formData.append("applicationId", metadata && metadata.applicationId ? metadata.applicationId : "");
         formData.append("documentType", metadata && metadata.documentType ? metadata.documentType : "other");
 
-        const response = await request(context, "", {
-            method: "POST",
-            body: formData
-        });
-        return response.json();
+        try {
+            const response = await request(context, "", {
+                method: "POST",
+                body: formData
+            });
+            return response.json();
+        } catch (error) {
+            const message = error && error.message ? error.message : "";
+            const shouldFallback =
+                message.includes("Upload API route was not found") ||
+                message.includes("Upload API returned an HTML page") ||
+                message.includes("Upload server is not available right now") ||
+                message.includes("Failed to fetch");
+
+            if (!shouldFallback) {
+                throw error;
+            }
+
+            return uploadFileToSupabaseStorage(context, file, metadata);
+        }
     }
 
     async function createObjectUrl(context, storedPath) {
@@ -85,22 +196,32 @@
             return "";
         }
 
-        if (isHostedPath(normalizedPath)) {
-            const response = await request(context, "/blob?path=" + encodeURIComponent(normalizedPath), {
-                method: "GET"
-            });
-            const blob = await response.blob();
-            return URL.createObjectURL(blob);
+        const cached = getCachedObjectUrl(normalizedPath);
+        if (cached) {
+            return cached;
         }
 
-        const result = await context.client.storage
-            .from(STORAGE_BUCKET)
-            .createSignedUrl(normalizedPath, 60 * 30);
+        const createPromise = (async function () {
+            if (isHostedPath(normalizedPath)) {
+                const response = await request(context, "/blob?path=" + encodeURIComponent(normalizedPath), {
+                    method: "GET"
+                });
+                const blob = await response.blob();
+                return URL.createObjectURL(blob);
+            }
 
-        if (result.error || !result.data || !result.data.signedUrl) {
-            return "";
-        }
-        return result.data.signedUrl;
+            const result = await context.client.storage
+                .from(STORAGE_BUCKET)
+                .createSignedUrl(normalizedPath, 60 * 30);
+
+            if (result.error || !result.data || !result.data.signedUrl) {
+                return "";
+            }
+            return result.data.signedUrl;
+        })();
+
+        cacheObjectUrlPromise(normalizedPath, createPromise);
+        return createPromise;
     }
 
     async function deleteFiles(context, storedPaths) {

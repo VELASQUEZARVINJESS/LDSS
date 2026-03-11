@@ -1,6 +1,28 @@
 (function () {
     "use strict";
 
+    const APPLICATION_STATUS_META = {
+        draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
+        submitted: { label: "Submitted", chipClass: "ldss-chip-success" },
+        pending_exam: { label: "Pending Exam", chipClass: "ldss-chip-accent" },
+        exam_scheduled: { label: "Exam Scheduled", chipClass: "ldss-chip-accent" },
+        exam_completed: { label: "Exam Completed", chipClass: "ldss-chip-accent" },
+        passed_exam: { label: "Passed Exam", chipClass: "ldss-chip-success" },
+        failed_exam: { label: "Failed Exam", chipClass: "ldss-chip-danger" },
+        special_endorsement_review: { label: "Special Endorsement Review", chipClass: "ldss-chip-accent" },
+        for_interview: { label: "For Interview", chipClass: "ldss-chip-accent" },
+        interview_scheduled: { label: "Interview Scheduled", chipClass: "ldss-chip-accent" },
+        interview_completed: { label: "Interview Completed", chipClass: "ldss-chip-accent" },
+        hard_copy_verified: { label: "Hard Copy Verified", chipClass: "ldss-chip-success" },
+        for_approval: { label: "For Approval", chipClass: "ldss-chip-accent" },
+        returned_for_correction: { label: "Returned for Correction", chipClass: "ldss-chip-danger" },
+        approved: { label: "Approved", chipClass: "ldss-chip-success" },
+        waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
+        rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
+        for_release: { label: "For Release", chipClass: "ldss-chip-accent" },
+        released: { label: "Released", chipClass: "ldss-chip-success" }
+    };
+
     let userRows = [];
     let authContext = null;
 
@@ -57,6 +79,20 @@
         return map[role] || (role || "-");
     }
 
+    function applicationStatusMeta(status) {
+        const normalized = (status || "").toString().trim();
+        if (!normalized) {
+            return { label: "-", chipClass: "ldss-chip-neutral" };
+        }
+        if (APPLICATION_STATUS_META[normalized]) {
+            return APPLICATION_STATUS_META[normalized];
+        }
+        return {
+            label: normalized.replace(/_/g, " ").replace(/\b\w/g, function (char) { return char.toUpperCase(); }),
+            chipClass: "ldss-chip-neutral"
+        };
+    }
+
     function fullName(row) {
         const parts = [
             row.first_name || "",
@@ -78,15 +114,98 @@
         return '<span class="ldss-chip ldss-chip-success">Active</span>';
     }
 
+    function latestApplicationByApplicant(rows) {
+        const map = {};
+        (rows || []).forEach(function (row) {
+            if (!row || !row.applicant_id) {
+                return;
+            }
+
+            const existing = map[row.applicant_id];
+            if (!existing) {
+                map[row.applicant_id] = row;
+                return;
+            }
+
+            const existingTs = new Date(existing.updated_at || existing.created_at || 0).getTime();
+            const currentTs = new Date(row.updated_at || row.created_at || 0).getTime();
+            if (currentTs > existingTs) {
+                map[row.applicant_id] = row;
+            }
+        });
+        return map;
+    }
+
+    function submissionMeta(row) {
+        if (!row || row.role !== "applicant") {
+            return {
+                state: "staff",
+                label: "Staff Account",
+                chipClass: "ldss-chip-neutral"
+            };
+        }
+
+        const application = row.latest_application || null;
+        if (!application) {
+            return {
+                state: "not_submitted",
+                label: "No Form",
+                chipClass: "ldss-chip-neutral"
+            };
+        }
+
+        if (application.submitted_at || (application.status || "").toString() !== "draft") {
+            return {
+                state: "submitted",
+                label: "Submitted",
+                chipClass: "ldss-chip-success"
+            };
+        }
+
+        return {
+            state: "not_submitted",
+            label: "Draft Only",
+            chipClass: "ldss-chip-accent"
+        };
+    }
+
+    function latestApplicationMarkup(row) {
+        if (!row || row.role !== "applicant") {
+            return '<span class="small text-muted">N/A</span>';
+        }
+
+        const application = row.latest_application || null;
+        if (!application) {
+            return '<span class="small text-muted">No application record</span>';
+        }
+
+        const meta = applicationStatusMeta(application.status);
+        const dateText = application.submitted_at
+            ? "Submitted " + formatDate(application.submitted_at)
+            : "Created " + formatDate(application.created_at);
+
+        return (
+            '<div class="fw-600">' + escapeHtml(application.application_no || "-") + "</div>" +
+            '<div class="small mt-1"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></div>" +
+            '<div class="small text-muted mt-1">' + escapeHtml(dateText) + "</div>"
+        );
+    }
+
     function matchesSearch(row, query) {
         if (!query) {
             return true;
         }
+        const submission = submissionMeta(row);
+        const latestApplication = row && row.latest_application ? row.latest_application : null;
+        const latestStatus = latestApplication ? applicationStatusMeta(latestApplication.status).label : "";
         const haystack = [
             fullName(row),
             row.email || "",
             row.mobile_number || "",
-            roleLabel(row.role)
+            roleLabel(row.role),
+            submission.label,
+            latestApplication && latestApplication.application_no ? latestApplication.application_no : "",
+            latestStatus
         ].join(" ").toLowerCase();
 
         return haystack.includes(query);
@@ -96,6 +215,7 @@
         const search = (byId("userMgmtSearch") ? byId("userMgmtSearch").value : "").trim().toLowerCase();
         const roleFilter = (byId("userMgmtRoleFilter") ? byId("userMgmtRoleFilter").value : "all").trim();
         const statusFilter = (byId("userMgmtStatusFilter") ? byId("userMgmtStatusFilter").value : "all").trim();
+        const submissionFilter = (byId("userMgmtSubmissionFilter") ? byId("userMgmtSubmissionFilter").value : "all").trim();
 
         return userRows.filter(function (row) {
             if (roleFilter !== "all" && row.role !== roleFilter) {
@@ -106,6 +226,15 @@
             }
             if (statusFilter === "suspended" && row.is_active !== false) {
                 return false;
+            }
+            if (submissionFilter !== "all") {
+                const submission = submissionMeta(row);
+                if (submissionFilter === "submitted" && submission.state !== "submitted") {
+                    return false;
+                }
+                if (submissionFilter === "not_submitted" && submission.state !== "not_submitted") {
+                    return false;
+                }
             }
             return matchesSearch(row, search);
         });
@@ -145,24 +274,22 @@
         }
 
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td class="text-center py-4 text-muted" colspan="6">No users found for current filters.</td></tr>';
+            tbody.innerHTML = '<tr><td class="text-center py-4 text-muted" colspan="7">No users found for current filters.</td></tr>';
             return;
         }
 
         tbody.innerHTML = rows.map(function (row) {
-            const contact = [
-                row.email || "",
-                row.mobile_number || ""
-            ].filter(function (value) { return !!value; }).join(" / ");
+            const submission = submissionMeta(row);
 
             return (
                 "<tr>" +
-                "<td>" + escapeHtml(fullName(row)) + "</td>" +
-                "<td>" + escapeHtml(roleLabel(row.role)) + "</td>" +
-                "<td>" + escapeHtml(contact || "-") + "</td>" +
-                "<td>" + statusChip(row) + "</td>" +
-                "<td>" + escapeHtml(formatDate(row.created_at)) + "</td>" +
-                "<td>" + rowActionsMarkup(row) + "</td>" +
+                '<td class="ldss-user-col-name"><span class="ldss-user-name">' + escapeHtml(fullName(row)) + "</span></td>" +
+                '<td class="ldss-user-col-role">' + escapeHtml(roleLabel(row.role)) + "</td>" +
+                '<td class="ldss-user-col-form"><span class="ldss-chip ' + submission.chipClass + '">' + escapeHtml(submission.label) + "</span></td>" +
+                '<td class="ldss-user-col-application">' + latestApplicationMarkup(row) + "</td>" +
+                '<td class="ldss-user-col-status">' + statusChip(row) + "</td>" +
+                '<td class="ldss-user-col-created d-none d-lg-table-cell">' + escapeHtml(formatDate(row.created_at)) + "</td>" +
+                '<td class="ldss-user-col-actions text-nowrap">' + rowActionsMarkup(row) + "</td>" +
                 "</tr>"
             );
         }).join("");
@@ -180,7 +307,32 @@
             return;
         }
 
-        userRows = result.data || [];
+        const profiles = result.data || [];
+        const applicantIds = profiles
+            .filter(function (row) { return row.role === "applicant"; })
+            .map(function (row) { return row.id; })
+            .filter(Boolean);
+
+        let latestByApplicant = {};
+        if (applicantIds.length > 0) {
+            const appResult = await authContext.client
+                .from("applications")
+                .select("id, applicant_id, application_no, status, submitted_at, created_at, updated_at")
+                .in("applicant_id", applicantIds)
+                .order("updated_at", { ascending: false });
+
+            if (appResult.error) {
+                showStatus("Users loaded, but application submission data could not be loaded: " + appResult.error.message, "alert-warning");
+            } else {
+                latestByApplicant = latestApplicationByApplicant(appResult.data || []);
+            }
+        }
+
+        userRows = profiles.map(function (row) {
+            return Object.assign({}, row, {
+                latest_application: latestByApplicant[row.id] || null
+            });
+        });
         renderRows();
     }
 
@@ -277,7 +429,7 @@
         const table = byId("userMgmtTableBody");
         const refreshBtn = byId("userMgmtRefreshBtn");
 
-        ["userMgmtSearch", "userMgmtRoleFilter", "userMgmtStatusFilter"].forEach(function (id) {
+        ["userMgmtSearch", "userMgmtRoleFilter", "userMgmtStatusFilter", "userMgmtSubmissionFilter"].forEach(function (id) {
             const input = byId(id);
             if (!input) {
                 return;

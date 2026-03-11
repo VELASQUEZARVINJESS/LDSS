@@ -10,6 +10,51 @@
         <link href="../css/styles.css" rel="stylesheet" />
         <link href="../css/ldss.css" rel="stylesheet" />
         <link rel="icon" type="image/png" href="../img/icon.png" />
+        <style>
+            .ldss-user-directory-table {
+                table-layout: fixed;
+            }
+
+            .ldss-user-col-name {
+                width: 36%;
+            }
+
+            .ldss-user-col-role {
+                width: 10%;
+            }
+
+            .ldss-user-col-form {
+                width: 11%;
+            }
+
+            .ldss-user-col-application {
+                width: 16%;
+            }
+
+            .ldss-user-col-status {
+                width: 8%;
+            }
+
+            .ldss-user-col-created {
+                width: 10%;
+            }
+
+            .ldss-user-col-actions {
+                width: 9%;
+            }
+
+            .ldss-user-name {
+                display: block;
+                white-space: normal;
+                word-break: break-word;
+            }
+
+            @media (max-width: 991.98px) {
+                .ldss-user-directory-table {
+                    table-layout: auto;
+                }
+            }
+        </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
     </head>
     <body class="nav-fixed">
@@ -113,7 +158,7 @@
                                         <label class="small mb-1" for="userMgmtSearch">Search</label>
                                         <input class="form-control" id="userMgmtSearch" type="text" placeholder="Name, email, or mobile" />
                                     </div>
-                                    <div class="col-6 col-lg-3">
+                                    <div class="col-6 col-lg-2">
                                         <label class="small mb-1" for="userMgmtRoleFilter">Role</label>
                                         <select class="form-select" id="userMgmtRoleFilter">
                                             <option value="all">All roles</option>
@@ -123,7 +168,7 @@
                                             <option value="super_admin">Super Admin</option>
                                         </select>
                                     </div>
-                                    <div class="col-6 col-lg-3">
+                                    <div class="col-6 col-lg-2">
                                         <label class="small mb-1" for="userMgmtStatusFilter">Account Status</label>
                                         <select class="form-select" id="userMgmtStatusFilter">
                                             <option value="all">All</option>
@@ -131,7 +176,15 @@
                                             <option value="suspended">Suspended</option>
                                         </select>
                                     </div>
-                                    <div class="col-12 col-lg-2 d-flex align-items-end">
+                                    <div class="col-6 col-lg-2">
+                                        <label class="small mb-1" for="userMgmtSubmissionFilter">Form Status</label>
+                                        <select class="form-select" id="userMgmtSubmissionFilter">
+                                            <option value="all">All</option>
+                                            <option value="submitted">Submitted</option>
+                                            <option value="not_submitted">Not Submitted</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6 col-lg-2 d-flex align-items-end">
                                         <button class="btn btn-dark w-100" id="userMgmtRefreshBtn" type="button">Refresh</button>
                                     </div>
                                 </div>
@@ -145,20 +198,21 @@
                             </div>
                             <div class="card-body p-0">
                                 <div class="table-responsive">
-                                    <table class="table mb-0">
+                                    <table class="table table-sm align-middle mb-0 ldss-user-directory-table">
                                         <thead class="bg-light">
                                             <tr>
-                                                <th>Name</th>
-                                                <th>Role</th>
-                                                <th>Email / Mobile</th>
-                                                <th>Status</th>
-                                                <th>Created</th>
-                                                <th>Actions</th>
+                                                <th class="ldss-user-col-name">Name</th>
+                                                <th class="ldss-user-col-role">Role</th>
+                                                <th class="ldss-user-col-form">Form Status</th>
+                                                <th class="ldss-user-col-application">Latest Application</th>
+                                                <th class="ldss-user-col-status">Status</th>
+                                                <th class="ldss-user-col-created d-none d-lg-table-cell">Created</th>
+                                                <th class="ldss-user-col-actions">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody id="userMgmtTableBody">
                                             <tr>
-                                                <td class="text-center py-4 text-muted" colspan="6">Loading users...</td>
+                                                <td class="text-center py-4 text-muted" colspan="7">Loading users...</td>
                                             </tr>
                                         </tbody>
                                     </table>

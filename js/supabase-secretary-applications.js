@@ -1,11 +1,27 @@
 (function () {
     "use strict";
 
-    const PAGE_SIZE = 10;
+    const DEFAULT_PAGE_SIZE = 10;
+    const MAX_PAGE_SIZE = 100;
+    const SECTOR_CLASSIFICATION_ORDER = [
+        "Person with Disability (PWD)",
+        "Solo Parent",
+        "Child of Solo Parent",
+        "Child of Farmer",
+        "Child of Fisherfolk",
+        "Orphan",
+        "None of the above"
+    ];
 
     let allRows = [];
     let filteredRows = [];
     let currentPage = 1;
+    let currentPageRows = [];
+    let pageSize = DEFAULT_PAGE_SIZE;
+    let authContext = null;
+    let photoRenderToken = 0;
+    let selectedApplicationIds = new Set();
+    let bulkActionLoading = false;
 
     function byId(id) {
         return document.getElementById(id);
@@ -65,6 +81,12 @@
         });
     }
 
+    function safeDomId(value) {
+        return (value || "")
+            .toString()
+            .replace(/[^a-zA-Z0-9\-_:.]/g, "_");
+    }
+
     function buildApplicantName(profile, fallbackEmail) {
         const first = (profile && profile.first_name ? profile.first_name : "").trim();
         const middle = (profile && profile.middle_name ? profile.middle_name : "").trim();
@@ -79,11 +101,96 @@
         return fallbackEmail || "Unknown Applicant";
     }
 
+    function applicantInitials(name) {
+        const parts = (name || "")
+            .toString()
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+        if (!parts.length) {
+            return "1x1";
+        }
+        return parts.slice(0, 2).map(function (part) {
+            return part.charAt(0).toUpperCase();
+        }).join("");
+    }
+
+    async function createSignedUrl(path) {
+        if (!authContext || !path || !window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
+            return "";
+        }
+        try {
+            return await window.ldssUploads.createObjectUrl(authContext, path);
+        } catch (error) {
+            return "";
+        }
+    }
+
     function getPageCount(total) {
         if (total <= 0) {
             return 1;
         }
-        return Math.ceil(total / PAGE_SIZE);
+        return Math.ceil(total / pageSize);
+    }
+
+    function canMarkForExamination(row) {
+        return normalizeStatus(row && row.status) === "submitted";
+    }
+
+    function pruneSelectedApplicationIds() {
+        const selectableIds = new Set(
+            allRows
+                .filter(function (row) { return canMarkForExamination(row); })
+                .map(function (row) { return row.id; })
+        );
+
+        selectedApplicationIds = new Set(
+            Array.from(selectedApplicationIds).filter(function (id) {
+                return selectableIds.has(id);
+            })
+        );
+    }
+
+    function visibleSelectableRows() {
+        return currentPageRows.filter(function (row) {
+            return canMarkForExamination(row);
+        });
+    }
+
+    function updateSelectionControls() {
+        const selectAll = byId("secretaryApplicationsSelectAll");
+        const markExamBtn = byId("secretaryApplicationsMarkExamBtn");
+        const summary = byId("secretaryApplicationsSelectionSummary");
+        const rowCheckboxes = document.querySelectorAll("input[data-select-application='true']");
+        const visibleRows = visibleSelectableRows();
+        const visibleSelectedCount = visibleRows.filter(function (row) {
+            return selectedApplicationIds.has(row.id);
+        }).length;
+        const totalSelectedCount = selectedApplicationIds.size;
+
+        if (summary) {
+            summary.textContent = totalSelectedCount + " selected";
+        }
+
+        if (selectAll) {
+            const hasVisibleSelectable = visibleRows.length > 0;
+            selectAll.checked = hasVisibleSelectable && visibleSelectedCount === visibleRows.length;
+            selectAll.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < visibleRows.length;
+            selectAll.disabled = bulkActionLoading || !hasVisibleSelectable;
+        }
+
+        if (markExamBtn) {
+            markExamBtn.disabled = bulkActionLoading || totalSelectedCount === 0;
+            markExamBtn.textContent = bulkActionLoading ? "Updating..." : "Set For Examination";
+        }
+
+        rowCheckboxes.forEach(function (checkbox) {
+            const appId = checkbox.getAttribute("data-app-id");
+            if (!appId) {
+                return;
+            }
+            checkbox.checked = selectedApplicationIds.has(appId);
+        });
     }
 
     function fillFilters(rows) {
@@ -183,10 +290,11 @@
 
         return allRows.filter(function (row) {
             const appNo = (row.application_no || "").toLowerCase();
-            const scholarship = (row.scholarship_type || "").toLowerCase();
+            const degreeCourse = (row.degree_course || row.scholarship_type || "").toLowerCase();
+            const sectorClassification = (row.sector_classification || "").toLowerCase();
             const applicant = (row.applicant_name || "").toLowerCase();
             const normalized = normalizeStatus(row.status);
-            const matchesSearch = !search || appNo.includes(search) || scholarship.includes(search) || applicant.includes(search);
+            const matchesSearch = !search || appNo.includes(search) || degreeCourse.includes(search) || sectorClassification.includes(search) || applicant.includes(search);
             const matchesStatus = status === "all" || normalized === status;
             const matchesYear = schoolYear === "all" || row.school_year === schoolYear;
             return matchesSearch && matchesStatus && matchesYear;
@@ -211,8 +319,8 @@
             info.textContent = "Showing 0 of 0 records";
             return;
         }
-        const start = (currentPage - 1) * PAGE_SIZE + 1;
-        const end = Math.min(currentPage * PAGE_SIZE, totalRows);
+        const start = (currentPage - 1) * pageSize + 1;
+        const end = Math.min(currentPage * pageSize, totalRows);
         info.textContent = "Showing " + start + "-" + end + " of " + totalRows + " records";
     }
 
@@ -245,18 +353,63 @@
         pagination.innerHTML = items.join("");
     }
 
-    function actionForStatus(status, appId) {
-        const normalized = normalizeStatus(status);
-        if (normalized === "for_approval") {
-            return { label: "View", href: "../ADMIN/admin-approval-queue.html" };
+    function renderSectorCounters(rows) {
+        const container = byId("secretaryApplicationsSectorCounters");
+        if (!container) {
+            return;
         }
-        if (isInterviewStage(normalized) || normalized === "passed_exam") {
-            return { label: "Verify", href: "secretary-interview-verification.html?id=" + encodeURIComponent(appId) };
+
+        const counts = {};
+        let unspecifiedCount = 0;
+
+        rows.forEach(function (row) {
+            const value = (row && row.sector_classification ? row.sector_classification : "").toString().trim();
+            if (!value) {
+                unspecifiedCount += 1;
+                return;
+            }
+            counts[value] = (counts[value] || 0) + 1;
+        });
+
+        const orderedLabels = SECTOR_CLASSIFICATION_ORDER.filter(function (label) {
+            return counts[label] > 0;
+        });
+
+        Object.keys(counts)
+            .sort(function (left, right) {
+                return left.localeCompare(right);
+            })
+            .forEach(function (label) {
+                if (!orderedLabels.includes(label)) {
+                    orderedLabels.push(label);
+                }
+            });
+
+        if (unspecifiedCount > 0) {
+            orderedLabels.push("Unspecified");
         }
-        if (isExamStage(normalized)) {
-            return { label: "Exam", href: "secretary-exam-batches.html" };
+
+        if (!orderedLabels.length) {
+            container.innerHTML = '<span class="small text-muted">No sector classification data.</span>';
+            return;
         }
-        return { label: "Open", href: "secretary-interview-verification.html?id=" + encodeURIComponent(appId) };
+
+        container.innerHTML = orderedLabels.map(function (label) {
+            const value = label === "Unspecified" ? unspecifiedCount : counts[label];
+            return (
+                '<span class="ldss-sector-counter">' +
+                '<span>' + escapeHtml(label) + "</span>" +
+                '<span class="ldss-sector-counter-value">' + escapeHtml(String(value)) + "</span>" +
+                "</span>"
+            );
+        }).join("");
+    }
+
+    function actionForStatus(_status, appId) {
+        return {
+            label: "View Data",
+            href: "secretary-interview-verification.html?id=" + encodeURIComponent(appId)
+        };
     }
 
     function renderTable(rows) {
@@ -264,34 +417,97 @@
         if (!tbody) {
             return;
         }
-
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No application records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No application records found.</td></tr>';
+            updateSelectionControls();
             return;
         }
-
         tbody.innerHTML = rows.map(function (row) {
             const normalized = normalizeStatus(row.status);
             const meta = statusMeta(normalized);
             const submitted = row.submitted_at || row.created_at;
             const action = actionForStatus(normalized, row.id);
-
+            const photoDomId = "secretaryApplicantPhoto-" + safeDomId(row.id);
+            const placeholderDomId = "secretaryApplicantPhotoPlaceholder-" + safeDomId(row.id);
+            const applicantName = row.applicant_name || "Unknown";
+            const degreeCourse = row.degree_course || row.scholarship_type || "-";
+            const sectorClassification = row.sector_classification || "-";
+            const selectable = canMarkForExamination(row);
+            const checked = selectable && selectedApplicationIds.has(row.id);
             return (
                 "<tr>" +
-                "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
-                "<td>" +
-                '<div class="fw-600">' + escapeHtml(row.applicant_name || "Unknown") + "</div>" +
-                '<div class="small text-muted">' + escapeHtml(row.applicant_contact || "-") + "</div>" +
+                '<td data-label="Select" class="text-center align-middle">' +
+                '<input class="form-check-input" type="checkbox" data-select-application="true" data-app-id="' + escapeHtml(row.id || "") + '"' +
+                (checked ? ' checked="checked"' : "") +
+                (selectable && !bulkActionLoading ? "" : ' disabled="disabled"') +
+                ' aria-label="Select application ' + escapeHtml(row.application_no || row.id || "") + '"' +
+                (selectable ? "" : ' title="Only submitted applications can be moved to examination."') +
+                " />" +
                 "</td>" +
-                "<td>" + escapeHtml(row.scholarship_type || "-") + "</td>" +
-                "<td>" + escapeHtml(formatDate(submitted)) + "</td>" +
-                '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
-                '<td><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
+                '<td data-label="Applicant">' +
+                '<div class="ldss-queue-applicant" style="display:flex;align-items:center;gap:0.75rem;min-width:0;">' +
+                '<div class="ldss-queue-applicant-photo" style="width:2.75rem;height:2.75rem;min-width:2.75rem;max-width:2.75rem;flex:0 0 2.75rem;border-radius:50%;overflow:hidden;border:1px solid #d1d5db;background:#f8f9fb;display:flex;align-items:center;justify-content:center;">' +
+                '<img class="d-none" id="' + escapeHtml(photoDomId) + '" alt="Applicant 1x1 photo" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:center;display:block;" />' +
+                '<div class="ldss-queue-applicant-photo-placeholder" id="' + escapeHtml(placeholderDomId) + '" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;letter-spacing:0.02em;color:#4b5563;text-transform:uppercase;">' + escapeHtml(applicantInitials(applicantName)) + "</div>" +
+                "</div>" +
+                '<div class="ldss-queue-applicant-body">' +
+                '<span class="ldss-queue-applicant-name">' + escapeHtml(applicantName) + "</span>" +
+                '<span class="small ldss-queue-applicant-contact">' + escapeHtml(row.applicant_contact || "-") + "</span>" +
+                "</div>" +
+                "</div>" +
+                "</td>" +
+                '<td data-label="Application ID">' + escapeHtml(row.application_no || "-") + "</td>" +
+                '<td data-label="Degree Course"><div class="ldss-queue-degree">' + escapeHtml(degreeCourse) + "</div></td>" +
+                '<td data-label="Sector Classification">' + escapeHtml(sectorClassification) + "</td>" +
+                '<td data-label="Submitted">' + escapeHtml(formatDate(submitted)) + "</td>" +
+                '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
+                '<td data-label="View Data"><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
                 "</tr>"
             );
         }).join("");
+        photoRenderToken += 1;
+        void renderApplicantPhotos(rows, photoRenderToken);
+        updateSelectionControls();
     }
+    async function renderApplicantPhotos(rows, token) {
+        const photoTasks = rows.map(async function (row) {
+            const photoPath = (row && row.applicant_photo_path ? row.applicant_photo_path : "").toString().trim();
+            if (!photoPath) {
+                return null;
+            }
 
+            const photoDomId = "secretaryApplicantPhoto-" + safeDomId(row.id);
+            const placeholderDomId = "secretaryApplicantPhotoPlaceholder-" + safeDomId(row.id);
+            const photoUrl = await createSignedUrl(photoPath);
+
+            return {
+                photoDomId: photoDomId,
+                placeholderDomId: placeholderDomId,
+                photoUrl: photoUrl
+            };
+        });
+
+        const photoResults = await Promise.all(photoTasks);
+        if (token !== photoRenderToken) {
+            return;
+        }
+
+        photoResults.forEach(function (result) {
+            if (!result || !result.photoUrl) {
+                return;
+            }
+
+            const image = byId(result.photoDomId);
+            const placeholder = byId(result.placeholderDomId);
+            if (!image || !placeholder) {
+                return;
+            }
+
+            image.src = result.photoUrl;
+            image.classList.remove("d-none");
+            placeholder.classList.add("d-none");
+        });
+    }
     function applyFiltersAndRender(resetPage) {
         if (resetPage) {
             currentPage = 1;
@@ -307,9 +523,11 @@
             currentPage = 1;
         }
 
-        const start = (currentPage - 1) * PAGE_SIZE;
-        const pageRows = filteredRows.slice(start, start + PAGE_SIZE);
+        const start = (currentPage - 1) * pageSize;
+        const pageRows = filteredRows.slice(start, start + pageSize);
+        currentPageRows = pageRows;
 
+        renderSectorCounters(filteredRows);
         renderTable(pageRows);
         renderPaginationInfo(filteredRows.length);
         renderPagination(filteredRows.length);
@@ -320,7 +538,7 @@
 
         const appResult = await context.client
             .from("applications")
-            .select("id, application_no, applicant_id, scholarship_type, school_year, status, submitted_at, created_at, updated_at")
+            .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at")
             .neq("status", "draft")
             .order("updated_at", { ascending: false });
 
@@ -338,7 +556,7 @@
         if (applicantIds.length > 0) {
             const profileResult = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, email, mobile_number")
+                .select("id, first_name, middle_name, last_name, email, mobile_number, course_or_strand, applicant_photo_path")
                 .in("id", applicantIds);
 
             if (!profileResult.error && profileResult.data) {
@@ -352,13 +570,82 @@
             const profile = profileMap[row.applicant_id] || null;
             return Object.assign({}, row, {
                 applicant_name: buildApplicantName(profile, ""),
-                applicant_contact: (profile && (profile.mobile_number || profile.email)) ? (profile.mobile_number || profile.email) : "No contact on file"
+                applicant_contact: (profile && (profile.mobile_number || profile.email)) ? (profile.mobile_number || profile.email) : "No contact on file",
+                degree_course: (profile && profile.course_or_strand ? profile.course_or_strand : "") || row.scholarship_type || "",
+                sector_classification: row.sector_classification || "",
+                applicant_photo_path: profile && profile.applicant_photo_path ? profile.applicant_photo_path : ""
             });
         });
 
+        pruneSelectedApplicationIds();
         updateKpis(allRows);
         fillFilters(allRows);
         applyFiltersAndRender(false);
+    }
+
+    async function handleMarkSelectedForExam() {
+        if (bulkActionLoading || !authContext || !authContext.client || !authContext.user) {
+            return;
+        }
+
+        const selectedRows = allRows.filter(function (row) {
+            return selectedApplicationIds.has(row.id);
+        });
+        const targetRows = selectedRows.filter(function (row) {
+            return canMarkForExamination(row);
+        });
+        const skippedCount = selectedRows.length - targetRows.length;
+
+        if (!targetRows.length) {
+            showStatus("Select at least one submitted application to move into examination.", "alert-warning");
+            updateSelectionControls();
+            return;
+        }
+
+        const confirmed = window.confirm(
+            "Move " + targetRows.length + " selected submitted application(s) to Pending Exam?"
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        bulkActionLoading = true;
+        updateSelectionControls();
+        showStatus("");
+
+        try {
+            const targetIds = targetRows.map(function (row) {
+                return row.id;
+            });
+
+            const result = await authContext.client
+                .from("applications")
+                .update({
+                    status: "pending_exam",
+                    secretary_reviewer_id: authContext.user.id,
+                    is_locked: false
+                })
+                .in("id", targetIds)
+                .eq("status", "submitted");
+
+            if (result.error) {
+                throw new Error(result.error.message);
+            }
+
+            selectedApplicationIds.clear();
+            await loadApplications(authContext);
+
+            let message = targetIds.length + " application(s) moved to Pending Exam.";
+            if (skippedCount > 0) {
+                message += " Skipped " + skippedCount + " row(s) that were no longer submitted.";
+            }
+            showStatus(message, "alert-success");
+        } catch (error) {
+            showStatus("Failed to update selected applications: " + (error && error.message ? error.message : "Unknown error"), "alert-danger");
+        } finally {
+            bulkActionLoading = false;
+            updateSelectionControls();
+        }
     }
 
     function bindEvents() {
@@ -367,6 +654,10 @@
         const statusFilter = byId("secretaryApplicationsStatusFilter");
         const yearFilter = byId("secretaryApplicationsYearFilter");
         const pagination = byId("secretaryApplicationsPagination");
+        const selectAll = byId("secretaryApplicationsSelectAll");
+        const tbody = byId("secretaryApplicationsTableBody");
+        const markExamBtn = byId("secretaryApplicationsMarkExamBtn");
+        const pageSizeSelect = byId("secretaryApplicationsPageSize");
 
         if (applyBtn) {
             applyBtn.addEventListener("click", function () {
@@ -395,6 +686,20 @@
             });
         }
 
+        if (pageSizeSelect) {
+            pageSizeSelect.value = String(pageSize);
+            pageSizeSelect.addEventListener("change", function () {
+                const nextValue = Number(pageSizeSelect.value);
+                if (Number.isNaN(nextValue) || nextValue < 1) {
+                    pageSizeSelect.value = String(pageSize);
+                    return;
+                }
+                pageSize = Math.min(MAX_PAGE_SIZE, nextValue);
+                pageSizeSelect.value = String(pageSize);
+                applyFiltersAndRender(true);
+            });
+        }
+
         if (pagination) {
             pagination.addEventListener("click", function (event) {
                 const button = event.target.closest("button[data-page]");
@@ -410,6 +715,46 @@
                 applyFiltersAndRender(false);
             });
         }
+
+        if (selectAll) {
+            selectAll.addEventListener("change", function () {
+                visibleSelectableRows().forEach(function (row) {
+                    if (selectAll.checked) {
+                        selectedApplicationIds.add(row.id);
+                    } else {
+                        selectedApplicationIds.delete(row.id);
+                    }
+                });
+                updateSelectionControls();
+            });
+        }
+
+        if (tbody) {
+            tbody.addEventListener("change", function (event) {
+                const checkbox = event.target.closest("input[data-select-application='true']");
+                if (!checkbox) {
+                    return;
+                }
+
+                const appId = checkbox.getAttribute("data-app-id");
+                if (!appId) {
+                    return;
+                }
+
+                if (checkbox.checked) {
+                    selectedApplicationIds.add(appId);
+                } else {
+                    selectedApplicationIds.delete(appId);
+                }
+                updateSelectionControls();
+            });
+        }
+
+        if (markExamBtn) {
+            markExamBtn.addEventListener("click", function () {
+                void handleMarkSelectedForExam();
+            });
+        }
     }
 
     async function init() {
@@ -417,6 +762,8 @@
         if (!context || !context.client || !context.user) {
             return;
         }
+
+        authContext = context;
 
         bindEvents();
         await loadApplications(context);

@@ -23,6 +23,9 @@
                         <p class="small text-muted mt-2 mb-0">Note: This is the official LGU Daet Scholarship Portal.</p>
                     </div>
                     <div class="alert alert-danger d-none" id="loginStatus" role="alert"></div>
+                    <div class="d-none mb-3" id="loginResendWrap">
+                        <button class="btn btn-outline-dark btn-sm w-100" id="loginResendBtn" type="button">Resend Verification Email</button>
+                    </div>
                     <form id="loginForm">
                         <div class="mb-3">
                             <label class="small mb-1" for="loginIdentifier">Email Address</label>
@@ -56,6 +59,7 @@
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="js/supabase-config.js"></script>
+        <script src="js/supabase-auth-email-helper.js"></script>
         <script src="js/supabase-login.js"></script>
         <script src="js/scripts.js"></script>
     </body>

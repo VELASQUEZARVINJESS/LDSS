@@ -2,6 +2,7 @@
     "use strict";
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
+    const DEFAULT_PRODUCTION_RESET_URL = "https://iskolarngdaet.app/reset-password.html";
 
     function setStatus(message, type) {
         const el = document.getElementById("forgotStatus");
@@ -31,6 +32,64 @@
         return value.includes("@");
     }
 
+    function resolveResetRedirectUrl() {
+        const configured = (window.LDSS_PASSWORD_RESET_REDIRECT_URL || "").toString().trim();
+        if (configured) {
+            return configured;
+        }
+
+        const protocol = (window.location.protocol || "").toString().trim().toLowerCase();
+        const hostname = (window.location.hostname || "").toString().trim().toLowerCase();
+        const origin = (window.location.origin || "").toString().trim().replace(/\/+$/, "");
+        const isLocal = protocol === "file:" || hostname === "localhost" || hostname === "127.0.0.1";
+
+        if (!isLocal && /^https?:\/\//i.test(origin)) {
+            return origin + "/reset-password.html";
+        }
+
+        return DEFAULT_PRODUCTION_RESET_URL;
+    }
+
+    function getErrorMessage(error, fallbackMessage) {
+        if (!error) {
+            return fallbackMessage;
+        }
+
+        if (typeof error === "string" && error.trim()) {
+            return error.trim();
+        }
+
+        if (typeof error.message === "string" && error.message.trim() && error.message.trim() !== "{}") {
+            return error.message.trim();
+        }
+
+        if (typeof error.error_description === "string" && error.error_description.trim()) {
+            return error.error_description.trim();
+        }
+
+        if (typeof error.msg === "string" && error.msg.trim()) {
+            return error.msg.trim();
+        }
+
+        if (typeof error.code === "string") {
+            if (error.code.toLowerCase().includes("rate")) {
+                return "Email rate limit exceeded. Wait at least 60 seconds, then try again.";
+            }
+            return "Request failed (" + error.code + ").";
+        }
+
+        try {
+            const serialized = JSON.stringify(error);
+            if (serialized && serialized !== "{}") {
+                return serialized;
+            }
+        } catch (serializationError) {
+            // Ignore serialization failure and use the fallback below.
+        }
+
+        return fallbackMessage;
+    }
+
     async function onForgotSubmit(client, event) {
         event.preventDefault();
         setStatus("");
@@ -48,19 +107,32 @@
 
         setSubmitLoading(true);
         try {
-            const redirectTo = window.location.origin + "/reset-password.html";
+            const redirectTo = resolveResetRedirectUrl();
             const { error } = await client.auth.resetPasswordForEmail(identifier.toLowerCase(), {
                 redirectTo: redirectTo
             });
 
             if (error) {
-                setStatus(error.message || "Failed to send recovery email.", "alert-danger");
+                setStatus(
+                    getErrorMessage(
+                        error,
+                        "Failed to send recovery email. Check Supabase Auth URL Configuration, SMTP, and rate limits."
+                    ),
+                    "alert-danger"
+                );
                 return;
             }
 
             setStatus("Recovery email sent. Check your inbox and open the reset link.", "alert-success");
         } catch (err) {
-            setStatus("Unexpected error while sending recovery email.", "alert-danger");
+            console.error("Forgot password error:", err);
+            setStatus(
+                getErrorMessage(
+                    err,
+                    "Unexpected error while sending recovery email. Check Supabase Auth URL Configuration, SMTP, and rate limits."
+                ),
+                "alert-danger"
+            );
         } finally {
             setSubmitLoading(false);
         }

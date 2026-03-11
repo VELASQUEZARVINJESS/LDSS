@@ -9,6 +9,7 @@
     };
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
+    let resendController = null;
 
     function setStatus(message, type) {
         const el = document.getElementById("loginStatus");
@@ -118,16 +119,44 @@
         try {
             const { data, error } = await client.auth.signInWithPassword(payload);
             if (error) {
-                setStatus(error.message || "Invalid login credentials.", "alert-danger");
+                if (window.LDSSAuthEmailHelper && window.LDSSAuthEmailHelper.isEmailNotConfirmedError(error)) {
+                    await resendController.request(client, payload.email, {
+                        automatic: true,
+                        fallbackErrorMessage: "Failed to resend confirmation email.",
+                        onCooldown: function (waitSeconds) {
+                            setStatus(
+                                "Your account is not verified yet. A confirmation email was already requested. Check your inbox or wait " + waitSeconds + " seconds before requesting again.",
+                                "alert-warning"
+                            );
+                        },
+                        onError: function (message) {
+                            setStatus("Your account is not verified yet. " + message, "alert-warning");
+                        },
+                        onSuccess: function (context) {
+                            setStatus(
+                                context.automatic
+                                    ? "Your account is not verified yet. A new confirmation email has been sent automatically. Check your inbox or spam folder, then confirm before signing in."
+                                    : "A new confirmation email has been sent. Check your inbox or spam folder, then confirm before signing in.",
+                                "alert-warning"
+                            );
+                        }
+                    });
+                    return;
+                }
+                resendController.hide();
+                setStatus(window.LDSSAuthEmailHelper.getErrorMessage(error, "Invalid login credentials."), "alert-danger");
                 return;
             }
             if (!data || !data.user) {
+                resendController.hide();
                 setStatus("Login failed: user session not returned.", "alert-danger");
                 return;
             }
+            resendController.hide();
             await fetchRoleAndRedirect(client, data.user.id);
         } catch (err) {
-            setStatus("Unexpected login error. Please try again.", "alert-danger");
+            resendController.hide();
+            setStatus(window.LDSSAuthEmailHelper.getErrorMessage(err, "Unexpected login error. Please try again."), "alert-danger");
         } finally {
             setSubmitLoading(false);
         }
@@ -150,12 +179,50 @@
             setStatus("Supabase library failed to load. Check internet/CDN access.", "alert-danger");
             return;
         }
+        if (!window.LDSSAuthEmailHelper || !window.LDSSAuthEmailHelper.createResendController) {
+            setStatus("Auth email helper failed to load. Check js/supabase-auth-email-helper.js.", "alert-danger");
+            return;
+        }
         if (!url || !anonKey || hasPlaceholderConfig) {
             setStatus("Supabase config is not set. Update js/supabase-config.js first.", "alert-warning");
             return;
         }
 
         const client = window.supabase.createClient(url, anonKey);
+        resendController = window.LDSSAuthEmailHelper.createResendController({
+            wrapId: "loginResendWrap",
+            buttonId: "loginResendBtn",
+            storagePrefix: "ldss-login-resend",
+            idleLabel: "Resend Verification Email",
+            loadingLabel: "Sending Confirmation...",
+            setStatus: setStatus
+        });
+        const resendBtn = resendController.button();
+        if (resendBtn) {
+            resendBtn.addEventListener("click", function () {
+                const email = (resendBtn.dataset.email || "").trim().toLowerCase();
+                if (!email) {
+                    setStatus("Enter your email first, then try signing in again.", "alert-warning");
+                    return;
+                }
+                resendController.request(client, email, {
+                    automatic: false,
+                    fallbackErrorMessage: "Failed to resend confirmation email.",
+                    onCooldown: function (waitSeconds) {
+                        setStatus(
+                            "Your account is not verified yet. A confirmation email was already requested. Check your inbox or wait " + waitSeconds + " seconds before requesting again.",
+                            "alert-warning"
+                        );
+                    },
+                    onError: function (message) {
+                        setStatus("Your account is not verified yet. " + message, "alert-warning");
+                    },
+                    onSuccess: function () {
+                        setStatus("A new confirmation email has been sent. Check your inbox or spam folder, then confirm before signing in.", "alert-warning");
+                    }
+                });
+            });
+        }
 
         try {
             const { data } = await client.auth.getSession();
