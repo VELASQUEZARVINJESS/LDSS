@@ -924,6 +924,9 @@
     }
 
     async function upsertInterview(formValues, verifiedPhotoPath, hardCopyVerified) {
+        const previousVerifiedPath = (currentInterview && currentInterview.verified_photo_path)
+            || (currentProfile && currentProfile.verified_interview_photo_path)
+            || "";
         const payload = {
             application_id: currentApplication.id,
             scheduled_at: formValues.interviewDateTimeIso,
@@ -971,6 +974,21 @@
 
             if (profileResult.error) {
                 throw new Error("Interview saved but profile verified photo update failed: " + profileResult.error.message);
+            }
+            if (currentProfile) {
+                currentProfile.verified_interview_photo_path = verifiedPhotoPath;
+            }
+            if (
+                previousVerifiedPath &&
+                previousVerifiedPath !== verifiedPhotoPath &&
+                window.ldssUploads &&
+                typeof window.ldssUploads.deleteFiles === "function"
+            ) {
+                try {
+                    await window.ldssUploads.deleteFiles(authContext, [previousVerifiedPath]);
+                } catch (cleanupError) {
+                    // Best-effort cleanup only. Keep the saved interview update successful.
+                }
             }
         }
 

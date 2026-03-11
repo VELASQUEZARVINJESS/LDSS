@@ -15,23 +15,110 @@ const SUPABASE_URL = process.env.LDSS_SUPABASE_URL || "https://rfzqifloaixrtseqz
 const SUPABASE_ANON_KEY = process.env.LDSS_SUPABASE_ANON_KEY || "sb_publishable_ysa32dk9v2Vcps9KQSR2Rg_F0w9TftL";
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const STAFF_ROLES = new Set(["secretary", "admin", "super_admin"]);
-const ALLOWED_DOCUMENT_TYPES = new Set([
-    "report_card",
-    "barangay_certificate",
-    "income_certificate",
-    "applicant_photo",
-    "verified_interview_photo",
-    "other"
-]);
+const EDITABLE_APPLICATION_STATUSES = new Set(["draft", "returned_for_correction"]);
+const ROOT_STATIC_FILES = [
+    "index.html",
+    "login.html",
+    "register.html",
+    "forgot-password.html",
+    "reset-password.html",
+    "logout.html",
+    "BARANGAY-DAET.TXT",
+    "BARANGAY-DAET LIST.TXT"
+];
+const STATIC_DIRECTORIES = [
+    "APPLICANT",
+    "SECRETARY",
+    "ADMIN",
+    "SYSTEMADMINISTRATOR",
+    "SUPERADMIN",
+    "css",
+    "js",
+    "img",
+    "assets"
+];
+const MIME_BY_KIND = {
+    jpg: "image/jpeg",
+    png: "image/png",
+    pdf: "application/pdf"
+};
+const EXTENSION_BY_KIND = {
+    jpg: ".jpg",
+    png: ".png",
+    pdf: ".pdf"
+};
+const DOCUMENT_RULES = {
+    report_card: {
+        allowedKinds: new Set(["jpg", "png", "pdf"]),
+        allowedExtensions: new Set([".jpg", ".jpeg", ".png", ".pdf"]),
+        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png", "application/pdf"])
+    },
+    barangay_certificate: {
+        allowedKinds: new Set(["jpg", "png", "pdf"]),
+        allowedExtensions: new Set([".jpg", ".jpeg", ".png", ".pdf"]),
+        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png", "application/pdf"])
+    },
+    income_certificate: {
+        allowedKinds: new Set(["pdf"]),
+        allowedExtensions: new Set([".pdf"]),
+        allowedMimeTypes: new Set(["application/pdf"])
+    },
+    applicant_photo: {
+        allowedKinds: new Set(["jpg", "png"]),
+        allowedExtensions: new Set([".jpg", ".jpeg", ".png"]),
+        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png"])
+    },
+    verified_interview_photo: {
+        allowedKinds: new Set(["jpg", "png"]),
+        allowedExtensions: new Set([".jpg", ".jpeg", ".png"]),
+        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png"])
+    },
+    other: {
+        allowedKinds: new Set(["jpg", "png", "pdf"]),
+        allowedExtensions: new Set([".jpg", ".jpeg", ".png", ".pdf"]),
+        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png", "application/pdf"])
+    }
+};
+const ALLOWED_DOCUMENT_TYPES = new Set(Object.keys(DOCUMENT_RULES));
 
 const app = express();
+app.disable("x-powered-by");
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_FILE_SIZE_BYTES }
 });
 
-function applyUploadCors(response) {
-    response.setHeader("Access-Control-Allow-Origin", "*");
+function resolveCorsOrigin(request) {
+    const origin = (request.headers.origin || "").toString().trim();
+    if (!origin) {
+        return "";
+    }
+
+    try {
+        const parsedOrigin = new URL(origin);
+        const requestHost = (request.headers.host || "").toString().trim().toLowerCase();
+        const originHost = parsedOrigin.host.toLowerCase();
+        const isLocalOrigin = parsedOrigin.hostname === "localhost" || parsedOrigin.hostname === "127.0.0.1";
+
+        if (isLocalOrigin) {
+            return origin;
+        }
+        if (requestHost && originHost === requestHost) {
+            return origin;
+        }
+    } catch (error) {
+        return "";
+    }
+
+    return "";
+}
+
+function applyUploadCors(request, response) {
+    const allowedOrigin = resolveCorsOrigin(request);
+    if (allowedOrigin) {
+        response.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+        response.setHeader("Vary", "Origin");
+    }
     response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     response.setHeader("Access-Control-Max-Age", "86400");
@@ -67,6 +154,88 @@ function sanitizeFileName(name) {
         .slice(0, 120);
 }
 
+function normalizeMimeType(mimeType) {
+    const normalized = (mimeType || "").toString().trim().toLowerCase();
+    if (!normalized) {
+        return "";
+    }
+    if (normalized === "image/jpg") {
+        return "image/jpeg";
+    }
+    return normalized;
+}
+
+function detectUploadedFileKind(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        return "";
+    }
+    if (
+        buffer.length >= 8 &&
+        buffer[0] === 0x89 &&
+        buffer[1] === 0x50 &&
+        buffer[2] === 0x4e &&
+        buffer[3] === 0x47 &&
+        buffer[4] === 0x0d &&
+        buffer[5] === 0x0a &&
+        buffer[6] === 0x1a &&
+        buffer[7] === 0x0a
+    ) {
+        return "png";
+    }
+    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        return "jpg";
+    }
+    if (buffer.length >= 5 && buffer.slice(0, 5).toString("ascii") === "%PDF-") {
+        return "pdf";
+    }
+    return "";
+}
+
+function canonicalMimeTypeForKind(kind) {
+    return MIME_BY_KIND[kind] || "application/octet-stream";
+}
+
+function canonicalExtensionForKind(kind) {
+    return EXTENSION_BY_KIND[kind] || "";
+}
+
+function buildStoredFileName(originalFileName, detectedKind) {
+    const parsed = path.parse((originalFileName || "document").toString());
+    const safeBase = sanitizeFileName(parsed.name || "document").replace(/\.+$/g, "") || "document";
+    return safeBase + canonicalExtensionForKind(detectedKind);
+}
+
+function validateUploadedFile(documentType, file) {
+    const rule = DOCUMENT_RULES[documentType];
+    if (!rule) {
+        throw new Error("Document type is not allowed.");
+    }
+    if (!file || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
+        throw new Error("Uploaded file is empty.");
+    }
+
+    const extension = path.extname((file.originalname || "").toString()).toLowerCase();
+    if (!extension || !rule.allowedExtensions.has(extension)) {
+        throw new Error("Invalid file extension for " + documentType + ".");
+    }
+
+    const mimeType = normalizeMimeType(file.mimetype);
+    if (mimeType && !rule.allowedMimeTypes.has(mimeType)) {
+        throw new Error("Invalid file type for " + documentType + ".");
+    }
+
+    const detectedKind = detectUploadedFileKind(file.buffer);
+    if (!detectedKind || !rule.allowedKinds.has(detectedKind)) {
+        throw new Error("Uploaded file contents do not match an allowed format for " + documentType + ".");
+    }
+
+    return {
+        detectedKind: detectedKind,
+        safeFileName: buildStoredFileName(file.originalname, detectedKind),
+        mimeType: canonicalMimeTypeForKind(detectedKind)
+    };
+}
+
 function normalizeStoredPath(value) {
     const raw = (value || "").toString().trim().replace(/\\/g, "/");
     if (!raw || raw.startsWith("/") || raw.includes("\0")) {
@@ -79,9 +248,9 @@ function normalizeStoredPath(value) {
     return normalized;
 }
 
-function buildHostedUploadPath(role, userId, applicationId, documentType, originalFileName) {
+function buildHostedUploadPath(role, userId, applicationId, documentType, storedFileName) {
     const randomSuffix = Date.now().toString() + "-" + crypto.randomBytes(5).toString("hex");
-    const safeName = randomSuffix + "-" + sanitizeFileName(originalFileName);
+    const safeName = randomSuffix + "-" + sanitizeFileName(storedFileName || "document");
 
     if (documentType === "verified_interview_photo" && STAFF_ROLES.has(role)) {
         return ["uploads", "verified_interview_photo", "staff", userId, applicationId, safeName].join("/");
@@ -103,6 +272,49 @@ function resolveHostedUploadPath(storedPath) {
     }
 
     return { normalized: normalized, absolutePath: absolutePath };
+}
+
+function parseHostedPathDetails(normalizedPath) {
+    const segments = (normalizedPath || "").split("/");
+    if (segments.length < 5 || segments[0] !== "uploads") {
+        return null;
+    }
+
+    const documentType = segments[1] || "";
+    if (documentType === "verified_interview_photo") {
+        if (segments[2] !== "staff" || segments.length < 6) {
+            return null;
+        }
+        return {
+            documentType: documentType,
+            isStaffScoped: true,
+            ownerId: segments[3] || "",
+            applicationId: segments[4] || "",
+            fileName: segments.slice(5).join("/")
+        };
+    }
+
+    return {
+        documentType: documentType,
+        isStaffScoped: false,
+        ownerId: segments[2] || "",
+        applicationId: segments[3] || "",
+        fileName: segments.slice(4).join("/")
+    };
+}
+
+function mimeTypeFromPath(storedPath) {
+    const extension = path.extname((storedPath || "").toString()).toLowerCase();
+    if (extension === ".jpg" || extension === ".jpeg") {
+        return "image/jpeg";
+    }
+    if (extension === ".png") {
+        return "image/png";
+    }
+    if (extension === ".pdf") {
+        return "application/pdf";
+    }
+    return "application/octet-stream";
 }
 
 async function ensureDirectory(targetFilePath) {
@@ -196,6 +408,21 @@ async function applicationExists(client, applicationId) {
     return !result.error && !!result.data;
 }
 
+async function applicantOwnsEditableApplication(client, applicantId, applicationId) {
+    if (!applicationId) {
+        return false;
+    }
+
+    const result = await client
+        .from("applications")
+        .select("status")
+        .eq("id", applicationId)
+        .eq("applicant_id", applicantId)
+        .maybeSingle();
+
+    return !result.error && !!result.data && EDITABLE_APPLICATION_STATUSES.has(result.data.status);
+}
+
 async function assertUploadAllowed(auth, applicationId, documentType) {
     if (!applicationId) {
         throw new Error("Application ID is required.");
@@ -221,40 +448,56 @@ async function assertUploadAllowed(auth, applicationId, documentType) {
     }
 }
 
-async function assertHostedPathAccess(auth, storedPath) {
+async function assertHostedPathAccess(auth, storedPath, accessMode) {
     const resolved = resolveHostedUploadPath(storedPath);
     if (!resolved.normalized || !resolved.absolutePath) {
         throw new Error("Invalid hosted upload path.");
     }
 
-    if (STAFF_ROLES.has(auth.role)) {
-        return resolved;
-    }
-
-    const segments = resolved.normalized.split("/");
-    if (segments.length < 5 || segments[0] !== "uploads") {
+    const details = parseHostedPathDetails(resolved.normalized);
+    if (!details || !details.applicationId) {
         throw new Error("Invalid hosted upload path.");
     }
 
-    const documentType = segments[1];
-    if (documentType === "verified_interview_photo") {
-        const applicationId = segments[4] || "";
-        if (!(await applicantOwnsApplication(auth.client, auth.user.id, applicationId))) {
-            throw new Error("You cannot access this file.");
+    if (STAFF_ROLES.has(auth.role)) {
+        if (accessMode === "delete") {
+            if (auth.role === "super_admin") {
+                return { resolved: resolved, details: details };
+            }
+            if (details.documentType !== "verified_interview_photo" || !details.isStaffScoped) {
+                throw new Error("Staff cannot delete applicant-uploaded files.");
+            }
+            if (auth.role === "secretary" && details.ownerId !== auth.user.id) {
+                throw new Error("You cannot delete another staff member's uploaded file.");
+            }
+            if (!(await applicationExists(auth.client, details.applicationId))) {
+                throw new Error("Target application was not found.");
+            }
+            return { resolved: resolved, details: details };
         }
-        return resolved;
+
+        if (!(await applicationExists(auth.client, details.applicationId))) {
+            throw new Error("Target application was not found.");
+        }
+        return { resolved: resolved, details: details };
     }
 
-    const ownerId = segments[2] || "";
-    const applicationId = segments[3] || "";
-    if (ownerId !== auth.user.id) {
-        throw new Error("You cannot access this file.");
-    }
-    if (!(await applicantOwnsApplication(auth.client, auth.user.id, applicationId))) {
+    if (details.isStaffScoped || details.ownerId !== auth.user.id) {
         throw new Error("You cannot access this file.");
     }
 
-    return resolved;
+    if (accessMode === "delete") {
+        if (!(await applicantOwnsEditableApplication(auth.client, auth.user.id, details.applicationId))) {
+            throw new Error("You cannot delete files for a locked application.");
+        }
+        return { resolved: resolved, details: details };
+    }
+
+    if (!(await applicantOwnsApplication(auth.client, auth.user.id, details.applicationId))) {
+        throw new Error("You cannot access this file.");
+    }
+
+    return { resolved: resolved, details: details };
 }
 
 function writeJsonError(response, statusCode, message) {
@@ -267,7 +510,7 @@ app.use(["/uploads", "/node_modules"], function (_request, response) {
 });
 
 app.use("/api/uploads", function (request, response, next) {
-    applyUploadCors(response);
+    applyUploadCors(request, response);
     if (request.method === "OPTIONS") {
         response.status(204).end();
         return;
@@ -294,13 +537,14 @@ app.post("/api/uploads", authenticate, upload.single("file"), async function (re
         const documentType = (request.body.documentType || "").toString().trim();
 
         await assertUploadAllowed(request.auth, applicationId, documentType);
+        const validatedFile = validateUploadedFile(documentType, file);
 
         const storedPath = buildHostedUploadPath(
             request.auth.role,
             request.auth.user.id,
             applicationId,
             documentType,
-            file.originalname
+            validatedFile.safeFileName
         );
         const resolved = resolveHostedUploadPath(storedPath);
         await ensureDirectory(resolved.absolutePath);
@@ -309,8 +553,8 @@ app.post("/api/uploads", authenticate, upload.single("file"), async function (re
         response.json({
             ok: true,
             path: resolved.normalized,
-            originalFilename: file.originalname,
-            mimeType: file.mimetype || "application/octet-stream",
+            originalFilename: path.basename(validatedFile.safeFileName),
+            mimeType: validatedFile.mimeType,
             sizeBytes: file.size
         });
     } catch (error) {
@@ -321,13 +565,16 @@ app.post("/api/uploads", authenticate, upload.single("file"), async function (re
 app.get("/api/uploads/blob", authenticate, async function (request, response) {
     try {
         const storedPath = (request.query.path || "").toString();
-        const resolved = await assertHostedPathAccess(request.auth, storedPath);
-        if (!fs.existsSync(resolved.absolutePath)) {
+        const access = await assertHostedPathAccess(request.auth, storedPath, "view");
+        if (!fs.existsSync(access.resolved.absolutePath)) {
             writeJsonError(response, 404, "File was not found.");
             return;
         }
 
-        response.sendFile(resolved.absolutePath);
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Cache-Control", "private, max-age=300");
+        response.type(mimeTypeFromPath(access.resolved.normalized));
+        response.sendFile(access.resolved.absolutePath);
     } catch (error) {
         writeJsonError(response, 403, error.message || "File access denied.");
     }
@@ -341,15 +588,15 @@ app.post("/api/uploads/delete", authenticate, async function (request, response)
 
         for (let index = 0; index < rawPaths.length; index += 1) {
             const storedPath = (rawPaths[index] || "").toString();
-            const resolved = await assertHostedPathAccess(request.auth, storedPath);
+            const access = await assertHostedPathAccess(request.auth, storedPath, "delete");
 
             try {
-                await fsPromises.unlink(resolved.absolutePath);
-                await removeEmptyParentDirectories(resolved.absolutePath);
-                deleted.push(resolved.normalized);
+                await fsPromises.unlink(access.resolved.absolutePath);
+                await removeEmptyParentDirectories(access.resolved.absolutePath);
+                deleted.push(access.resolved.normalized);
             } catch (error) {
                 if (error && error.code === "ENOENT") {
-                    missing.push(resolved.normalized);
+                    missing.push(access.resolved.normalized);
                     continue;
                 }
                 throw error;
@@ -385,7 +632,19 @@ app.use(function (error, request, response, next) {
     next(error);
 });
 
-app.use(express.static(ROOT_DIR, { extensions: ["html"] }));
+STATIC_DIRECTORIES.forEach(function (directoryName) {
+    app.use("/" + directoryName, express.static(path.join(ROOT_DIR, directoryName), { extensions: ["html"] }));
+});
+
+ROOT_STATIC_FILES.forEach(function (fileName) {
+    app.get("/" + fileName, function (_request, response) {
+        response.sendFile(path.join(ROOT_DIR, fileName));
+    });
+});
+
+app.get("/", function (_request, response) {
+    response.sendFile(path.join(ROOT_DIR, "index.html"));
+});
 
 app.use(function (_request, response) {
     response.status(404).send("Not found");

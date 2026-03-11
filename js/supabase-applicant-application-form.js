@@ -1704,7 +1704,7 @@
     async function upsertDocumentRow(context, applicationId, docType, storagePath, file) {
         const existing = await context.client
             .from("application_documents")
-            .select("id")
+            .select("id,storage_path")
             .eq("application_id", applicationId)
             .eq("document_type", docType)
             .order("created_at", { ascending: false })
@@ -1731,7 +1731,23 @@
                 .from("application_documents")
                 .update(payload)
                 .eq("id", existing.data[0].id);
-            return updateResult.error ? updateResult.error.message : "";
+            if (updateResult.error) {
+                return updateResult.error.message;
+            }
+            const previousPath = (existing.data[0].storage_path || "").toString().trim();
+            if (
+                previousPath &&
+                previousPath !== storagePath &&
+                window.ldssUploads &&
+                typeof window.ldssUploads.deleteFiles === "function"
+            ) {
+                try {
+                    await window.ldssUploads.deleteFiles(context, [previousPath]);
+                } catch (cleanupError) {
+                    // Best-effort cleanup only. The new uploaded file remains valid.
+                }
+            }
+            return "";
         }
 
         const insertResult = await context.client
