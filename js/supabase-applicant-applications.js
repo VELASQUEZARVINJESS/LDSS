@@ -363,11 +363,13 @@
                     });
 
                 if (storagePaths.length > 0) {
-                    const removeResult = await context.client.storage
-                        .from(STORAGE_BUCKET)
-                        .remove(storagePaths);
-                    if (removeResult.error) {
-                        storageWarning = " Storage files may remain: " + removeResult.error.message;
+                    if (window.ldssUploads && typeof window.ldssUploads.deleteFiles === "function") {
+                        const removeResult = await window.ldssUploads.deleteFiles(context, storagePaths);
+                        if (removeResult.warnings && removeResult.warnings.length > 0) {
+                            storageWarning = " Storage files may remain: " + removeResult.warnings.join(" | ");
+                        }
+                    } else {
+                        storageWarning = " Storage files may remain: upload client is unavailable.";
                     }
                 }
             }

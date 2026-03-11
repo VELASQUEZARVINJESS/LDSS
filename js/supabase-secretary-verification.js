@@ -493,14 +493,10 @@
         if (!path || !authContext || !authContext.client) {
             return "";
         }
-        const result = await authContext.client.storage
-            .from(STORAGE_BUCKET)
-            .createSignedUrl(path, 60 * 30);
-
-        if (result.error || !result.data || !result.data.signedUrl) {
+        if (!window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
             return "";
         }
-        return result.data.signedUrl;
+        return window.ldssUploads.createObjectUrl(authContext, path);
     }
 
     function latestDocumentsByType(rows) {
@@ -879,23 +875,17 @@
             throw new Error("Verified photo exceeds 10MB limit.");
         }
 
-        const extensionMatch = (file.name || "").toLowerCase().match(/\.[a-z0-9]+$/);
-        const extension = extensionMatch ? extensionMatch[0] : ".jpg";
+        if (!window.ldssUploads || typeof window.ldssUploads.uploadFile !== "function") {
+            throw new Error("Verified photo upload client is not available.");
+        }
 
-        const storagePath = [
-            "staff",
-            authContext.user.id,
-            "applications",
-            currentApplication.id,
-            "verified-interview-photo-" + Date.now() + extension
-        ].join("/");
-
-        const uploadResult = await authContext.client.storage
-            .from(STORAGE_BUCKET)
-            .upload(storagePath, file, { upsert: true });
-
-        if (uploadResult.error) {
-            throw new Error("Verified photo upload failed: " + uploadResult.error.message);
+        const uploadResult = await window.ldssUploads.uploadFile(authContext, file, {
+            applicationId: currentApplication.id,
+            documentType: "verified_interview_photo"
+        });
+        const storagePath = uploadResult && uploadResult.path ? uploadResult.path : "";
+        if (!storagePath) {
+            throw new Error("Verified photo upload failed: upload server did not return a file path.");
         }
 
         fileInput.value = "";

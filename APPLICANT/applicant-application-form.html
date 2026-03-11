@@ -25,7 +25,7 @@
                     <a class="btn btn-icon btn-transparent-dark ldss-bell-alert" href="applicant-notifications.html"><i data-feather="bell"></i></a>
                 </li>
                 <li class="nav-item dropdown no-caret">
-                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i></a>
+                    <a class="btn btn-outline-dark btn-sm d-inline-flex align-items-center gap-2 dropdown-toggle ldss-account-trigger" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i><span class="ldss-account-trigger-label">My Profile</span></a>
                     <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
                         <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
                         <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
@@ -90,34 +90,37 @@
                             <div class="card-body">
                                 Application Form
                                 <div class="ldss-paper-form"> 
-                                    <div class="col-12 col-md-1 col-md-4">
-                                        <label class="small mb-1 d-block" for="reqApplicantPhoto">Applicant 1x1 Picture</label>
-                                        
-                                        <div class="ldss-paper-photo-box mb-2">
-                                            <img class="d-none" id="reqApplicantPhotoPreview" alt="Applicant 1x1 preview" />
-                                            <div id="reqApplicantPhotoPlaceholder">1x1</div>
+                                    <div class="row g-3 align-items-start mb-3">
+                                        <div class="col-12 col-lg-3">
+                                            <label class="small mb-1 d-block" for="reqApplicantPhoto">Applicant 1x1 Picture</label>
+                                            <div class="ldss-paper-photo-box mb-2">
+                                                <img class="d-none" id="reqApplicantPhotoPreview" alt="Applicant 1x1 preview" />
+                                                <div id="reqApplicantPhotoPlaceholder">1x1</div>
+                                            </div>
+                                            <input class="form-control" id="reqApplicantPhoto" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
+                                            <div class="form-text" id="reqApplicantPhotoFeedback"></div>
                                         </div>
-
-                                        <input class="form-control" id="reqApplicantPhoto" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
-                                        <div class="form-text" id="reqApplicantPhotoFeedback"></div>
-                                    </div>
-                                  
-                                    <div class="row-md-4">
-                                        <label class="small mb-1" for="schoolYear">School Year</label>
-                                        <select class="form-select" id="schoolYear">
-                                            <option value="">Select school year</option>
-                                            <option selected>2026-2027</option>
-                                            <option>2025-2026</option>
-                                        </select>     
-                                        <div class="form-text">Policy: only one application submission is allowed per school year.</div>
-                                    </div>
-                                    
-                                    <div class="row-md-4">
-                                        <label class="small mb-1" for="applicantCategory">Applicant Category</label>
-                                        <select class="form-select" id="applicantCategory">
-                                            <option value="new" selected>New Applicant</option>
-                                            <option value="renewal" disabled>Renewal (Temporarily Disabled)</option>
-                                        </select>
+                                        <div class="col-12 col-md-4 col-lg-3">
+                                            <label class="small mb-1" for="schoolYear">School Year</label>
+                                            <select class="form-select" id="schoolYear">
+                                                <option value="">Select school year</option>
+                                                <option selected>2026-2027</option>
+                                                <option>2025-2026</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-12 col-md-4 col-lg-3">
+                                            <label class="small mb-1" for="applicantCategory">Applicant Category</label>
+                                            <select class="form-select" id="applicantCategory">
+                                                <option value="new" selected>New Applicant</option>
+                                                <option value="renewal" disabled>Renewal (Temporarily Disabled)</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-12 col-md-4 col-lg-3">
+                                            <label class="small mb-1" for="grantAppliedFor">Grant Applied For</label>
+                                            <select class="form-select" id="grantAppliedFor" disabled>
+                                                <option value="Degree Course" selected>Degree Course</option>
+                                            </select>
+                                        </div>
                                     </div>
                             
                                 <input id="scholarshipType" type="hidden" value="Revised Daet Expanded Scholarship Program" />
@@ -136,7 +139,7 @@
                                     </div>
                                     <div class="col-md-4">
                                         <label class="small mb-1" for="middleName">Middle Name</label>
-                                        <input class="form-control" id="middleName" type="text" />
+                                        <input class="form-control" id="middleName" type="text" placeholder="Optional; leave blank for N/A" />
                                     </div>
                                     <div class="col-md-4">
                                         <label class="small mb-1" for="sex">Sex</label>
@@ -163,7 +166,6 @@
                                             <option value="Roman Catholic">Roman Catholic</option>
                                             <option value="Christian">Christian</option>
                                             <option value="Islam">Islam</option>
-                                            <option value="Iglesia ni Cristo">Iglesia ni Cristo</option>
                                             <option value="Others">Others</option>
                                         </select>
                                     </div>
@@ -171,9 +173,22 @@
                                         <label class="small mb-1" for="dateOfBirth">Date of Birth</label>
                                         <input class="form-control" id="dateOfBirth" type="date" />
                                     </div>
-                                    <div class="col-md-8">
+                                    <div class="col-md-4">
                                         <label class="small mb-1" for="placeOfBirth">Place of Birth</label>
                                         <input class="form-control" id="placeOfBirth" type="text" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="additionalData">Sector Classification</label>
+                                        <select class="form-select" id="additionalData">
+                                            <option value="">Select</option>
+                                            <option value="Person with Disability (PWD)">Person with Disability (PWD)</option>
+                                            <option value="Solo Parent">Solo Parent</option>
+                                            <option value="Child of Solo Parent">Child of Solo Parent</option>
+                                            <option value="Child of Farmer">Child of Farmer</option>
+                                            <option value="Child of Fisherfolk">Child of Fisherfolk</option>
+                                            <option value="Orphan">Orphan</option>
+                                            <option value="None of the above">None of the above</option>
+                                        </select>
                                     </div>
                                     <div class="col-md-12">
                                         <label class="small mb-1" for="permanentAddress">Permanent Address</label>
@@ -191,16 +206,14 @@
                                         <label class="small mb-1" for="highestEducationAttainment">Highest Educational Attainment</label>
                                         <select class="form-select" id="highestEducationAttainment">
                                             <option value="">Select</option>
-                                            <option value="High School Graduate">High School Graduate</option>
                                             <option value="Senior High School Graduate">Senior High School Graduate</option>
-                                            <option value="College Graduate">College Graduate</option>
+                                            <option value="College Graduate">College Level</option>
                                         </select>
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="small mb-1" for="highestGradeYearLevel">Highest Grade/Year Attended</label>
+                                        <label class="small mb-1" for="highestGradeYearLevel">Highest Grade/Year Level</label>
                                         <select class="form-select" id="highestGradeYearLevel">
                                             <option value="">Select</option>
-                                            <option value="Grade 11">Grade 11</option>
                                             <option value="Grade 12">Grade 12</option>
                                             <option value="1st Year">1st Year</option>
                                             <option value="2nd Year">2nd Year</option>
@@ -213,9 +226,13 @@
                                         <label class="small mb-1" for="gwa">General Weighted Average (0-100)</label>
                                         <input class="form-control" id="gwa" type="text" placeholder="e.g. 90 or 90%" />
                                     </div>
-                                    <div class="col-md-8">
+                                    <div class="col-md-4">
                                         <label class="small mb-1" for="schoolName">School Name</label>
                                         <input class="form-control" id="schoolName" type="text" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="degreeProgramCourse">Degree Course</label>
+                                        <input class="form-control" id="degreeProgramCourse" type="text" placeholder="e.g. BS Information Technology" />
                                     </div>
                                     <div class="col-md-4">
                                         <label class="small mb-1" for="schoolType">School Type</label>
@@ -224,16 +241,6 @@
                                             <option value="Public">Public</option>
                                             <option value="Private">Private</option>
                                         </select>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="small mb-1" for="grantAppliedFor">Grant Applied For</label>
-                                        <select class="form-select" id="grantAppliedFor">
-                                            <option value="Degree Course" selected>Degree Course</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-8">
-                                        <label class="small mb-1" for="degreeProgramCourse">Degree Course</label>
-                                        <input class="form-control" id="degreeProgramCourse" type="text" placeholder="e.g. BS Information Technology" />
                                     </div>
                                 </div>
                             </div>
@@ -251,20 +258,30 @@
                                 <div class="ldss-paper-block-title">Family Background</div>
                                 <div class="row g-3 ldss-paper-fields">
                                     <div class="col-md-6">
-                                        <label class="small mb-1" for="fatherStatus">Father Status</label>
-                                        <select class="form-select" id="fatherStatus">
-                                            <option value="">Select</option>
-                                            <option value="Alive">Living / Alive</option>
-                                            <option value="Deceased">Deceased</option>
-                                        </select>
+                                        <div class="small mb-1">Father</div>
+                                        <div class="d-flex flex-wrap gap-3 pt-1" id="fatherStatusGroup">
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="fatherStatusAlive" name="fatherStatus" type="radio" value="Alive" />
+                                                <label class="form-check-label" for="fatherStatusAlive">Living</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="fatherStatusDeceased" name="fatherStatus" type="radio" value="Deceased" />
+                                                <label class="form-check-label" for="fatherStatusDeceased">Deceased</label>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="col-md-6">
-                                        <label class="small mb-1" for="motherStatus">Mother Status</label>
-                                        <select class="form-select" id="motherStatus">
-                                            <option value="">Select</option>
-                                            <option value="Alive">Living / Alive</option>
-                                            <option value="Deceased">Deceased</option>
-                                        </select>
+                                        <div class="small mb-1">Mother</div>
+                                        <div class="d-flex flex-wrap gap-3 pt-1" id="motherStatusGroup">
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="motherStatusAlive" name="motherStatus" type="radio" value="Alive" />
+                                                <label class="form-check-label" for="motherStatusAlive">Living</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" id="motherStatusDeceased" name="motherStatus" type="radio" value="Deceased" />
+                                                <label class="form-check-label" for="motherStatusDeceased">Deceased</label>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="col-12">
                                         <div class="small fw-600 text-uppercase text-muted">Father Name</div>
@@ -320,68 +337,72 @@
                                         <label class="small mb-1" for="motherEducationAttainment">Mother Educational Attainment</label>
                                         <input class="form-control" id="motherEducationAttainment" type="text" />
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="small mb-1" for="totalParentsGrossIncome">Total Parents Gross Income (PHP)</label>
-                                        <input class="form-control" id="totalParentsGrossIncome" type="number" min="0" step="0.01" />
-                                    </div>
-                                    <div class="col-md-4">
+                                    <div class="col-12 col-sm-6 col-xl-3">
                                         <label class="small mb-1" for="childrenInFamily">No. of Children in Family</label>
                                         <input class="form-control" id="childrenInFamily" type="number" min="0" step="1" />
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-12 col-sm-6 col-xl-3">
                                         <label class="small mb-1" for="brotherCount">No. of Brothers</label>
                                         <input class="form-control" id="brotherCount" type="number" min="0" step="1" />
                                     </div>
-                                    <div class="col-md-4">
+                                    <div class="col-12 col-sm-6 col-xl-3">
                                         <label class="small mb-1" for="sisterCount">No. of Sisters</label>
                                         <input class="form-control" id="sisterCount" type="number" min="0" step="1" />
+                                    </div>
+                                    <div class="col-12 col-sm-6 col-xl-3">
+                                        <label class="small mb-1" for="totalParentsGrossIncome">Total Parents Gross Income (PHP)</label>
+                                        <input class="form-control" id="totalParentsGrossIncome" type="number" min="0" step="0.01" />
                                     </div>
                                 </div>
                             </div>
 
                             <div class="ldss-paper-block">
                                 <div class="ldss-paper-block-title">For Married or Living Together Applicant Only</div>
-                                <div class="row g-3 ldss-paper-fields">
-                                    <div class="col-12">
-                                        <div class="form-check form-switch">
-                                            <input class="form-check-input" id="isMarriedApplicant" type="checkbox" />
-                                            <label class="form-check-label small" for="isMarriedApplicant">Slide to enable if applicant is married or living together</label>
-                                        </div>
+                                <div class="form-text mb-2">Optional. Fill out this section only if applicable.</div>
+                                <div class="row g-3 align-items-start ldss-paper-fields">
+                                    <div class="col-12 col-lg-4">
+                                        <label class="small mb-1" for="spouseName">Name of Husband / Wife</label>
+                                        <input class="form-control" id="spouseName" type="text" />
                                     </div>
-                                    <fieldset id="marriedFieldsGroup" class="col-12 border-0 p-0 m-0" disabled>
-                                        <div class="row g-3">
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="spouseName">Name of Husband / Wife</label>
-                                                <input class="form-control" id="spouseName" type="text" />
-                                            </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="spouseChildrenCount">No. of Children</label>
-                                                <input class="form-control" id="spouseChildrenCount" type="number" min="0" step="1" />
-                                            </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="spouseOccupation">Occupation</label>
-                                                <input class="form-control" id="spouseOccupation" type="text" />
-                                            </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="spouseEducation">Educational Attainment</label>
-                                                <input class="form-control" id="spouseEducation" type="text" />
-                                            </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="intendedSchool">School Intended to Enroll In</label>
-                                                <input class="form-control" id="intendedSchool" type="text" />
-                                            </div>
-                                        </div>
-                                    </fieldset>
+                                    <div class="col-12 col-sm-6 col-lg-2">
+                                        <label class="small mb-1" for="spouseChildrenCount">No. of Children</label>
+                                        <input class="form-control" id="spouseChildrenCount" type="number" min="0" step="1" />
+                                    </div>
+                                    <div class="col-12 col-sm-6 col-lg-2">
+                                        <label class="small mb-1" for="spouseOccupation">Occupation</label>
+                                        <input class="form-control" id="spouseOccupation" type="text" />
+                                    </div>
+                                    <div class="col-12 col-sm-6 col-lg-2">
+                                        <label class="small mb-1" for="spouseEducation">Educational Attainment</label>
+                                        <input class="form-control" id="spouseEducation" type="text" />
+                                    </div>
+                                    <div class="col-12 col-sm-6 col-lg-2">
+                                        <label class="small mb-1" for="intendedSchool">School Intended to Enroll In</label>
+                                        <input class="form-control" id="intendedSchool" type="text" />
+                                    </div>
                                 </div>
                             </div>
 
                             <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 pt-2">
-                                <div class="form-check pt-2 mb-0">
-                                    <input class="form-check-input" id="applicationAgreement" type="checkbox" />
-                                    <label class="form-check-label small" for="applicationAgreement">
-                                        I agree that all information in this form is true and correct.
-                                    </label>
-                                    <div class="invalid-feedback">Please agree before saving draft or submitting.</div>
+                                <div class="d-flex flex-column gap-2">
+                                    <div class="form-check pt-2 mb-0">
+                                        <input class="form-check-input" id="applicationAgreement" type="checkbox" />
+                                        <label class="form-check-label small" for="applicationAgreement">
+                                            I agree that all information in this form is true and correct.
+                                        </label>
+                                        <div class="invalid-feedback">Please agree before saving draft or submitting.</div>
+                                    </div>
+                                    <div class="form-check mb-0">
+                                        <input class="form-check-input" id="privacyNoticeAgreement" type="checkbox" />
+                                        <label class="form-check-label small" for="privacyNoticeAgreement">
+                                            I have read and understood the Data Privacy Notice.
+                                        </label>
+                                        <div class="invalid-feedback">Please review and acknowledge the Data Privacy Notice before submitting.</div>
+                                    </div>
+                                    <div class="small text-muted">
+                                        Review notice:
+                                        <button class="btn btn-link btn-sm p-0 align-baseline" id="openPrivacyNoticeBtn" type="button">View Data Privacy Notice</button>
+                                    </div>
                                 </div>
                                 <div class="d-flex flex-wrap justify-content-end gap-2">
                                     <button class="btn btn-outline-dark" id="saveDraftBtn" type="button">Save Draft</button>
@@ -420,10 +441,77 @@
                 </div>
             </div>
         </div>
+        <div class="modal fade" id="applicationPolicyModal" tabindex="-1" aria-labelledby="applicationPolicyModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="applicationPolicyModalLabel">Application Policy</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="small text-muted mb-3">
+                            Please review this reminder before final submission.
+                        </p>
+                        <div class="small fw-700 mb-1">Submission policy</div>
+                        <p class="small text-muted">
+                            Only one application submission is allowed per school year.
+                        </p>
+                        <div class="small fw-700 mb-1">After sending your form</div>
+                        <p class="small text-muted mb-0">
+                            After you submit this application, please wait for the examination schedule or further notice from the scholarship office.
+                        </p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Back</button>
+                        <button class="btn btn-dark" id="applicationPolicyConfirmBtn" type="button">Confirm and Submit</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="dataPrivacyModal" tabindex="-1" aria-labelledby="dataPrivacyModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="dataPrivacyModalLabel">Data Privacy Notice</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="small text-muted mb-3">
+                            This notice explains how the LGU Daet Scholarship System processes the personal data you provide in this application.
+                        </p>
+                        <div class="small fw-700 mb-1">What data may be collected</div>
+                        <p class="small text-muted">
+                            Identification details, contact information, family background, education details, uploaded documents, and other information required to evaluate your scholarship application.
+                        </p>
+                        <div class="small fw-700 mb-1">Why your data is used</div>
+                        <p class="small text-muted">
+                            Your data may be used to receive, validate, review, verify, communicate, rank, and decide on your scholarship application, and to maintain official records and audit trails.
+                        </p>
+                        <div class="small fw-700 mb-1">Who may access it</div>
+                        <p class="small text-muted">
+                            Access is limited to authorized scholarship personnel, evaluators, and system administrators who need the information to process your application and manage official scholarship records.
+                        </p>
+                        <div class="small fw-700 mb-1">How it is protected</div>
+                        <p class="small text-muted">
+                            Reasonable administrative, organizational, and technical safeguards are applied to protect your information against unauthorized access, disclosure, alteration, or loss, subject to applicable law and official policy.
+                        </p>
+                        <div class="small fw-700 mb-1">Your acknowledgment</div>
+                        <p class="small text-muted mb-0">
+                            By continuing with this application, you confirm that you understand this notice and consent to the lawful processing of your data for legitimate scholarship administration purposes.
+                        </p>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Close</button>
+                        <button class="btn btn-dark" id="dataPrivacyAcknowledgeBtn" type="button">I Have Read the Notice</button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/ldss-upload-api.js"></script>
         <script src="../js/supabase-applicant-application-form.js"></script>
         <script src="../js/scripts.js"></script>
     </body>

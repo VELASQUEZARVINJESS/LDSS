@@ -29,7 +29,11 @@
     let isSubmitting = false;
     let applicantPhotoPreviewObjectUrl = "";
     let submittedModalInstance = null;
+    let privacyModalInstance = null;
+    let applicationPolicyModalInstance = null;
+    let pendingSubmitContext = null;
     let submittedTrackingUrl = "";
+    let applicationsSupportsSectorClassification = true;
 
     function byId(id) {
         return document.getElementById(id);
@@ -38,6 +42,17 @@
     function nullIfBlank(value) {
         const normalized = (value || "").toString().trim();
         return normalized ? normalized : null;
+    }
+
+    function normalizeMiddleNameValue(value) {
+        const normalized = (value || "").toString().trim();
+        if (!normalized) {
+            return "N/A";
+        }
+        if (/^n\s*\/?\s*a$/i.test(normalized)) {
+            return "N/A";
+        }
+        return normalized;
     }
 
     function normalizeMobileForStorage(value) {
@@ -100,20 +115,14 @@
         target.textContent = "Application ID: " + applicationNo;
     }
 
-    function sanitizeFileName(name) {
-        return (name || "document")
-            .replace(/[^a-zA-Z0-9.\-_]/g, "_")
-            .replace(/_+/g, "_")
-            .slice(0, 120);
-    }
-
-    function isBucketNotFoundMessage(message) {
-        return /bucket not found/i.test((message || "").toString());
-    }
-
-    function isStoragePolicyMessage(message) {
+    function isUploadServerUnavailableMessage(message) {
         const text = (message || "").toString().toLowerCase();
-        return text.includes("row-level security") || text.includes("permission") || text.includes("not allowed");
+        return text.includes("upload server is not available") || text.includes("failed to fetch") || text.includes("networkerror");
+    }
+
+    function isUploadAccessDeniedMessage(message) {
+        const text = (message || "").toString().toLowerCase();
+        return text.includes("access token") || text.includes("authentication") || text.includes("cannot upload") || text.includes("not allowed");
     }
 
     function setSelectValue(id, value) {
@@ -137,6 +146,62 @@
         dynamicOption.textContent = normalized;
         select.appendChild(dynamicOption);
         select.value = normalized;
+    }
+
+    function normalizeParentStatusValue(value) {
+        const normalized = (value || "").toString().trim().toLowerCase();
+        if (!normalized) {
+            return "";
+        }
+        if (normalized === "alive" || normalized === "living" || normalized === "living / alive") {
+            return "Alive";
+        }
+        if (normalized === "deceased") {
+            return "Deceased";
+        }
+        return (value || "").toString().trim();
+    }
+
+    function getRadioValue(name) {
+        const selected = document.querySelector("input[name=\"" + name + "\"]:checked");
+        return selected ? normalizeParentStatusValue(selected.value) : "";
+    }
+
+    function setRadioValue(name, value) {
+        const normalized = normalizeParentStatusValue(value);
+        document.querySelectorAll("input[name=\"" + name + "\"]").forEach(function (radio) {
+            radio.checked = normalizeParentStatusValue(radio.value) === normalized;
+        });
+    }
+
+    function setRadioGroupDisabled(name, disabled) {
+        document.querySelectorAll("input[name=\"" + name + "\"]").forEach(function (radio) {
+            radio.disabled = !!disabled;
+        });
+    }
+
+    function applicationSelectFields() {
+        if (applicationsSupportsSectorClassification) {
+            return "id, application_no, application_type, scholarship_type, school_year, sector_classification, status, submitted_at, is_locked, created_at, updated_at";
+        }
+        return "id, application_no, application_type, scholarship_type, school_year, status, submitted_at, is_locked, created_at, updated_at";
+    }
+
+    function applicationMutationPayload(payload) {
+        const normalized = payload && typeof payload === "object" ? Object.assign({}, payload) : {};
+        if (!applicationsSupportsSectorClassification) {
+            delete normalized.sector_classification;
+        }
+        return normalized;
+    }
+
+    function isMissingApplicationsColumnError(error, columnName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedColumn = (columnName || "").toString().toLowerCase();
+        if (!text || !normalizedColumn) {
+            return false;
+        }
+        return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
     }
 
     function parseQuery() {
@@ -202,6 +267,14 @@
         checkbox.classList.toggle("is-invalid", !!isInvalid);
     }
 
+    function setPrivacyNoticeValidity(isInvalid) {
+        const checkbox = byId("privacyNoticeAgreement");
+        if (!checkbox) {
+            return;
+        }
+        checkbox.classList.toggle("is-invalid", !!isInvalid);
+    }
+
     function hasAgreement() {
         const checkbox = byId("applicationAgreement");
         if (!checkbox) {
@@ -222,6 +295,76 @@
             checkbox.focus();
         }
         throw new Error("Please agree that all information is correct before " + actionLabel + ".");
+    }
+
+    function hasPrivacyNoticeAgreement() {
+        const checkbox = byId("privacyNoticeAgreement");
+        if (!checkbox) {
+            return true;
+        }
+        return !!checkbox.checked;
+    }
+
+    function getPrivacyModal() {
+        const modalEl = byId("dataPrivacyModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!privacyModalInstance) {
+            privacyModalInstance = new window.bootstrap.Modal(modalEl);
+        }
+        return privacyModalInstance;
+    }
+
+    function openPrivacyModalForReview() {
+        const modal = getPrivacyModal();
+        if (!modal) {
+            return;
+        }
+        modal.show();
+    }
+
+    function acknowledgePrivacyNotice() {
+        const checkbox = byId("privacyNoticeAgreement");
+        if (checkbox) {
+            checkbox.checked = true;
+        }
+        setPrivacyNoticeValidity(false);
+        const modal = getPrivacyModal();
+        if (modal) {
+            modal.hide();
+        }
+    }
+
+    function requirePrivacyNoticeOrThrow(actionLabel) {
+        if (hasPrivacyNoticeAgreement()) {
+            setPrivacyNoticeValidity(false);
+            return;
+        }
+
+        setPrivacyNoticeValidity(true);
+        openPrivacyModalForReview();
+        throw new Error("Please review and acknowledge the Data Privacy Notice before " + actionLabel + ".");
+    }
+
+    function getApplicationPolicyModal() {
+        const modalEl = byId("applicationPolicyModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!applicationPolicyModalInstance) {
+            applicationPolicyModalInstance = new window.bootstrap.Modal(modalEl);
+        }
+        return applicationPolicyModalInstance;
+    }
+
+    function openApplicationPolicyModal() {
+        const modal = getApplicationPolicyModal();
+        if (modal) {
+            modal.show();
+            return true;
+        }
+        return false;
     }
 
     function getSubmittedModal() {
@@ -464,20 +607,26 @@
         if (!userId || !applicationId) {
             return;
         }
+        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"];
+        const hasSpouseDetails = spouseFieldIds.some(function (id) {
+            const input = byId(id);
+            return !!(input && nullIfBlank(input.value));
+        });
         // TODO(Supabase): move these auxiliary fields to a dedicated application details table.
         const payload = {
             religion: nullIfBlank(byId("religion") ? byId("religion").value : ""),
             placeOfBirth: nullIfBlank(byId("placeOfBirth") ? byId("placeOfBirth").value : ""),
+            additionalData: nullIfBlank(byId("additionalData") ? byId("additionalData").value : ""),
             highestEducationAttainment: nullIfBlank(byId("highestEducationAttainment") ? byId("highestEducationAttainment").value : ""),
             highestGradeYearLevel: nullIfBlank(byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value : ""),
             schoolType: nullIfBlank(byId("schoolType") ? byId("schoolType").value : ""),
             grantAppliedFor: nullIfBlank(byId("grantAppliedFor") ? byId("grantAppliedFor").value : ""),
             awards: collectAwardsFromForm(),
-            fatherStatus: nullIfBlank(byId("fatherStatus") ? byId("fatherStatus").value : ""),
+            fatherStatus: nullIfBlank(getRadioValue("fatherStatus")),
             fatherFirstName: nullIfBlank(byId("fatherFirstName") ? byId("fatherFirstName").value : ""),
             fatherMiddleName: nullIfBlank(byId("fatherMiddleName") ? byId("fatherMiddleName").value : ""),
             fatherLastName: nullIfBlank(byId("fatherLastName") ? byId("fatherLastName").value : ""),
-            motherStatus: nullIfBlank(byId("motherStatus") ? byId("motherStatus").value : ""),
+            motherStatus: nullIfBlank(getRadioValue("motherStatus")),
             motherFirstName: nullIfBlank(byId("motherFirstName") ? byId("motherFirstName").value : ""),
             motherMiddleName: nullIfBlank(byId("motherMiddleName") ? byId("motherMiddleName").value : ""),
             motherMaidenName: nullIfBlank(byId("motherMaidenName") ? byId("motherMaidenName").value : ""),
@@ -492,7 +641,7 @@
             childrenInFamily: nullIfBlank(byId("childrenInFamily") ? byId("childrenInFamily").value : ""),
             brotherCount: nullIfBlank(byId("brotherCount") ? byId("brotherCount").value : ""),
             sisterCount: nullIfBlank(byId("sisterCount") ? byId("sisterCount").value : ""),
-            isMarriedApplicant: !!(byId("isMarriedApplicant") && byId("isMarriedApplicant").checked),
+            isMarriedApplicant: hasSpouseDetails,
             spouseName: nullIfBlank(byId("spouseName") ? byId("spouseName").value : ""),
             spouseChildrenCount: nullIfBlank(byId("spouseChildrenCount") ? byId("spouseChildrenCount").value : ""),
             spouseOccupation: nullIfBlank(byId("spouseOccupation") ? byId("spouseOccupation").value : ""),
@@ -514,6 +663,9 @@
         }
         if (byId("placeOfBirth")) {
             byId("placeOfBirth").value = payload.placeOfBirth || "";
+        }
+        if (byId("additionalData") && !(currentApplication && currentApplication.sector_classification)) {
+            setSelectValue("additionalData", payload.additionalData || "");
         }
         if (byId("highestEducationAttainment")) {
             setSelectValue("highestEducationAttainment", payload.highestEducationAttainment || "");
@@ -538,9 +690,7 @@
             ]);
         }
         renderAwardRows(awards);
-        if (byId("fatherStatus")) {
-            setSelectValue("fatherStatus", payload.fatherStatus || "");
-        }
+        setRadioValue("fatherStatus", payload.fatherStatus || "");
         if (byId("fatherFirstName")) {
             byId("fatherFirstName").value = payload.fatherFirstName || "";
         }
@@ -550,9 +700,7 @@
         if (byId("fatherLastName")) {
             byId("fatherLastName").value = payload.fatherLastName || "";
         }
-        if (byId("motherStatus")) {
-            setSelectValue("motherStatus", payload.motherStatus || "");
-        }
+        setRadioValue("motherStatus", payload.motherStatus || "");
         if (byId("motherFirstName")) {
             byId("motherFirstName").value = payload.motherFirstName || "";
         }
@@ -613,9 +761,6 @@
         if (byId("degreeProgramCourse")) {
             byId("degreeProgramCourse").value = payload.degreeProgramCourse || "";
         }
-        if (byId("isMarriedApplicant")) {
-            byId("isMarriedApplicant").checked = !!payload.isMarriedApplicant;
-        }
     }
 
     function collectApplicationPayload() {
@@ -627,13 +772,16 @@
         return {
             school_year: schoolYear,
             scholarship_type: scholarshipType,
-            application_type: (byId("applicantCategory") && byId("applicantCategory").value === "renewal") ? "renewal" : "new"
+            application_type: (byId("applicantCategory") && byId("applicantCategory").value === "renewal") ? "renewal" : "new",
+            sector_classification: nullIfBlank(byId("additionalData") ? byId("additionalData").value : "")
         };
     }
 
     function collectProfilePayload() {
         const monthlyIncomeRaw = byId("totalParentsGrossIncome") ? byId("totalParentsGrossIncome").value : "";
         const monthlyIncomeParsed = monthlyIncomeRaw === "" ? null : Number(monthlyIncomeRaw);
+        const middleNameInput = byId("middleName");
+        const normalizedMiddleName = normalizeMiddleNameValue(middleNameInput ? middleNameInput.value : "");
         const fatherNameParts = [
             byId("fatherFirstName") ? byId("fatherFirstName").value : "",
             byId("fatherMiddleName") ? byId("fatherMiddleName").value : "",
@@ -646,9 +794,13 @@
                 return value.length > 0;
             });
 
+        if (middleNameInput) {
+            middleNameInput.value = normalizedMiddleName;
+        }
+
         return {
             first_name: nullIfBlank(byId("firstName") ? byId("firstName").value : ""),
-            middle_name: nullIfBlank(byId("middleName") ? byId("middleName").value : ""),
+            middle_name: normalizedMiddleName,
             last_name: nullIfBlank(byId("lastName") ? byId("lastName").value : ""),
             sex: nullIfBlank(byId("sex") ? byId("sex").value : ""),
             civil_status: nullIfBlank(byId("civilStatus") ? byId("civilStatus").value : ""),
@@ -667,10 +819,17 @@
 
     function setInputValidity(inputId, isInvalid) {
         const input = byId(inputId);
-        if (!input) {
+        if (input) {
+            input.classList.toggle("is-invalid", !!isInvalid);
             return;
         }
-        input.classList.toggle("is-invalid", !!isInvalid);
+        const radioGroup = document.querySelectorAll("input[name=\"" + inputId + "\"]");
+        if (radioGroup.length === 0) {
+            return;
+        }
+        radioGroup.forEach(function (radio) {
+            radio.classList.toggle("is-invalid", !!isInvalid);
+        });
     }
 
     function setFileFeedback(inputId, message, isError) {
@@ -749,16 +908,19 @@
             return;
         }
 
-        const signed = await context.client.storage
-            .from(STORAGE_BUCKET)
-            .createSignedUrl(storagePath, 60 * 30);
-
-        if (signed.error || !signed.data || !signed.data.signedUrl) {
+        if (!window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
             return;
         }
 
         clearApplicantPhotoPreviewObjectUrl();
-        setApplicantPhotoPreviewUrl(signed.data.signedUrl);
+        const previewUrl = await window.ldssUploads.createObjectUrl(context, storagePath);
+        if (!previewUrl) {
+            return;
+        }
+        if (previewUrl.indexOf("blob:") === 0) {
+            applicantPhotoPreviewObjectUrl = previewUrl;
+        }
+        setApplicantPhotoPreviewUrl(previewUrl);
     }
 
     function validateSelectedFiles() {
@@ -810,12 +972,12 @@
         const grantAppliedFor = byId("grantAppliedFor") ? byId("grantAppliedFor").value.trim() : "";
         const lastName = byId("lastName") ? byId("lastName").value.trim() : "";
         const firstName = byId("firstName") ? byId("firstName").value.trim() : "";
-        const middleName = byId("middleName") ? byId("middleName").value.trim() : "";
         const sex = byId("sex") ? byId("sex").value.trim() : "";
         const civilStatus = byId("civilStatus") ? byId("civilStatus").value.trim() : "";
         const religion = byId("religion") ? byId("religion").value.trim() : "";
         const dateOfBirth = byId("dateOfBirth") ? byId("dateOfBirth").value.trim() : "";
         const placeOfBirth = byId("placeOfBirth") ? byId("placeOfBirth").value.trim() : "";
+        const additionalData = byId("additionalData") ? byId("additionalData").value.trim() : "";
         const permanentAddress = byId("permanentAddress") ? byId("permanentAddress").value.trim() : "";
         const contactNumber = byId("contactNumber") ? byId("contactNumber").value.trim() : "";
         const emailAddress = byId("emailAddress") ? byId("emailAddress").value.trim() : "";
@@ -823,9 +985,11 @@
         const highestGradeYearLevel = byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value.trim() : "";
         const schoolName = byId("schoolName") ? byId("schoolName").value.trim() : "";
         const schoolType = byId("schoolType") ? byId("schoolType").value.trim() : "";
+        const fatherStatus = getRadioValue("fatherStatus");
         const fatherFirstName = byId("fatherFirstName") ? byId("fatherFirstName").value.trim() : "";
         const fatherMiddleName = byId("fatherMiddleName") ? byId("fatherMiddleName").value.trim() : "";
         const fatherLastName = byId("fatherLastName") ? byId("fatherLastName").value.trim() : "";
+        const motherStatus = getRadioValue("motherStatus");
         const motherFirstName = byId("motherFirstName") ? byId("motherFirstName").value.trim() : "";
         const motherMiddleName = byId("motherMiddleName") ? byId("motherMiddleName").value.trim() : "";
         const motherMaidenName = byId("motherMaidenName") ? byId("motherMaidenName").value.trim() : "";
@@ -840,7 +1004,6 @@
         const brotherCountRaw = byId("brotherCount") ? byId("brotherCount").value.trim() : "";
         const sisterCountRaw = byId("sisterCount") ? byId("sisterCount").value.trim() : "";
         const gwaRaw = byId("gwa") ? byId("gwa").value.trim() : "";
-        const isMarriedApplicant = !!(byId("isMarriedApplicant") && byId("isMarriedApplicant").checked);
         const spouseName = byId("spouseName") ? byId("spouseName").value.trim() : "";
         const spouseChildrenCount = byId("spouseChildrenCount") ? byId("spouseChildrenCount").value.trim() : "";
         const spouseOccupation = byId("spouseOccupation") ? byId("spouseOccupation").value.trim() : "";
@@ -863,12 +1026,12 @@
         const requiredChecks = [
             { id: "lastName", label: "Last Name", value: lastName },
             { id: "firstName", label: "First Name", value: firstName },
-            { id: "middleName", label: "Middle Name", value: middleName },
             { id: "sex", label: "Sex", value: sex },
             { id: "civilStatus", label: "Status", value: civilStatus },
             { id: "religion", label: "Religion", value: religion },
             { id: "dateOfBirth", label: "Date of Birth", value: dateOfBirth },
             { id: "placeOfBirth", label: "Place of Birth", value: placeOfBirth },
+            { id: "additionalData", label: "Sector Classification", value: additionalData },
             { id: "permanentAddress", label: "Permanent Address", value: permanentAddress },
             { id: "contactNumber", label: "Contact Number", value: contactNumber },
             { id: "emailAddress", label: "Email Address", value: emailAddress },
@@ -879,8 +1042,8 @@
             { id: "schoolType", label: "School Type", value: schoolType },
             { id: "grantAppliedFor", label: "Grant Applied For", value: grantAppliedFor },
             { id: "degreeProgramCourse", label: "Degree Course", value: degreeProgramCourse },
-            { id: "fatherStatus", label: "Father Status", value: byId("fatherStatus") ? byId("fatherStatus").value.trim() : "" },
-            { id: "motherStatus", label: "Mother Status", value: byId("motherStatus") ? byId("motherStatus").value.trim() : "" },
+            { id: "fatherStatus", label: "Father", value: fatherStatus },
+            { id: "motherStatus", label: "Mother", value: motherStatus },
             { id: "fatherFirstName", label: "Father First Name", value: fatherFirstName },
             { id: "fatherMiddleName", label: "Father Middle Name", value: fatherMiddleName },
             { id: "fatherLastName", label: "Father Surname", value: fatherLastName },
@@ -975,33 +1138,16 @@
             setInputValidity("sisterCount", true);
         }
 
-        if (isMarriedApplicant) {
-            const spouseRequired = [
-                { id: "spouseName", label: "Name of Husband / Wife", value: spouseName },
-                { id: "spouseChildrenCount", label: "No. of Children", value: spouseChildrenCount },
-                { id: "spouseOccupation", label: "Spouse Occupation", value: spouseOccupation },
-                { id: "spouseEducation", label: "Spouse Educational Attainment", value: spouseEducation },
-                { id: "intendedSchool", label: "School Intended to Enroll In", value: intendedSchool }
-            ];
-            spouseRequired.forEach(function (item) {
-                const missing = submitting && !item.value;
-                setInputValidity(item.id, missing);
-                if (missing) {
-                    errors.push(item.label + " is required when married/living together is checked.");
-                }
-            });
+        ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"].forEach(function (id) {
+            setInputValidity(id, false);
+        });
 
-            if (spouseChildrenCount) {
-                const spouseChildren = Number(spouseChildrenCount);
-                if (Number.isNaN(spouseChildren) || spouseChildren < 0) {
-                    errors.push("Spouse No. of Children must be a valid non-negative number.");
-                    setInputValidity("spouseChildrenCount", true);
-                }
+        if (spouseChildrenCount) {
+            const spouseChildren = Number(spouseChildrenCount);
+            if (Number.isNaN(spouseChildren) || spouseChildren < 0) {
+                errors.push("Spouse No. of Children must be a valid non-negative number.");
+                setInputValidity("spouseChildrenCount", true);
             }
-        } else {
-            ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"].forEach(function (id) {
-                setInputValidity(id, false);
-            });
         }
 
         return errors;
@@ -1069,6 +1215,9 @@
         if (byId("degreeProgramCourse") && !byId("degreeProgramCourse").value && application.scholarship_type) {
             byId("degreeProgramCourse").value = application.scholarship_type;
         }
+        if (byId("additionalData")) {
+            setSelectValue("additionalData", application.sector_classification || "");
+        }
         setSelectValue("applicantCategory", application.application_type || "new");
         setApplicationIdDisplay(application.application_no || "");
     }
@@ -1096,6 +1245,7 @@
             "religion",
             "dateOfBirth",
             "placeOfBirth",
+            "additionalData",
             "permanentAddress",
             "contactNumber",
             "emailAddress",
@@ -1104,11 +1254,9 @@
             "schoolName",
             "schoolType",
             "grantAppliedFor",
-            "fatherStatus",
             "fatherFirstName",
             "fatherMiddleName",
             "fatherLastName",
-            "motherStatus",
             "motherFirstName",
             "motherMiddleName",
             "motherMaidenName",
@@ -1123,7 +1271,6 @@
             "childrenInFamily",
             "brotherCount",
             "sisterCount",
-            "isMarriedApplicant",
             "spouseName",
             "spouseChildrenCount",
             "spouseOccupation",
@@ -1132,6 +1279,7 @@
             "degreeProgramCourse",
             "reqApplicantPhoto",
             "applicationAgreement",
+            "privacyNoticeAgreement",
             "awardAddBtn",
             "saveDraftBtn",
             "submitApplicationBtn"
@@ -1142,6 +1290,8 @@
                 el.disabled = !editable;
             }
         });
+        setRadioGroupDisabled("fatherStatus", !editable);
+        setRadioGroupDisabled("motherStatus", !editable);
         document.querySelectorAll("#awardsRows [data-award-input='true']").forEach(function (input) {
             input.disabled = !editable;
         });
@@ -1189,12 +1339,22 @@
     }
 
     async function loadApplication(context, applicationId) {
-        const result = await context.client
+        let result = await context.client
             .from("applications")
-            .select("id, application_no, application_type, scholarship_type, school_year, status, submitted_at, is_locked, created_at, updated_at")
+            .select(applicationSelectFields())
             .eq("id", applicationId)
             .eq("applicant_id", context.user.id)
             .single();
+
+        if (applicationsSupportsSectorClassification && isMissingApplicationsColumnError(result.error, "sector_classification")) {
+            applicationsSupportsSectorClassification = false;
+            result = await context.client
+                .from("applications")
+                .select(applicationSelectFields())
+                .eq("id", applicationId)
+                .eq("applicant_id", context.user.id)
+                .single();
+        }
 
         if (result.error) {
             return null;
@@ -1377,17 +1537,34 @@
             if (!isEditable(currentApplication)) {
                 throw new Error("This application is no longer editable.");
             }
-            const updateResult = await context.client
+            let updateResult = await context.client
                 .from("applications")
-                .update({
+                .update(applicationMutationPayload({
                     school_year: payload.school_year,
                     scholarship_type: payload.scholarship_type,
-                    application_type: payload.application_type
-                })
+                    application_type: payload.application_type,
+                    sector_classification: payload.sector_classification
+                }))
                 .eq("id", currentApplication.id)
                 .eq("applicant_id", context.user.id)
-                .select("id, application_no, application_type, scholarship_type, school_year, status, submitted_at, is_locked, created_at, updated_at")
+                .select(applicationSelectFields())
                 .single();
+
+            if (applicationsSupportsSectorClassification && isMissingApplicationsColumnError(updateResult.error, "sector_classification")) {
+                applicationsSupportsSectorClassification = false;
+                updateResult = await context.client
+                    .from("applications")
+                    .update(applicationMutationPayload({
+                        school_year: payload.school_year,
+                        scholarship_type: payload.scholarship_type,
+                        application_type: payload.application_type,
+                        sector_classification: payload.sector_classification
+                    }))
+                    .eq("id", currentApplication.id)
+                    .eq("applicant_id", context.user.id)
+                    .select(applicationSelectFields())
+                    .single();
+            }
 
             if (updateResult.error) {
                 throw new Error(updateResult.error.message);
@@ -1399,17 +1576,34 @@
 
         await assertApplicationIntakeOpen(context);
 
-        const insertResult = await context.client
+        let insertResult = await context.client
             .from("applications")
-            .insert({
+            .insert(applicationMutationPayload({
                 applicant_id: context.user.id,
                 school_year: payload.school_year,
                 scholarship_type: payload.scholarship_type,
                 application_type: payload.application_type,
+                sector_classification: payload.sector_classification,
                 status: "draft"
-            })
-            .select("id, application_no, application_type, scholarship_type, school_year, status, submitted_at, is_locked, created_at, updated_at")
+            }))
+            .select(applicationSelectFields())
             .single();
+
+        if (applicationsSupportsSectorClassification && isMissingApplicationsColumnError(insertResult.error, "sector_classification")) {
+            applicationsSupportsSectorClassification = false;
+            insertResult = await context.client
+                .from("applications")
+                .insert(applicationMutationPayload({
+                    applicant_id: context.user.id,
+                    school_year: payload.school_year,
+                    scholarship_type: payload.scholarship_type,
+                    application_type: payload.application_type,
+                    sector_classification: payload.sector_classification,
+                    status: "draft"
+                }))
+                .select(applicationSelectFields())
+                .single();
+        }
 
         if (insertResult.error) {
             throw new Error(insertResult.error.message);
@@ -1435,7 +1629,7 @@
             currentApplication.id
         );
 
-        const result = await context.client
+        let result = await context.client
             .from("applications")
             .update({
                 status: "submitted",
@@ -1443,8 +1637,22 @@
             })
             .eq("id", currentApplication.id)
             .eq("applicant_id", context.user.id)
-            .select("id, application_no, application_type, scholarship_type, school_year, status, submitted_at, is_locked, created_at, updated_at")
+            .select(applicationSelectFields())
             .single();
+
+        if (applicationsSupportsSectorClassification && isMissingApplicationsColumnError(result.error, "sector_classification")) {
+            applicationsSupportsSectorClassification = false;
+            result = await context.client
+                .from("applications")
+                .update({
+                    status: "submitted",
+                    submitted_at: new Date().toISOString()
+                })
+                .eq("id", currentApplication.id)
+                .eq("applicant_id", context.user.id)
+                .select(applicationSelectFields())
+                .single();
+        }
 
         if (result.error) {
             throw new Error(result.error.message);
@@ -1515,22 +1723,28 @@
                 continue;
             }
 
-            const randomSuffix = Date.now().toString() + "-" + Math.floor(Math.random() * 100000).toString();
-            const path = "applications/" + context.user.id + "/" + applicationId + "/" + doc.docType + "/" + randomSuffix + "-" + sanitizeFileName(file.name);
-
-            const uploadResult = await context.client.storage
-                .from(STORAGE_BUCKET)
-                .upload(path, file, { contentType: file.type || "application/octet-stream" });
-
-            if (uploadResult.error) {
-                const uploadMessage = uploadResult.error.message || "Unknown storage upload error.";
-                if (isBucketNotFoundMessage(uploadMessage)) {
-                    fatalCode = "bucket_missing";
-                    errors.push("Storage bucket '" + STORAGE_BUCKET + "' was not found.");
+            let path = "";
+            try {
+                if (!window.ldssUploads || typeof window.ldssUploads.uploadFile !== "function") {
+                    throw new Error("Upload client is not available.");
+                }
+                const uploadResult = await window.ldssUploads.uploadFile(context, file, {
+                    applicationId: applicationId,
+                    documentType: doc.docType
+                });
+                path = uploadResult && uploadResult.path ? uploadResult.path : "";
+                if (!path) {
+                    throw new Error("Upload server did not return a file path.");
+                }
+            } catch (error) {
+                const uploadMessage = error && error.message ? error.message : "Unknown upload error.";
+                if (isUploadServerUnavailableMessage(uploadMessage)) {
+                    fatalCode = "upload_server_unavailable";
+                    errors.push(doc.label + ": " + uploadMessage);
                     break;
                 }
-                if (isStoragePolicyMessage(uploadMessage)) {
-                    fatalCode = "policy_blocked";
+                if (isUploadAccessDeniedMessage(uploadMessage)) {
+                    fatalCode = "upload_access_denied";
                 }
                 errors.push(doc.label + ": " + uploadMessage);
                 continue;
@@ -1619,10 +1833,10 @@
                 }
                 if (uploadResult.errors.length > 0) {
                     details.push("Upload warnings: " + uploadResult.errors.join(" | "));
-                    if (uploadResult.fatalCode === "bucket_missing") {
-                        details.push("Create bucket '" + STORAGE_BUCKET + "' and run storage policies from supabase/ldss_phase1_schema_rls.sql.");
-                    } else if (uploadResult.fatalCode === "policy_blocked") {
-                        details.push("Run/update storage RLS policies from supabase/ldss_phase1_schema_rls.sql.");
+                    if (uploadResult.fatalCode === "upload_server_unavailable") {
+                        details.push("Start the Node upload server and verify that LDSS_UPLOAD_API_BASE points to /api/uploads.");
+                    } else if (uploadResult.fatalCode === "upload_access_denied") {
+                        details.push("Check the Node upload server auth/config and try again.");
                     }
                 }
                 setStatus("Draft saved (" + (application.application_no || application.id) + "). " + details.join(" "), "alert-warning");
@@ -1645,45 +1859,31 @@
         }
     }
 
-    async function handleSubmit(context) {
-        if (isSubmitting || isSaving) {
-            return;
-        }
-        try {
-            requireAgreementOrThrow("submitting");
-        } catch (error) {
-            setStatus(error.message || "Please agree before submission.", "alert-warning");
+    async function runConfirmedSubmission(context) {
+        if (isSubmitting || isSaving || !context) {
             return;
         }
 
+        pendingSubmitContext = null;
         isSubmitting = true;
         setStatus("", "");
         setActionLoading("submit", true);
 
         try {
-            const fieldErrors = validateFormFields("submit");
-            const fileErrors = validateSelectedFiles();
-            const validationErrors = fieldErrors.concat(fileErrors);
-            if (validationErrors.length > 0) {
-                throw new Error(validationErrors.join(" | "));
-            }
-
             const application = await saveOrCreateDraft(context);
             writeAuxMeta(context.user.id, application.id);
             const profileErrorMessage = await saveProfile(context);
 
             const uploadResult = await uploadSelectedDocuments(context, application.id);
             if (uploadResult.errors.length > 0) {
-                if (uploadResult.fatalCode === "bucket_missing") {
+                if (uploadResult.fatalCode === "upload_server_unavailable") {
                     throw new Error(
-                        "Storage bucket '" +
-                            STORAGE_BUCKET +
-                            "' not found. Run the storage section in supabase/ldss_phase1_schema_rls.sql, then retry."
+                        "Upload server is not available. Start the Node server and make sure /api/uploads is reachable."
                     );
                 }
-                if (uploadResult.fatalCode === "policy_blocked") {
+                if (uploadResult.fatalCode === "upload_access_denied") {
                     throw new Error(
-                        "Storage upload blocked by policy. Run/update storage RLS policies from supabase/ldss_phase1_schema_rls.sql, then retry."
+                        "Upload request was denied by the Node upload server. Check server auth/config, then retry."
                     );
                 }
                 throw new Error(
@@ -1716,23 +1916,41 @@
         }
     }
 
-    function toggleMarriedFields() {
-        const enabled = !!(byId("isMarriedApplicant") && byId("isMarriedApplicant").checked);
-        const fieldset = byId("marriedFieldsGroup");
-        if (fieldset) {
-            fieldset.disabled = !enabled;
+    async function handleSubmit(context) {
+        if (isSubmitting || isSaving) {
+            return;
         }
-        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"];
-        spouseFieldIds.forEach(function (id) {
-            const input = byId(id);
-            if (!input) {
-                return;
+        try {
+            requireAgreementOrThrow("submitting");
+            requirePrivacyNoticeOrThrow("submitting");
+
+            const fieldErrors = validateFormFields("submit");
+            const fileErrors = validateSelectedFiles();
+            const validationErrors = fieldErrors.concat(fileErrors);
+            if (validationErrors.length > 0) {
+                throw new Error(validationErrors.join(" | "));
             }
-            input.disabled = !enabled;
-            if (!enabled) {
-                input.classList.remove("is-invalid");
-            }
-        });
+        } catch (error) {
+            setStatus(error.message || "Please agree before submission.", "alert-warning");
+            return;
+        }
+
+        pendingSubmitContext = context;
+        if (openApplicationPolicyModal()) {
+            return;
+        }
+
+        const confirmed = window.confirm(
+            "Only one application submission is allowed per school year.\n\n" +
+                "After you submit this application, please wait for the examination schedule or further notice from the scholarship office.\n\n" +
+                "Do you want to continue?"
+        );
+        if (!confirmed) {
+            pendingSubmitContext = null;
+            return;
+        }
+
+        await runConfirmedSubmission(context);
     }
 
     function bindInlineValidation() {
@@ -1747,6 +1965,7 @@
             "religion",
             "dateOfBirth",
             "placeOfBirth",
+            "additionalData",
             "permanentAddress",
             "contactNumber",
             "emailAddress",
@@ -1755,11 +1974,9 @@
             "schoolName",
             "schoolType",
             "grantAppliedFor",
-            "fatherStatus",
             "fatherFirstName",
             "fatherMiddleName",
             "fatherLastName",
-            "motherStatus",
             "motherFirstName",
             "motherMiddleName",
             "motherMaidenName",
@@ -1794,6 +2011,14 @@
             });
         });
 
+        ["fatherStatus", "motherStatus"].forEach(function (name) {
+            document.querySelectorAll("input[name=\"" + name + "\"]").forEach(function (input) {
+                input.addEventListener("change", function () {
+                    setInputValidity(name, false);
+                });
+            });
+        });
+
         DOC_FIELDS.forEach(function (doc) {
             const input = byId(doc.inputId);
             if (!input) {
@@ -1808,17 +2033,42 @@
             });
         });
 
-        const marriedCheckbox = byId("isMarriedApplicant");
-        if (marriedCheckbox) {
-            marriedCheckbox.addEventListener("change", function () {
-                toggleMarriedFields();
-            });
-        }
-
         const agreementCheckbox = byId("applicationAgreement");
         if (agreementCheckbox) {
             agreementCheckbox.addEventListener("change", function () {
                 setAgreementValidity(!agreementCheckbox.checked);
+            });
+        }
+
+        const privacyCheckbox = byId("privacyNoticeAgreement");
+        if (privacyCheckbox) {
+            privacyCheckbox.addEventListener("change", function () {
+                setPrivacyNoticeValidity(!privacyCheckbox.checked);
+            });
+        }
+
+        const openPrivacyBtn = byId("openPrivacyNoticeBtn");
+        if (openPrivacyBtn) {
+            openPrivacyBtn.addEventListener("click", function () {
+                openPrivacyModalForReview();
+            });
+        }
+
+        const privacyAcknowledgeBtn = byId("dataPrivacyAcknowledgeBtn");
+        if (privacyAcknowledgeBtn) {
+            privacyAcknowledgeBtn.addEventListener("click", function () {
+                acknowledgePrivacyNotice();
+            });
+        }
+
+        const policyConfirmBtn = byId("applicationPolicyConfirmBtn");
+        if (policyConfirmBtn) {
+            policyConfirmBtn.addEventListener("click", function () {
+                const modal = getApplicationPolicyModal();
+                if (modal) {
+                    modal.hide();
+                }
+                runConfirmedSubmission(pendingSubmitContext);
             });
         }
 
@@ -1874,7 +2124,9 @@
         }
 
         submittedTrackingUrl = "";
+        pendingSubmitContext = null;
         setAgreementValidity(false);
+        setPrivacyNoticeValidity(false);
         const openTrackingBtn = byId("applicationSubmittedModalOpenBtn");
         if (openTrackingBtn) {
             openTrackingBtn.disabled = true;
@@ -1928,8 +2180,6 @@
             applyAuxMeta(context.user.id, "new");
         }
 
-        toggleMarriedFields();
-
         const saveBtn = byId("saveDraftBtn");
         if (saveBtn) {
             saveBtn.addEventListener("click", function () {
@@ -1945,6 +2195,12 @@
         }
 
         bindInlineValidation();
+
+        if (!hasPrivacyNoticeAgreement()) {
+            window.setTimeout(function () {
+                openPrivacyModalForReview();
+            }, 120);
+        }
     }
 
     window.addEventListener("DOMContentLoaded", init);

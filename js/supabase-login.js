@@ -10,28 +10,6 @@
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
 
-    function normalizePhone(identifier) {
-        const cleaned = (identifier || "").replace(/[\s()-]/g, "");
-        const digitsOnly = cleaned.replace(/\D/g, "");
-
-        if (/^09\d{9}$/.test(digitsOnly)) {
-            return "+63" + digitsOnly.slice(1);
-        }
-        if (/^9\d{9}$/.test(digitsOnly)) {
-            return "+63" + digitsOnly;
-        }
-        if (/^63\d{10}$/.test(digitsOnly)) {
-            return "+" + digitsOnly;
-        }
-        if (/^\+63\d{10}$/.test(cleaned)) {
-            return cleaned;
-        }
-        if (/^\+\d{10,15}$/.test(cleaned)) {
-            return cleaned;
-        }
-        return cleaned;
-    }
-
     function setStatus(message, type) {
         const el = document.getElementById("loginStatus");
         if (!el) {
@@ -126,14 +104,15 @@
         const password = passwordInput ? passwordInput.value : "";
 
         if (!identifier || !password) {
-            setStatus("Please enter your email/mobile and password.", "alert-danger");
+            setStatus("Please enter your email and password.", "alert-danger");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
+            setStatus("Please enter a valid email address.", "alert-danger");
             return;
         }
 
-        const isEmail = identifier.includes("@");
-        const payload = isEmail
-            ? { email: identifier.toLowerCase(), password: password }
-            : { phone: normalizePhone(identifier), password: password };
+        const payload = { email: identifier.toLowerCase(), password: password };
 
         setSubmitLoading(true);
         try {

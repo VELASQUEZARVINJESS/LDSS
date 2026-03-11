@@ -1,6 +1,6 @@
-# LDSP Static Frontend (InfinityFree Ready)
+# LDSP Frontend + Node Upload Server
 
-This project is now standalone (no nested SB Admin folder) and deploy-ready for static hosting.
+This project now runs as a Node-hosted site with private file uploads stored on the hosting server and application metadata still stored in Supabase.
 
 ## Main URLs
 - `https://daet-scholarship.gt.tc/` -> Login
@@ -18,6 +18,8 @@ This project is now standalone (no nested SB Admin folder) and deploy-ready for 
 - `SYSTEMADMINISTRATOR/` (renamed Super Admin portal)
 - `SUPERADMIN/` (legacy redirect)
 - `css/`, `js/`, `assets/`, `img/`
+- `server.js` (Node server for static pages + private uploads API)
+- `uploads/` (created at runtime on the host; ignored in git)
 - `supabase/ldss_phase1_schema_rls.sql`
 
 ## Supabase
@@ -56,7 +58,36 @@ This project is now standalone (no nested SB Admin folder) and deploy-ready for 
 - SQL bootstrap now includes integration-ready workflow tables:
   - `exam_batches`, `exam_records`, `interview_records`, `approval_records`, `ranking_settings`
 - UI pages still include targeted `TODO(Supabase)` markers for remaining server-side integrations (ranking engine, PDF generation, report exports).
-- Storage bucket/policies for requirement uploads are included in the same SQL bootstrap (`ldss-documents` bucket).
+- Legacy Supabase Storage bucket/policies for requirement uploads are still included in the SQL bootstrap (`ldss-documents` bucket) for backward compatibility with older uploaded files.
+
+## Hosting Uploads (Node)
+This project now stores new uploads in your hosting storage through the Node server instead of sending new files to Supabase Storage.
+
+New hosted path format:
+- `uploads/<document_type>/<user_id>/<application_id>/<filename>`
+- Verified interview photo: `uploads/verified_interview_photo/staff/<staff_user_id>/<application_id>/<filename>`
+
+What remains in Supabase:
+- `application_documents.storage_path`
+- `profiles.applicant_photo_path`
+- `profiles.verified_interview_photo_path`
+
+Required setup:
+1. Run `npm install`
+2. Start the app with `npm start`
+3. Make sure your Node host serves this project through `server.js`
+4. Keep these environment values available to Node:
+   - `PORT`
+   - `LDSS_UPLOAD_DIR` (default: `uploads`)
+   - `LDSS_SUPABASE_URL`
+   - `LDSS_SUPABASE_ANON_KEY`
+
+Optional:
+- Copy `.env.example` to `.env` for local/server setup
+
+Important:
+- New uploads use hosting storage.
+- Older file paths that still point to Supabase Storage remain readable through the frontend fallback until they are replaced or reuploaded.
 
 ## Live Login Setup (Supabase)
 1. Open `js/supabase-config.js`.
@@ -64,7 +95,8 @@ This project is now standalone (no nested SB Admin folder) and deploy-ready for 
    - `LDSS_SUPABASE_URL`
    - `LDSS_SUPABASE_ANON_KEY`
    - `LDSS_STORAGE_BUCKET` (default: `ldss-documents`)
-3. Upload all files to InfinityFree public directory.
+3. For Node hosting, deploy the full project and run `npm start`.
+4. For local static file references, keep the app behind the Node server so `/api/uploads` is available.
 
 Login behavior now:
 - Uses Supabase `signInWithPassword` (email or mobile/phone).

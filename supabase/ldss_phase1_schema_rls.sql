@@ -232,6 +232,7 @@ create table if not exists public.applications (
     application_type public.application_type not null default 'new',
     scholarship_type text not null,
     school_year text not null,
+    sector_classification text,
     status public.application_status not null default 'draft',
     submitted_at timestamptz,
     secretary_reviewer_id uuid references public.profiles (id) on delete set null,
@@ -243,7 +244,19 @@ create table if not exists public.applications (
     release_batch_id uuid references public.release_batches (id) on delete set null,
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now()),
-    constraint applications_school_year_format check (school_year ~ '^[0-9]{4}-[0-9]{4}$')
+    constraint applications_school_year_format check (school_year ~ '^[0-9]{4}-[0-9]{4}$'),
+    constraint applications_sector_classification_check check (
+        sector_classification is null
+        or sector_classification in (
+            'Person with Disability (PWD)',
+            'Solo Parent',
+            'Child of Solo Parent',
+            'Child of Farmer',
+            'Child of Fisherfolk',
+            'Orphan',
+            'None of the above'
+        )
+    )
 );
 
 create table if not exists public.application_documents (
@@ -959,6 +972,7 @@ using (
     and (
         public.is_staff()
         or (storage.foldername(name))[2] = auth.uid()::text
+        or (storage.foldername(name))[3] = auth.uid()::text
     )
 );
 
@@ -973,7 +987,10 @@ with check (
         public.is_staff()
         or (
             public.current_user_role() = 'applicant'
-            and (storage.foldername(name))[2] = auth.uid()::text
+            and (
+                (storage.foldername(name))[2] = auth.uid()::text
+                or (storage.foldername(name))[3] = auth.uid()::text
+            )
         )
     )
 );
@@ -988,6 +1005,7 @@ using (
     and (
         public.is_staff()
         or (storage.foldername(name))[2] = auth.uid()::text
+        or (storage.foldername(name))[3] = auth.uid()::text
     )
 )
 with check (
@@ -995,6 +1013,7 @@ with check (
     and (
         public.is_staff()
         or (storage.foldername(name))[2] = auth.uid()::text
+        or (storage.foldername(name))[3] = auth.uid()::text
     )
 );
 
@@ -1008,6 +1027,7 @@ using (
     and (
         public.is_staff()
         or (storage.foldername(name))[2] = auth.uid()::text
+        or (storage.foldername(name))[3] = auth.uid()::text
     )
 );
 

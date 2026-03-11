@@ -1,11 +1,11 @@
 {
   "name": "ldss",
   "version": "1.0.0",
-  "description": "This project is now standalone (no nested SB Admin folder) and deploy-ready for static hosting.",
-  "main": "index.js",
+  "description": "LDSS frontend with Node-based private file uploads backed by Supabase auth and metadata.",
+  "main": "server.js",
   "scripts": {
-    "start": "serve -l 3000 .",
-    "host": "serve -l 3000 .",
+    "start": "node server.js",
+    "host": "node server.js",
     "test": "echo \"No tests configured\""
   },
   "repository": {
@@ -22,5 +22,11 @@
   "homepage": "https://github.com/VELASQUEZARVINJESS/LDSS#readme",
   "devDependencies": {
     "serve": "^14.2.6"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "multer": "^2.1.1"
   }
 }

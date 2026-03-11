@@ -202,14 +202,10 @@
         if (!path) {
             return "";
         }
-        const result = await context.client.storage
-            .from(STORAGE_BUCKET)
-            .createSignedUrl(path, 60 * 30);
-
-        if (result.error || !result.data || !result.data.signedUrl) {
+        if (!window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
             return "";
         }
-        return result.data.signedUrl;
+        return window.ldssUploads.createObjectUrl(context, path);
     }
 
     function latestDocumentsByType(rows) {
