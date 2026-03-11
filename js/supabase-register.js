@@ -28,6 +28,38 @@
         btn.textContent = isLoading ? "Creating Account..." : "Create Applicant Account";
     }
 
+    function setPasswordToggleIcon(button, isVisible) {
+        if (!button) {
+            return;
+        }
+
+        const iconName = isVisible ? "eye-off" : "eye";
+        button.setAttribute("aria-label", isVisible ? "Hide password" : "Show password");
+
+        if (window.feather && window.feather.icons && window.feather.icons[iconName]) {
+            button.innerHTML = window.feather.icons[iconName].toSvg({ width: 16, height: 16 });
+            return;
+        }
+
+        button.textContent = isVisible ? "Hide" : "Show";
+    }
+
+    function bindPasswordToggle(inputId, buttonId) {
+        const input = document.getElementById(inputId);
+        const button = document.getElementById(buttonId);
+        if (!input || !button) {
+            return;
+        }
+
+        setPasswordToggleIcon(button, input.type === "text");
+        button.addEventListener("click", function () {
+            const nextVisible = input.type === "password";
+            input.type = nextVisible ? "text" : "password";
+            setPasswordToggleIcon(button, nextVisible);
+            input.focus();
+        });
+    }
+
     function normalizePhone(identifier) {
         const raw = (identifier || "").trim();
         const cleaned = raw.replace(/[\s()-]/g, "");
@@ -108,7 +140,7 @@
 
         setSubmitLoading(true);
         try {
-            const emailRedirectTo = window.location.origin + "/login.html";
+            const emailRedirectTo = "https://iskolarngdaet.app/login.html";
             const { data, error } = await client.auth.signUp({
                 email: email,
                 password: password,
@@ -158,6 +190,8 @@
         if (!form) {
             return;
         }
+        bindPasswordToggle("password", "passwordToggle");
+        bindPasswordToggle("confirmPassword", "confirmPasswordToggle");
 
         const url = window.LDSS_SUPABASE_URL || "";
         const anonKey = window.LDSS_SUPABASE_ANON_KEY || "";

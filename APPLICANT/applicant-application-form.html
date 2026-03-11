@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8" />
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-        <meta name="description" content="LDSS applicant scholarship application form" />
+        <meta name="description" content="LDSP applicant scholarship application form" />
         <meta name="author" content="LGU Daet" />
-        <title>LDSS | New Scholarship Application</title>
+        <title>LDSP | New Scholarship Application</title>
         <link href="../css/styles.css" rel="stylesheet" />
         <link href="../css/ldss.css" rel="stylesheet" />
         <link rel="icon" type="image/png" href="../img/icon.png" />
@@ -16,8 +16,8 @@
         <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
             <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
             <a class="navbar-brand d-flex align-items-center" href="applicant-dashboard.html">
-                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
-                LDSS
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSP Icon" />
+                LDSP
                 <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
             </a>
             <ul class="navbar-nav align-items-center ms-auto">
@@ -109,6 +109,7 @@
                                             <option selected>2026-2027</option>
                                             <option>2025-2026</option>
                                         </select>     
+                                        <div class="form-text">Policy: only one application submission is allowed per school year.</div>
                                     </div>
                                     
                                     <div class="row-md-4">
@@ -186,22 +187,31 @@
                                         <label class="small mb-1" for="emailAddress">Email Address</label>
                                         <input class="form-control" id="emailAddress" type="email" />
                                     </div>
-                                    <div class="col-md-6">
+                                    <div class="col-md-4">
                                         <label class="small mb-1" for="highestEducationAttainment">Highest Educational Attainment</label>
                                         <select class="form-select" id="highestEducationAttainment">
                                             <option value="">Select</option>
                                             <option value="High School Graduate">High School Graduate</option>
+                                            <option value="Senior High School Graduate">Senior High School Graduate</option>
                                             <option value="College Graduate">College Graduate</option>
-                                            <option value="ALS Graduate">ALS Graduate</option>
                                         </select>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="small mb-1" for="highestGradeYearLevel">Highest Grade/Year</label>
-                                        <input class="form-control" id="highestGradeYearLevel" type="text" />
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="highestGradeYearLevel">Highest Grade/Year Attended</label>
+                                        <select class="form-select" id="highestGradeYearLevel">
+                                            <option value="">Select</option>
+                                            <option value="Grade 11">Grade 11</option>
+                                            <option value="Grade 12">Grade 12</option>
+                                            <option value="1st Year">1st Year</option>
+                                            <option value="2nd Year">2nd Year</option>
+                                            <option value="3rd Year">3rd Year</option>
+                                            <option value="4th Year">4th Year</option>
+                                            <option value="5th Year">5th Year</option>
+                                        </select>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="small mb-1" for="gwa">General Weighted Average</label>
-                                        <input class="form-control" id="gwa" type="text" placeholder="e.g. 1.75" />
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="gwa">General Weighted Average (0-100)</label>
+                                        <input class="form-control" id="gwa" type="text" placeholder="e.g. 90 or 90%" />
                                     </div>
                                     <div class="col-md-8">
                                         <label class="small mb-1" for="schoolName">School Name</label>
@@ -214,6 +224,16 @@
                                             <option value="Public">Public</option>
                                             <option value="Private">Private</option>
                                         </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="grantAppliedFor">Grant Applied For</label>
+                                        <select class="form-select" id="grantAppliedFor">
+                                            <option value="Degree Course" selected>Degree Course</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <label class="small mb-1" for="degreeProgramCourse">Degree Course</label>
+                                        <input class="form-control" id="degreeProgramCourse" type="text" placeholder="e.g. BS Information Technology" />
                                     </div>
                                 </div>
                             </div>
@@ -304,11 +324,6 @@
                                         <label class="small mb-1" for="totalParentsGrossIncome">Total Parents Gross Income (PHP)</label>
                                         <input class="form-control" id="totalParentsGrossIncome" type="number" min="0" step="0.01" />
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="small mb-1" for="reqIncomeTaxReturn">ITR (Income Tax Return) PDF (Optional)</label>
-                                        <input class="form-control" id="reqIncomeTaxReturn" type="file" accept=".pdf,application/pdf" />
-                                        <div class="form-text" id="reqIncomeTaxReturnFeedback"></div>
-                                    </div>
                                     <div class="col-md-4">
                                         <label class="small mb-1" for="childrenInFamily">No. of Children in Family</label>
                                         <input class="form-control" id="childrenInFamily" type="number" min="0" step="1" />
@@ -355,25 +370,23 @@
                                                 <label class="small mb-1" for="intendedSchool">School Intended to Enroll In</label>
                                                 <input class="form-control" id="intendedSchool" type="text" />
                                             </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="degreeProgramCourse">Degree Program Course</label>
-                                                <input class="form-control" id="degreeProgramCourse" type="text" />
-                                            </div>
                                         </div>
                                     </fieldset>
                                 </div>
                             </div>
 
-                            <div class="form-check pt-2">
-                                <input class="form-check-input" id="applicationAgreement" type="checkbox" />
-                                <label class="form-check-label small" for="applicationAgreement">
-                                    I agree that all information in this form is true and correct.
-                                </label>
-                                <div class="invalid-feedback">Please agree before saving draft or submitting.</div>
-                            </div>
-                            <div class="d-flex flex-wrap gap-2 pt-2">
-                                <button class="btn btn-outline-dark" id="saveDraftBtn" type="button">Save Draft</button>
-                                <button class="btn btn-dark" id="submitApplicationBtn" type="button">Submit Application</button>
+                            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 pt-2">
+                                <div class="form-check pt-2 mb-0">
+                                    <input class="form-check-input" id="applicationAgreement" type="checkbox" />
+                                    <label class="form-check-label small" for="applicationAgreement">
+                                        I agree that all information in this form is true and correct.
+                                    </label>
+                                    <div class="invalid-feedback">Please agree before saving draft or submitting.</div>
+                                </div>
+                                <div class="d-flex flex-wrap justify-content-end gap-2">
+                                    <button class="btn btn-outline-dark" id="saveDraftBtn" type="button">Save Draft</button>
+                                    <button class="btn btn-dark" id="submitApplicationBtn" type="button">Submit Application</button>
+                                </div>
                             </div>
                                 </div>
                             </div>
@@ -384,7 +397,7 @@
                     <div class="container-xl px-4">
                         <div class="row">
                             <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
-                            <div class="col-md-6 text-md-end small">LDSS Applicant Portal</div>
+                            <div class="col-md-6 text-md-end small">LDSP Applicant Portal</div>
                         </div>
                     </div>
                 </footer>
@@ -415,6 +428,7 @@
         <script src="../js/scripts.js"></script>
     </body>
 </html>
+
 
 
 

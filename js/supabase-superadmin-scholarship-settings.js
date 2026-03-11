@@ -18,6 +18,7 @@
             requirements_weight: 5,
             notes: "",
             controls: {
+                application_intake_enabled: true,
                 require_admin_remarks: true,
                 lock_ranking_after_decision: true,
                 allow_special_endorsement: true,
@@ -133,6 +134,7 @@
             "Quota: " + Number(settings.quota_slots || 0),
             "Waitlist Buffer: " + Number(settings.waitlist_slots || 0),
             "Passing Score: " + formatPercent(settings.passing_score || 0),
+            "New Application Filing: " + ((ranking.controls && ranking.controls.application_intake_enabled !== false) ? "Open" : "Closed"),
             "Weights (Exam/Interview/Income/Requirements): "
                 + Number(ranking.exam_weight || 0) + "/"
                 + Number(ranking.interview_weight || 0) + "/"
@@ -162,6 +164,7 @@
         writeInput("superSettingsWeightIncome", ranking.income_weight || 0);
         writeInput("superSettingsWeightRequirements", ranking.requirements_weight || 0);
         writeInput("superSettingsRankingNotes", ranking.notes || "");
+        writeCheckbox("superSettingsApplicationIntakeEnabled", controls.application_intake_enabled !== false);
         writeCheckbox("superSettingsRequireRemarks", controls.require_admin_remarks);
         writeCheckbox("superSettingsLockRankingAfterDecision", controls.lock_ranking_after_decision);
         writeCheckbox("superSettingsAllowSpecialEndorsement", controls.allow_special_endorsement);
@@ -218,6 +221,7 @@
                 requirements_weight: requirementsWeight,
                 notes: byId("superSettingsRankingNotes") ? byId("superSettingsRankingNotes").value.trim() : "",
                 controls: {
+                    application_intake_enabled: Boolean(byId("superSettingsApplicationIntakeEnabled") && byId("superSettingsApplicationIntakeEnabled").checked),
                     require_admin_remarks: Boolean(byId("superSettingsRequireRemarks") && byId("superSettingsRequireRemarks").checked),
                     lock_ranking_after_decision: Boolean(byId("superSettingsLockRankingAfterDecision") && byId("superSettingsLockRankingAfterDecision").checked),
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),

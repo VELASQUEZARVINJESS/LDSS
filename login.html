@@ -4,9 +4,9 @@
         <meta charset="utf-8" />
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-        <meta name="description" content="LDSS shared login page" />
+        <meta name="description" content="LDSP shared login page" />
         <meta name="author" content="LGU Daet" />
-        <title>LDSS | Login</title>
+        <title>LDSP | Login</title>
         <link href="css/styles.css" rel="stylesheet" />
         <link href="css/ldss.css" rel="stylesheet" />
         <link rel="icon" type="image/png" href="img/icon.png" />
@@ -18,8 +18,9 @@
                 <div class="card-body p-4 p-md-5">
                     <div class="text-center mb-4">
                         <img class="ldss-auth-logo mb-2" src="img/daet-lgu.png" alt="LGU Daet Logo" />
-                        <h1 class="h4 ldss-auth-title">LDSS</h1>
-                        <p class="ldss-auth-subtitle mb-0">LGU Daet Scholarship System</p>
+                        <h1 class="h4 ldss-auth-title">LDSP</h1>
+                        <p class="ldss-auth-subtitle mb-0">LGU Daet Scholarship Portal</p>
+                        <p class="small text-muted mt-2 mb-0">Note: This is the official LGU Daet Scholarship Portal.</p>
                     </div>
                     <div class="alert alert-danger d-none" id="loginStatus" role="alert"></div>
                     <form id="loginForm">
@@ -29,7 +30,12 @@
                         </div>
                         <div class="mb-3">
                             <label class="small mb-1" for="loginPassword">Password</label>
-                            <input class="form-control" id="loginPassword" type="password" placeholder="Enter password" />
+                            <div class="input-group">
+                                <input class="form-control" id="loginPassword" type="password" placeholder="Enter password" />
+                                <button class="btn btn-outline-secondary" id="loginPasswordToggle" type="button" aria-label="Show password" aria-controls="loginPassword">
+                                    <i data-feather="eye"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <div class="form-check mb-0">
@@ -41,8 +47,8 @@
                         <button class="btn btn-dark w-100" id="loginSubmitBtn" type="submit">Sign In</button>
                     </form>
                     <div class="text-center mt-4">
-                        <p class="small text-muted mb-2">Need an applicant account?</p>
-                        <a class="btn btn-outline-dark btn-sm" href="register.html">Register as Applicant</a>
+                        <p class="small text-muted mb-2">Need an account to apply for scholarship?</p>
+                        <a class="btn btn-outline-dark w-100" href="register.html">Register as Scholarship Applicant</a>
                     </div>
                 </div>
             </div>

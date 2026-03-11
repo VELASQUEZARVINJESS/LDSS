@@ -1,4 +1,4 @@
-# LDSS Static Frontend (InfinityFree Ready)
+# LDSP Static Frontend (InfinityFree Ready)
 
 This project is now standalone (no nested SB Admin folder) and deploy-ready for static hosting.
 
@@ -22,6 +22,10 @@ This project is now standalone (no nested SB Admin folder) and deploy-ready for 
 
 ## Supabase
 - Schema + RLS bootstrap is in `supabase/ldss_phase1_schema_rls.sql`.
+- One-attempt-per-school-year hotfix (includes draft) and System Admin ON/OFF intake switch are in `supabase/submission_limit_hotfix_2026_03_10.sql`.
+- Security role hardening hotfix is in `supabase/security_hotfix_2026_03_10.sql`.
+- LDSP branding hotfix (application number prefix) is in `supabase/branding_hotfix_ldsp_2026_03_10.sql`.
+- User management hotfix (secure super-admin delete user RPC) is in `supabase/user_management_hotfix_2026_03_10.sql`.
 - Applicant Phase 1.1 live integrations now in:
   - `js/supabase-applicant-guard.js`
   - `js/supabase-applicant-profile.js`
@@ -42,6 +46,7 @@ This project is now standalone (no nested SB Admin folder) and deploy-ready for 
   - `js/supabase-admin-approval-queue.js`
 - Super Admin settings integration shell:
   - `js/supabase-superadmin-scholarship-settings.js`
+  - `js/supabase-superadmin-user-management.js`
 - Applicant notifications page supports live list, filter, pagination, mark read/unread, and mark all read.
 - Secretary verification supports document status updates, interview scheduling, hard-copy verification state, verified photo upload, recommend-to-admin, and applicant notifications.
 - Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
@@ -88,3 +93,4 @@ Required Supabase Auth settings:
 2. Add redirect URL:
    - `https://daet-scholarship.gt.tc/reset-password.html`
 3. Keep Email provider enabled for recovery links.
+

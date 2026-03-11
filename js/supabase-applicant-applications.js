@@ -71,6 +71,95 @@
         return workflow().statusMeta(status);
     }
 
+    function toIsoDateOnly(value) {
+        if (!value) {
+            return "";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+        return date.toISOString().slice(0, 10);
+    }
+
+    async function loadIntakePolicy(context) {
+        const fallback = {
+            isOpen: true,
+            reason: "open",
+            openDate: "",
+            closeDate: ""
+        };
+
+        const result = await context.client.rpc("application_intake_is_open");
+        if (result.error || !result.data || typeof result.data !== "object") {
+            return fallback;
+        }
+
+        return {
+            isOpen: result.data.is_open !== false,
+            reason: (result.data.reason || "open").toString(),
+            openDate: toIsoDateOnly(result.data.open_date || ""),
+            closeDate: toIsoDateOnly(result.data.close_date || "")
+        };
+    }
+
+    function intakeClosedMessage(policy) {
+        if (!policy) {
+            return "New application filing is currently closed by System Administrator.";
+        }
+        if (policy.reason === "before_open_date" && policy.openDate) {
+            return "New application filing opens on " + formatDate(policy.openDate) + ".";
+        }
+        if (policy.reason === "after_close_date" && policy.closeDate) {
+            return "New application filing closed on " + formatDate(policy.closeDate) + ".";
+        }
+        if (policy.reason === "closed_by_admin") {
+            return "New application filing is currently turned OFF by System Administrator.";
+        }
+        return "New application filing is currently closed by System Administrator.";
+    }
+
+    function applyIntakeState(policy) {
+        const btn = byId("newApplicationBtn");
+        if (!btn) {
+            return;
+        }
+
+        const openHref = btn.getAttribute("data-open-href") || btn.getAttribute("href") || "applicant-application-form.html";
+        btn.setAttribute("data-open-href", openHref);
+
+        if (policy && policy.isOpen) {
+            btn.classList.remove("disabled");
+            btn.setAttribute("href", openHref);
+            btn.removeAttribute("aria-disabled");
+            btn.removeAttribute("title");
+            return;
+        }
+
+        const message = intakeClosedMessage(policy);
+        btn.classList.add("disabled");
+        btn.setAttribute("href", "javascript:void(0);");
+        btn.setAttribute("aria-disabled", "true");
+        btn.setAttribute("title", message);
+        showStatus(message, "alert-warning");
+    }
+
+    async function loadApplicantCourse(context) {
+        const result = await context.client
+            .from("profiles")
+            .select("course_or_strand")
+            .eq("id", context.user.id)
+            .maybeSingle();
+
+        if (result.error) {
+            return "";
+        }
+
+        return result.data && result.data.course_or_strand
+            ? result.data.course_or_strand
+            : "";
+    }
+
     function dropdownId(rowId) {
         const normalized = (rowId || "")
             .toString()
@@ -82,7 +171,7 @@
         const menuId = dropdownId(row.id);
         const encodedId = encodeURIComponent(row.id);
 
-        if (EDITABLE_STATUSES.includes(row.status)) {
+        if (row.status === "draft") {
             return (
                 '<div class="dropdown dropup">' +
                 '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + menuId + '" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
@@ -90,6 +179,18 @@
                 '<li><a class="dropdown-item" href="applicant-application-form.html?application_id=' + encodedId + '">Continue Draft</a></li>' +
                 '<li><hr class="dropdown-divider" /></li>' +
                 '<li><button class="dropdown-item text-danger" type="button" data-action="delete-draft" data-id="' + escapeHtml(row.id) + '">Delete Draft</button></li>' +
+                "</ul>" +
+                "</div>"
+            );
+        }
+
+        if (row.status === "returned_for_correction") {
+            return (
+                '<div class="dropdown dropup">' +
+                '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + menuId + '" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
+                '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="' + menuId + '">' +
+                '<li><a class="dropdown-item" href="applicant-application-form.html?application_id=' + encodedId + '">Edit and Resubmit</a></li>' +
+                '<li><a class="dropdown-item" href="application-detail.html?id=' + encodedId + '">Track Application</a></li>' +
                 "</ul>" +
                 "</div>"
             );
@@ -147,7 +248,7 @@
                 return (
                     "<tr>" +
                     "<td>" + escapeHtml(row.application_no) + "</td>" +
-                    "<td>" + escapeHtml(row.scholarship_type || "-") + "</td>" +
+                    "<td>" + escapeHtml(row.degree_course || "-") + "</td>" +
                     "<td>" + escapeHtml(formatDate(row.submitted_at || row.created_at)) + "</td>" +
                     '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
                     '<td><div class="small">' + escapeHtml(examText) + '</div><span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span></td>" +
@@ -232,8 +333,8 @@
         const targetRow = applicationRows.find(function (row) {
             return row.id === applicationId;
         });
-        if (!targetRow || !EDITABLE_STATUSES.includes(targetRow.status)) {
-            showStatus("Only draft applications can be deleted.", "alert-warning");
+        if (!targetRow || targetRow.status !== "draft") {
+            showStatus("Only draft applications can be deleted. Submitted records cannot be deleted.", "alert-warning");
             return;
         }
 
@@ -366,12 +467,14 @@
         }
 
         const rows = result.data || [];
+        const applicantCourse = await loadApplicantCourse(context);
         const appIds = rows.map(function (row) { return row.id; }).filter(Boolean);
         const examMap = await loadExamMap(context, appIds);
 
         applicationRows = rows.map(function (row) {
             return Object.assign({}, row, {
-                exam_record: examMap[row.id] || null
+                exam_record: examMap[row.id] || null,
+                degree_course: applicantCourse || ""
             });
         });
 
@@ -421,6 +524,8 @@
         }
         bindEvents(context);
         await loadApplications(context);
+        const intakePolicy = await loadIntakePolicy(context);
+        applyIntakeState(intakePolicy);
     }
 
     window.addEventListener("DOMContentLoaded", init);

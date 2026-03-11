@@ -583,7 +583,9 @@ body {
 .ldss-paper-photo-box img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    object-position: center;
+    background: #ffffff;
 }
 
 .ldss-paper-photo-box div {
@@ -642,11 +644,15 @@ body {
     border: 0;
     border-bottom: 1px solid #7b8794;
     border-radius: 0;
-    background: transparent;
+    background-color: transparent;
     box-shadow: none;
     padding: 0.2rem 0.1rem;
     min-height: 30px;
     font-size: 0.86rem;
+}
+
+.ldss-paper-fields .form-select {
+    background-repeat: no-repeat;
 }
 
 .ldss-paper-fields .form-control:focus,
@@ -733,7 +739,9 @@ body {
 .ldss-print-photo-box img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    object-position: center;
+    background: #ffffff;
 }
 
 .ldss-print-photo-placeholder {
@@ -800,7 +808,9 @@ body {
 .ldss-photo-1x1 img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    object-position: center;
+    background: #ffffff;
 }
 
 .ldss-photo-1x1-placeholder {

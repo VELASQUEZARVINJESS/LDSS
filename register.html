@@ -4,9 +4,9 @@
         <meta charset="utf-8" />
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-        <meta name="description" content="LDSS applicant registration page" />
+        <meta name="description" content="LDSP applicant registration page" />
         <meta name="author" content="LGU Daet" />
-        <title>LDSS | Applicant Registration</title>
+        <title>LDSP | Applicant Registration</title>
         <link href="css/styles.css" rel="stylesheet" />
         <link href="css/ldss.css" rel="stylesheet" />
         <link rel="icon" type="image/png" href="img/icon.png" />
@@ -19,7 +19,7 @@
                     <div class="text-center mb-4">
                         <img class="ldss-auth-logo mb-2" src="img/daet-lgu.png" alt="LGU Daet Logo" />
                         <h1 class="h4 ldss-auth-title">Applicant Registration</h1>
-                        <p class="ldss-auth-subtitle mb-0">Create your LDSS account</p>
+                        <p class="ldss-auth-subtitle mb-0">Create your LDSP account</p>
                     </div>
                     <div class="alert alert-danger d-none" id="registerStatus" role="alert"></div>
                     <form id="registerForm">
@@ -44,11 +44,21 @@
                         <div class="row gx-2">
                             <div class="col-sm-6 mb-3">
                                 <label class="small mb-1" for="password">Password</label>
-                                <input class="form-control" id="password" type="password" />
+                                <div class="input-group">
+                                    <input class="form-control" id="password" type="password" />
+                                    <button class="btn btn-outline-secondary" id="passwordToggle" type="button" aria-label="Show password" aria-controls="password">
+                                        <i data-feather="eye"></i>
+                                    </button>
+                                </div>
                             </div>
                             <div class="col-sm-6 mb-3">
                                 <label class="small mb-1" for="confirmPassword">Confirm Password</label>
-                                <input class="form-control" id="confirmPassword" type="password" />
+                                <div class="input-group">
+                                    <input class="form-control" id="confirmPassword" type="password" />
+                                    <button class="btn btn-outline-secondary" id="confirmPasswordToggle" type="button" aria-label="Show password" aria-controls="confirmPassword">
+                                        <i data-feather="eye"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div class="small text-muted mb-3">Password must be at least 12 characters and include uppercase, lowercase, number, and symbol.</div>
@@ -74,5 +84,6 @@
         <script src="js/scripts.js"></script>
     </body>
 </html>
+
 
 

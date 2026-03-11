@@ -1,10 +1,10 @@
-# LDSS Product Requirements Document (PRD) v1
+# LDSP Product Requirements Document (PRD) v1
 
 ## 1. Project Title
-**LDSS — LGU Daet Scholarship System**
+**LDSP - LGU Daet Scholarship System**
 
 ## 2. Purpose
-This document defines the product requirements for LDSS, a real-world scholarship management system for the Local Government Unit of Daet. This PRD is intended to be the implementation reference for Codex and the development team.
+This document defines the product requirements for LDSP, a real-world scholarship management system for the Local Government Unit of Daet. This PRD is intended to be the implementation reference for Codex and the development team.
 
 The system will support:
 - applicant registration and login
@@ -62,7 +62,7 @@ Use these existing assets:
 ---
 
 ## 5. Product Summary
-LDSS is a scholarship records, evaluation, approval, certification, and release management system for LGU Daet.
+LDSP is a scholarship records, evaluation, approval, certification, and release management system for LGU Daet.
 
 It must support both:
 - **new applicants**
@@ -116,7 +116,7 @@ Has the highest control over users, settings, master data, and government-side s
 
 ## 8. Branding and UI Direction
 ### Display Name
-**LDSS**
+**LDSP**
 
 ### Full Name
 **LGU Daet Scholarship System**
@@ -435,9 +435,10 @@ Codex must:
 - inspect the existing SB Admin Pro template in the project root first
 - preserve and adapt the template, not replace it
 - remove unnecessary template/demo clutter
-- build a minimal modern UI for LDSS
+- build a minimal modern UI for LDSP
 - preserve static deployability for InfinityFree
 - avoid server-side Node requirements
 - leave clear TODO comments for future Supabase integration
 - output a concise file map and next steps after each implementation pass
+
 

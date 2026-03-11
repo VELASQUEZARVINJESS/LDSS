@@ -1,4 +1,4 @@
--- LDSS Security Hotfix
+-- LDSP Security Hotfix
 -- Date: 2026-03-10
 -- Purpose:
 -- 1) Prevent client-supplied signup metadata from assigning staff roles.
@@ -37,6 +37,7 @@ begin
         email,
         mobile_number,
         first_name,
+        middle_name,
         last_name
     )
     values (
@@ -45,6 +46,7 @@ begin
         new.email,
         nullif(new.phone, ''),
         nullif(new.raw_user_meta_data ->> 'first_name', ''),
+        nullif(new.raw_user_meta_data ->> 'middle_name', ''),
         nullif(new.raw_user_meta_data ->> 'last_name', '')
     )
     on conflict (id) do nothing;
@@ -82,3 +84,4 @@ with check (
 -- from public.profiles
 -- where role in ('secretary', 'admin', 'super_admin')
 -- order by created_at desc;
+

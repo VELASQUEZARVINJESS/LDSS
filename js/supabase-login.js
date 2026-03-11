@@ -56,6 +56,38 @@
         btn.textContent = isLoading ? "Signing In..." : "Sign In";
     }
 
+    function setPasswordToggleIcon(button, isVisible) {
+        if (!button) {
+            return;
+        }
+
+        const iconName = isVisible ? "eye-off" : "eye";
+        button.setAttribute("aria-label", isVisible ? "Hide password" : "Show password");
+
+        if (window.feather && window.feather.icons && window.feather.icons[iconName]) {
+            button.innerHTML = window.feather.icons[iconName].toSvg({ width: 16, height: 16 });
+            return;
+        }
+
+        button.textContent = isVisible ? "Hide" : "Show";
+    }
+
+    function bindPasswordToggle(inputId, buttonId) {
+        const input = document.getElementById(inputId);
+        const button = document.getElementById(buttonId);
+        if (!input || !button) {
+            return;
+        }
+
+        setPasswordToggleIcon(button, input.type === "text");
+        button.addEventListener("click", function () {
+            const nextVisible = input.type === "password";
+            input.type = nextVisible ? "text" : "password";
+            setPasswordToggleIcon(button, nextVisible);
+            input.focus();
+        });
+    }
+
     async function fetchRoleAndRedirect(client, userId) {
         const { data, error } = await client
             .from("profiles")
@@ -127,6 +159,7 @@
         if (!form) {
             return;
         }
+        bindPasswordToggle("loginPassword", "loginPasswordToggle");
 
         const url = window.LDSS_SUPABASE_URL || "";
         const anonKey = window.LDSS_SUPABASE_ANON_KEY || "";

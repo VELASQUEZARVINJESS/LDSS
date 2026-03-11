@@ -1,12 +1,12 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
     <head>
         <meta charset="utf-8" />
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
-        <meta name="description" content="LDSS | System Administrator System Settings" />
+        <meta name="description" content="LDSP | System Administrator System Settings" />
         <meta name="author" content="LGU Daet" />
-        <title>LDSS | System Administrator System Settings</title>
+        <title>LDSP | System Administrator System Settings</title>
         <link href="../css/styles.css" rel="stylesheet" />
         <link href="../css/ldss.css" rel="stylesheet" />
         <link rel="icon" type="image/png" href="../img/icon.png" />
@@ -16,8 +16,8 @@
         <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
             <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
             <a class="navbar-brand d-flex align-items-center" href="super-admin-dashboard.html">
-                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSS Icon" />
-                LDSS
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSP Icon" />
+                LDSP
                 <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
             </a>
             <ul class="navbar-nav align-items-center ms-auto">
@@ -97,14 +97,38 @@
                         </div>
                     </header>
                     <div class="container-xl px-4 mt-4">
-                        <!-- TODO(Supabase): persist system-wide settings and feature flags -->
-                        <div class="card">
-                            <div class="card-header">Module Placeholder</div>
-                            <div class="card-body">
-                                <div class="ldss-shell-placeholder">
-                                    <div class="fw-700 mb-1">System Administrator System Settings</div>
-                                    <p class="small mb-2">This static page is intentionally included so role navigation works end-to-end in Phase 1.</p>
-                                    <p class="small mb-0">Replace this with connected Supabase-backed UI in the next implementation pass.</p>
+                        <div class="alert d-none" id="superAdminSettingsStatus" role="alert"></div>
+
+                        <div class="row g-4">
+                            <div class="col-lg-7">
+                                <!-- TODO(Supabase): persist system-wide settings and feature flags -->
+                                <div class="card h-100">
+                                    <div class="card-header">System Settings Module</div>
+                                    <div class="card-body">
+                                        <div class="ldss-shell-placeholder">
+                                            <div class="fw-700 mb-1">System Administrator System Settings</div>
+                                            <p class="small mb-2">This module will store platform-wide feature flags and environment-level defaults.</p>
+                                            <p class="small mb-0">Current focus: provide emergency data-reset control for application records.</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-lg-5">
+                                <div class="card border-danger">
+                                    <div class="card-header text-danger">Danger Zone</div>
+                                    <div class="card-body">
+                                        <div class="small text-muted mb-3">
+                                            Clean all application workflow records (applications, uploads, exam/interview/approval records, and related notifications).
+                                            User accounts and profiles are not deleted.
+                                        </div>
+                                        <label class="small mb-1" for="superAdminCleanupConfirmInput">Type <code>DELETE APPLICATION DATA</code> to enable</label>
+                                        <input class="form-control mb-3" id="superAdminCleanupConfirmInput" type="text" placeholder="DELETE APPLICATION DATA" />
+                                        <button class="btn btn-danger w-100" id="superAdminCleanupBtn" type="button" disabled>Clean Application Data</button>
+                                        <div class="small text-muted mt-2">Super Admin only. Action is irreversible.</div>
+                                        <hr />
+                                        <div class="small fw-600 mb-2">Last Cleanup Summary</div>
+                                        <pre class="small bg-light border rounded p-2 mb-0" id="superAdminCleanupSummary">No cleanup executed in this session.</pre>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -114,7 +138,7 @@
                     <div class="container-xl px-4">
                         <div class="row">
                             <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
-                            <div class="col-md-6 text-md-end small">LDSS System Administrator Portal</div>
+                            <div class="col-md-6 text-md-end small">LDSP System Administrator Portal</div>
                         </div>
                     </div>
                 </footer>
@@ -125,9 +149,11 @@
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/supabase-superadmin-system-settings.js"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
+
 
 
 

@@ -17,21 +17,11 @@
             fileTypeHint: "JPG or PNG only",
             requiredOnSubmit: true,
             syncToProfilePhoto: true
-        },
-        {
-            inputId: "reqIncomeTaxReturn",
-            docType: "income_certificate",
-            label: "ITR (Income Tax Return)",
-            allowedExtensions: [".pdf"],
-            allowedMimeTypes: ["application/pdf", "application/x-pdf"],
-            fileTypeHint: "PDF only",
-            requiredOnSubmit: false
         }
     ];
 
     const DOC_LABELS = {
-        applicant_photo: "Applicant 1x1 Photo",
-        income_certificate: "ITR (Income Tax Return)"
+        applicant_photo: "Applicant 1x1 Photo"
     };
 
     let currentApplication = null;
@@ -481,6 +471,7 @@
             highestEducationAttainment: nullIfBlank(byId("highestEducationAttainment") ? byId("highestEducationAttainment").value : ""),
             highestGradeYearLevel: nullIfBlank(byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value : ""),
             schoolType: nullIfBlank(byId("schoolType") ? byId("schoolType").value : ""),
+            grantAppliedFor: nullIfBlank(byId("grantAppliedFor") ? byId("grantAppliedFor").value : ""),
             awards: collectAwardsFromForm(),
             fatherStatus: nullIfBlank(byId("fatherStatus") ? byId("fatherStatus").value : ""),
             fatherFirstName: nullIfBlank(byId("fatherFirstName") ? byId("fatherFirstName").value : ""),
@@ -528,10 +519,13 @@
             setSelectValue("highestEducationAttainment", payload.highestEducationAttainment || "");
         }
         if (byId("highestGradeYearLevel")) {
-            byId("highestGradeYearLevel").value = payload.highestGradeYearLevel || "";
+            setSelectValue("highestGradeYearLevel", payload.highestGradeYearLevel || "");
         }
         if (byId("schoolType")) {
             setSelectValue("schoolType", payload.schoolType || "");
+        }
+        if (byId("grantAppliedFor")) {
+            setSelectValue("grantAppliedFor", payload.grantAppliedFor || "Degree Course");
         }
         let awards = normalizeAwardList(payload.awards);
         if (awards.length === 0) {
@@ -625,9 +619,14 @@
     }
 
     function collectApplicationPayload() {
+        const schoolYear = nullIfBlank(byId("schoolYear") ? byId("schoolYear").value : "");
+        const hiddenScholarshipType = nullIfBlank(byId("scholarshipType") ? byId("scholarshipType").value : "");
+        const degreeProgramCourse = nullIfBlank(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "");
+        const scholarshipType = degreeProgramCourse || hiddenScholarshipType;
+
         return {
-            school_year: nullIfBlank(byId("schoolYear") ? byId("schoolYear").value : ""),
-            scholarship_type: nullIfBlank(byId("scholarshipType") ? byId("scholarshipType").value : ""),
+            school_year: schoolYear,
+            scholarship_type: scholarshipType,
             application_type: (byId("applicantCategory") && byId("applicantCategory").value === "renewal") ? "renewal" : "new"
         };
     }
@@ -808,7 +807,7 @@
         const errors = [];
 
         const schoolYear = byId("schoolYear") ? byId("schoolYear").value.trim() : "";
-        const scholarshipType = byId("scholarshipType") ? byId("scholarshipType").value.trim() : "";
+        const grantAppliedFor = byId("grantAppliedFor") ? byId("grantAppliedFor").value.trim() : "";
         const lastName = byId("lastName") ? byId("lastName").value.trim() : "";
         const firstName = byId("firstName") ? byId("firstName").value.trim() : "";
         const middleName = byId("middleName") ? byId("middleName").value.trim() : "";
@@ -850,7 +849,7 @@
         const degreeProgramCourse = byId("degreeProgramCourse") ? byId("degreeProgramCourse").value.trim() : "";
 
         setInputValidity("schoolYear", !schoolYear);
-        setInputValidity("scholarshipType", !scholarshipType);
+        setInputValidity("grantAppliedFor", false);
 
         if (!schoolYear) {
             errors.push("School Year is required.");
@@ -858,9 +857,6 @@
         if (schoolYear && !/^\d{4}-\d{4}$/.test(schoolYear)) {
             errors.push("School Year format must be YYYY-YYYY.");
             setInputValidity("schoolYear", true);
-        }
-        if (!scholarshipType) {
-            errors.push("Scholarship Type is required.");
         }
 
         const submitting = mode === "submit";
@@ -878,9 +874,11 @@
             { id: "emailAddress", label: "Email Address", value: emailAddress },
             { id: "highestEducationAttainment", label: "Highest Educational Attainment", value: highestEducationAttainment },
             { id: "highestGradeYearLevel", label: "Highest Grade/Year", value: highestGradeYearLevel },
-            { id: "gwa", label: "General Weighted Average", value: gwaRaw },
+            { id: "gwa", label: "General Weighted Average (0-100)", value: gwaRaw },
             { id: "schoolName", label: "School Name", value: schoolName },
             { id: "schoolType", label: "School Type", value: schoolType },
+            { id: "grantAppliedFor", label: "Grant Applied For", value: grantAppliedFor },
+            { id: "degreeProgramCourse", label: "Degree Course", value: degreeProgramCourse },
             { id: "fatherStatus", label: "Father Status", value: byId("fatherStatus") ? byId("fatherStatus").value.trim() : "" },
             { id: "motherStatus", label: "Mother Status", value: byId("motherStatus") ? byId("motherStatus").value.trim() : "" },
             { id: "fatherFirstName", label: "Father First Name", value: fatherFirstName },
@@ -941,11 +939,14 @@
         }
 
         if (gwaRaw) {
-            const gwa = Number(gwaRaw);
-            const invalidGwa = Number.isNaN(gwa) || gwa < 1 || gwa > 5;
+            const normalizedGwa = gwaRaw.replace(/%/g, "").trim();
+            const gwa = Number(normalizedGwa);
+            const invalidGwa = Number.isNaN(gwa) || gwa < 0 || gwa > 100;
             setInputValidity("gwa", invalidGwa);
             if (invalidGwa) {
-                errors.push("Latest GWA must be a number between 1.00 and 5.00.");
+                errors.push("General Weighted Average must be a number between 0 and 100.");
+            } else if (byId("gwa")) {
+                byId("gwa").value = normalizedGwa;
             }
         } else {
             setInputValidity("gwa", false);
@@ -980,8 +981,7 @@
                 { id: "spouseChildrenCount", label: "No. of Children", value: spouseChildrenCount },
                 { id: "spouseOccupation", label: "Spouse Occupation", value: spouseOccupation },
                 { id: "spouseEducation", label: "Spouse Educational Attainment", value: spouseEducation },
-                { id: "intendedSchool", label: "School Intended to Enroll In", value: intendedSchool },
-                { id: "degreeProgramCourse", label: "Degree Program Course", value: degreeProgramCourse }
+                { id: "intendedSchool", label: "School Intended to Enroll In", value: intendedSchool }
             ];
             spouseRequired.forEach(function (item) {
                 const missing = submitting && !item.value;
@@ -999,7 +999,7 @@
                 }
             }
         } else {
-            ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool", "degreeProgramCourse"].forEach(function (id) {
+            ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"].forEach(function (id) {
                 setInputValidity(id, false);
             });
         }
@@ -1042,7 +1042,7 @@
             byId("schoolName").value = profile.school_name || "";
         }
         if (byId("highestGradeYearLevel")) {
-            byId("highestGradeYearLevel").value = profile.year_level || "";
+            setSelectValue("highestGradeYearLevel", profile.year_level || "");
         }
         if (byId("fatherOccupation")) {
             byId("fatherOccupation").value = profile.guardian_occupation || "";
@@ -1061,7 +1061,13 @@
         }
         setSelectValue("schoolYear", application.school_year || "");
         if (byId("scholarshipType")) {
-            byId("scholarshipType").value = application.scholarship_type || "Revised Daet Expanded Scholarship Program";
+            byId("scholarshipType").value = application.scholarship_type || "";
+        }
+        if (byId("grantAppliedFor")) {
+            setSelectValue("grantAppliedFor", "Degree Course");
+        }
+        if (byId("degreeProgramCourse") && !byId("degreeProgramCourse").value && application.scholarship_type) {
+            byId("degreeProgramCourse").value = application.scholarship_type;
         }
         setSelectValue("applicantCategory", application.application_type || "new");
         setApplicationIdDisplay(application.application_no || "");
@@ -1097,6 +1103,7 @@
             "highestGradeYearLevel",
             "schoolName",
             "schoolType",
+            "grantAppliedFor",
             "fatherStatus",
             "fatherFirstName",
             "fatherMiddleName",
@@ -1113,7 +1120,6 @@
             "motherOccupation",
             "motherEducationAttainment",
             "totalParentsGrossIncome",
-            "reqIncomeTaxReturn",
             "childrenInFamily",
             "brotherCount",
             "sisterCount",
@@ -1211,6 +1217,109 @@
         return result.data[0];
     }
 
+    function toIsoDateOnly(value) {
+        if (!value) {
+            return "";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+        return date.toISOString().slice(0, 10);
+    }
+
+    function describeIntakeClosedReason(policy) {
+        if (!policy) {
+            return "New application filing is currently closed by System Administrator.";
+        }
+        if (policy.reason === "before_open_date" && policy.openDate) {
+            return "New application filing opens on " + formatDate(policy.openDate) + ".";
+        }
+        if (policy.reason === "after_close_date" && policy.closeDate) {
+            return "New application filing closed on " + formatDate(policy.closeDate) + ".";
+        }
+        if (policy.reason === "closed_by_admin") {
+            return "New application filing is currently turned OFF by System Administrator.";
+        }
+        return "New application filing is currently closed by System Administrator.";
+    }
+
+    async function loadIntakePolicy(context) {
+        const fallback = {
+            isOpen: true,
+            reason: "open",
+            openDate: "",
+            closeDate: ""
+        };
+
+        const result = await context.client.rpc("application_intake_is_open");
+        if (result.error || !result.data || typeof result.data !== "object") {
+            return fallback;
+        }
+
+        return {
+            isOpen: result.data.is_open !== false,
+            reason: (result.data.reason || "open").toString(),
+            openDate: toIsoDateOnly(result.data.open_date || ""),
+            closeDate: toIsoDateOnly(result.data.close_date || "")
+        };
+    }
+
+    async function assertApplicationIntakeOpen(context) {
+        const policy = await loadIntakePolicy(context);
+        if (policy.isOpen) {
+            return;
+        }
+        throw new Error(describeIntakeClosedReason(policy));
+    }
+
+    async function findExistingAttemptForSchoolYear(context, schoolYear, excludeApplicationId) {
+        const normalizedSchoolYear = nullIfBlank(schoolYear);
+        if (!normalizedSchoolYear) {
+            return null;
+        }
+
+        let query = context.client
+            .from("applications")
+            .select("id, application_no, school_year, status")
+            .eq("applicant_id", context.user.id)
+            .eq("school_year", normalizedSchoolYear)
+            .order("updated_at", { ascending: false })
+            .limit(1);
+
+        if (excludeApplicationId) {
+            query = query.neq("id", excludeApplicationId);
+        }
+
+        const result = await query;
+        if (result.error || !result.data || result.data.length === 0) {
+            return null;
+        }
+
+        return result.data[0];
+    }
+
+    async function ensureSingleAttemptPerSchoolYear(context, schoolYear, excludeApplicationId) {
+        const existing = await findExistingAttemptForSchoolYear(context, schoolYear, excludeApplicationId);
+        if (!existing) {
+            return;
+        }
+
+        const existingRef = existing.application_no || existing.id;
+        const selectedYear = existing.school_year || schoolYear;
+        const trackingLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
+
+        throw new Error(
+            "Only one application attempt per school year is allowed. " +
+            "You already have " +
+            existingRef +
+            " for " +
+            selectedYear +
+            ". Open tracking: " +
+            trackingLink
+        );
+    }
+
     async function saveProfile(context) {
         const patch = collectProfilePayload();
         const result = await context.client
@@ -1258,6 +1367,12 @@
             throw new Error("School Year and Scholarship Type are required.");
         }
 
+        await ensureSingleAttemptPerSchoolYear(
+            context,
+            payload.school_year,
+            currentApplication && currentApplication.id ? currentApplication.id : ""
+        );
+
         if (currentApplication) {
             if (!isEditable(currentApplication)) {
                 throw new Error("This application is no longer editable.");
@@ -1281,6 +1396,8 @@
             setApplicationIdDisplay(currentApplication.application_no || "");
             return currentApplication;
         }
+
+        await assertApplicationIntakeOpen(context);
 
         const insertResult = await context.client
             .from("applications")
@@ -1311,6 +1428,12 @@
         if (!isEditable(currentApplication)) {
             throw new Error("This application is no longer editable.");
         }
+
+        await ensureSingleAttemptPerSchoolYear(
+            context,
+            currentApplication.school_year,
+            currentApplication.id
+        );
 
         const result = await context.client
             .from("applications")
@@ -1599,7 +1722,7 @@
         if (fieldset) {
             fieldset.disabled = !enabled;
         }
-        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool", "degreeProgramCourse"];
+        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"];
         spouseFieldIds.forEach(function (id) {
             const input = byId(id);
             if (!input) {
@@ -1631,6 +1754,7 @@
             "highestGradeYearLevel",
             "schoolName",
             "schoolType",
+            "grantAppliedFor",
             "fatherStatus",
             "fatherFirstName",
             "fatherMiddleName",
@@ -1794,6 +1918,12 @@
                     "alert-info",
                     true
                 );
+            } else {
+                const intakePolicy = await loadIntakePolicy(context);
+                if (!intakePolicy.isOpen) {
+                    setFormEditableState(false);
+                    setStatus(describeIntakeClosedReason(intakePolicy), "alert-warning");
+                }
             }
             applyAuxMeta(context.user.id, "new");
         }
