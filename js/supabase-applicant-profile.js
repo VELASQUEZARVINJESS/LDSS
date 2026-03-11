@@ -109,6 +109,69 @@
         }
     }
 
+    function setProfileOverviewPhoto(url, useFallback) {
+        const image = byId("profileOverviewPhoto");
+        if (!image) {
+            return;
+        }
+
+        const fallbackSrc = "../img/daet-lgu.png";
+        image.src = url || fallbackSrc;
+        image.classList.remove("ldss-profile-avatar-image", "ldss-profile-avatar-photo");
+        image.classList.add(useFallback ? "ldss-profile-avatar-image" : "ldss-profile-avatar-photo");
+        image.alt = useFallback ? "Daet LGU Logo" : "Applicant 1x1 Photo";
+        image.onerror = function () {
+            image.onerror = null;
+            image.src = fallbackSrc;
+            image.classList.remove("ldss-profile-avatar-photo");
+            image.classList.add("ldss-profile-avatar-image");
+            image.alt = "Daet LGU Logo";
+        };
+    }
+
+    function isMissingApplicationsColumnError(error, columnName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedColumn = (columnName || "").toString().toLowerCase();
+        if (!text || !normalizedColumn) {
+            return false;
+        }
+        return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
+    }
+
+    function auxMetaKey(userId, applicationId) {
+        return "ldss:application-form-meta:" + userId + ":" + (applicationId || "new");
+    }
+
+    function readAuxMeta(userId, applicationId) {
+        if (!userId || !applicationId) {
+            return {};
+        }
+        try {
+            const raw = localStorage.getItem(auxMetaKey(userId, applicationId));
+            if (!raw) {
+                return {};
+            }
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function buildPersonName(parts, fallback) {
+        const normalized = (parts || [])
+            .map(function (value) {
+                return (value || "").toString().trim();
+            })
+            .filter(function (value) {
+                return value.length > 0 && value !== "N/A";
+            });
+        if (normalized.length > 0) {
+            return normalized.join(" ");
+        }
+        return textValue(fallback);
+    }
+
     function selectSetValue(selectElement, value) {
         if (!selectElement) {
             return;
@@ -280,23 +343,51 @@
         return upsertResult.data;
     }
 
-    async function loadLatestApplicationSummary(context) {
-        const latest = await context.client
+    async function loadLatestApplicationSummary(context, profile) {
+        let latest = await context.client
             .from("applications")
-            .select("application_no, scholarship_type")
+            .select("id, application_no, sector_classification")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false })
             .limit(1);
 
+        if (latest.error && isMissingApplicationsColumnError(latest.error, "sector_classification")) {
+            latest = await context.client
+                .from("applications")
+                .select("id, application_no")
+                .eq("applicant_id", context.user.id)
+                .order("created_at", { ascending: false })
+                .limit(1);
+        }
+
         if (latest.error || !latest.data || latest.data.length === 0) {
             setText("profileLatestApplicationNo", "-");
-            setText("profileLatestScholarshipType", "-");
+            setText("profileLatestScholarshipType", "DEGREE COURSE");
+            setText("profileSectorClassificationDisplay", "-");
+            setText("profileFatherNameDisplay", profile ? profile.guardian_name : "-");
+            setText("profileMotherNameDisplay", "-");
             return;
         }
 
         const row = latest.data[0];
+        const auxMeta = readAuxMeta(context.user.id, row.id);
         setText("profileLatestApplicationNo", row.application_no);
-        setText("profileLatestScholarshipType", row.scholarship_type);
+        setText("profileLatestScholarshipType", "DEGREE COURSE");
+        setText("profileSectorClassificationDisplay", row.sector_classification || auxMeta.additionalData || "-");
+        setText(
+            "profileFatherNameDisplay",
+            buildPersonName(
+                [auxMeta.fatherFirstName, auxMeta.fatherMiddleName, auxMeta.fatherLastName],
+                profile ? profile.guardian_name : ""
+            )
+        );
+        setText(
+            "profileMotherNameDisplay",
+            buildPersonName(
+                [auxMeta.motherFirstName, auxMeta.motherMiddleName, auxMeta.motherMaidenName],
+                ""
+            )
+        );
     }
 
     function fillProfileDisplay(profile) {
@@ -319,10 +410,9 @@
             })
             .join(" - ");
         setText("profileCourseYearDisplay", courseYear || "-");
-
-        setText("profileStudentNoDisplay", profile.student_number);
-        setText("profileGuardianDisplay", profile.guardian_name);
-        setText("profileOccupationDisplay", profile.guardian_occupation);
+        setText("profileFatherNameDisplay", profile.guardian_name);
+        setText("profileMotherNameDisplay", "-");
+        setText("profileSectorClassificationDisplay", "-");
         setText("profileIncomeDisplay", formatIncomeDisplay(profile.monthly_income));
     }
 
@@ -363,9 +453,6 @@
             byId("modalCourse").value = profile.course_or_strand || "";
         }
         selectSetValue(byId("modalYearLevel"), profile.year_level || "");
-        if (byId("modalStudentNo")) {
-            byId("modalStudentNo").value = profile.student_number || "";
-        }
         if (byId("modalGuardian")) {
             byId("modalGuardian").value = profile.guardian_name || "";
         }
@@ -389,6 +476,20 @@
         fillProfileDisplay(result.data);
         await fillProfileModal(result.data);
         return result.data;
+    }
+
+    async function loadProfileOverviewPhoto(context, profile) {
+        if (!profile || !profile.applicant_photo_path || !window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
+            setProfileOverviewPhoto("", true);
+            return;
+        }
+
+        try {
+            const photoUrl = await window.ldssUploads.createObjectUrl(context, profile.applicant_photo_path);
+            setProfileOverviewPhoto(photoUrl, !photoUrl);
+        } catch (error) {
+            setProfileOverviewPhoto("", true);
+        }
     }
 
     function closeModal(modalId) {
@@ -450,8 +551,7 @@
                 const patch = {
                     school_name: byId("modalSchool") ? (byId("modalSchool").value.trim() || null) : null,
                     course_or_strand: byId("modalCourse") ? (byId("modalCourse").value.trim() || null) : null,
-                    year_level: byId("modalYearLevel") ? (byId("modalYearLevel").value || null) : null,
-                    student_number: byId("modalStudentNo") ? (byId("modalStudentNo").value.trim() || null) : null
+                    year_level: byId("modalYearLevel") ? (byId("modalYearLevel").value || null) : null
                 };
                 const data = await updateProfile(context, patch, "Educational information updated.");
                 if (data) {
@@ -491,7 +591,8 @@
             writeProfileCache(authContext.user.id, profile);
             fillProfileDisplay(profile);
             await fillProfileModal(profile);
-            await loadLatestApplicationSummary(authContext);
+            await loadProfileOverviewPhoto(authContext, profile);
+            await loadLatestApplicationSummary(authContext, profile);
             bindSaveHandlers(authContext);
         } catch (error) {
             showProfileStatus("Failed to load profile record. Please refresh.", "alert-danger");

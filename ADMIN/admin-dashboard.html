@@ -30,8 +30,15 @@
                         <a class="dropdown-item small" href="admin-release-management.html"><span id="adminDashAlertRelease">0</span> records are pending release action.</a>
                     </div>
                 </li>
-                <li class="nav-item">
-                    <a class="btn btn-icon btn-transparent-dark" href="../logout.html"><i data-feather="log-out"></i></a>
+                <li class="nav-item dropdown no-caret">
+                    <a class="btn btn-outline-dark btn-sm d-inline-flex align-items-center gap-2 dropdown-toggle ldss-account-trigger" id="adminUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i><span class="ldss-account-trigger-label">My Profile</span></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow ldss-account-menu" aria-labelledby="adminUser">
+                        <h6 class="dropdown-header">Admin Account</h6>
+                        <a class="dropdown-item" href="admin-dashboard.html">Dashboard</a>
+                        <a class="dropdown-item" href="admin-notifications.html">Notifications</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="../logout.html">Logout</a>
+                    </div>
                 </li>
             </ul>
         </nav>

@@ -44,6 +44,11 @@
         return normalized ? normalized : null;
     }
 
+    function upperTextOrNull(value) {
+        const normalized = nullIfBlank(value);
+        return normalized ? normalized.toUpperCase() : null;
+    }
+
     function normalizeMiddleNameValue(value) {
         const normalized = (value || "").toString().trim();
         if (!normalized) {
@@ -52,7 +57,7 @@
         if (/^n\s*\/?\s*a$/i.test(normalized)) {
             return "N/A";
         }
-        return normalized;
+        return normalized.toUpperCase();
     }
 
     function normalizeMobileForStorage(value) {
@@ -123,6 +128,39 @@
     function isUploadAccessDeniedMessage(message) {
         const text = (message || "").toString().toLowerCase();
         return text.includes("access token") || text.includes("authentication") || text.includes("cannot upload") || text.includes("not allowed");
+    }
+
+    function shouldUppercaseField(input) {
+        if (!input || !input.tagName) {
+            return false;
+        }
+        const tagName = input.tagName.toLowerCase();
+        if (tagName === "textarea") {
+            return true;
+        }
+        if (tagName !== "input") {
+            return false;
+        }
+
+        const type = (input.type || "text").toLowerCase();
+        return ["text", "search", "tel"].includes(type) && type !== "email";
+    }
+
+    function enforceUppercaseFieldValue(input) {
+        if (!shouldUppercaseField(input)) {
+            return;
+        }
+        const original = input.value || "";
+        const upper = original.toUpperCase();
+        if (upper === original) {
+            return;
+        }
+        const start = typeof input.selectionStart === "number" ? input.selectionStart : null;
+        const end = typeof input.selectionEnd === "number" ? input.selectionEnd : null;
+        input.value = upper;
+        if (start !== null && end !== null && typeof input.setSelectionRange === "function") {
+            input.setSelectionRange(start, end);
+        }
     }
 
     function setSelectValue(id, value) {
@@ -410,13 +448,13 @@
     function normalizeAwardItem(item) {
         const safeItem = item && typeof item === "object" ? item : {};
         return {
-            natureDescription: nullIfBlank(
+            natureDescription: upperTextOrNull(
                 safeItem.natureDescription ||
                     safeItem.awardNatureDescription ||
                     safeItem.description ||
                     ""
             ),
-            schoolName: nullIfBlank(safeItem.schoolName || safeItem.awardSchoolName || ""),
+            schoolName: upperTextOrNull(safeItem.schoolName || safeItem.awardSchoolName || ""),
             yearAwarded: nullIfBlank(safeItem.yearAwarded || safeItem.awardSchoolYear || "")
         };
     }
@@ -615,7 +653,7 @@
         // TODO(Supabase): move these auxiliary fields to a dedicated application details table.
         const payload = {
             religion: nullIfBlank(byId("religion") ? byId("religion").value : ""),
-            placeOfBirth: nullIfBlank(byId("placeOfBirth") ? byId("placeOfBirth").value : ""),
+            placeOfBirth: upperTextOrNull(byId("placeOfBirth") ? byId("placeOfBirth").value : ""),
             additionalData: nullIfBlank(byId("additionalData") ? byId("additionalData").value : ""),
             highestEducationAttainment: nullIfBlank(byId("highestEducationAttainment") ? byId("highestEducationAttainment").value : ""),
             highestGradeYearLevel: nullIfBlank(byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value : ""),
@@ -623,31 +661,31 @@
             grantAppliedFor: nullIfBlank(byId("grantAppliedFor") ? byId("grantAppliedFor").value : ""),
             awards: collectAwardsFromForm(),
             fatherStatus: nullIfBlank(getRadioValue("fatherStatus")),
-            fatherFirstName: nullIfBlank(byId("fatherFirstName") ? byId("fatherFirstName").value : ""),
-            fatherMiddleName: nullIfBlank(byId("fatherMiddleName") ? byId("fatherMiddleName").value : ""),
-            fatherLastName: nullIfBlank(byId("fatherLastName") ? byId("fatherLastName").value : ""),
+            fatherFirstName: upperTextOrNull(byId("fatherFirstName") ? byId("fatherFirstName").value : ""),
+            fatherMiddleName: upperTextOrNull(byId("fatherMiddleName") ? byId("fatherMiddleName").value : ""),
+            fatherLastName: upperTextOrNull(byId("fatherLastName") ? byId("fatherLastName").value : ""),
             motherStatus: nullIfBlank(getRadioValue("motherStatus")),
-            motherFirstName: nullIfBlank(byId("motherFirstName") ? byId("motherFirstName").value : ""),
-            motherMiddleName: nullIfBlank(byId("motherMiddleName") ? byId("motherMiddleName").value : ""),
-            motherMaidenName: nullIfBlank(byId("motherMaidenName") ? byId("motherMaidenName").value : ""),
-            fatherAddress: nullIfBlank(byId("fatherAddress") ? byId("fatherAddress").value : ""),
-            motherAddress: nullIfBlank(byId("motherAddress") ? byId("motherAddress").value : ""),
-            fatherOccupation: nullIfBlank(byId("fatherOccupation") ? byId("fatherOccupation").value : ""),
+            motherFirstName: upperTextOrNull(byId("motherFirstName") ? byId("motherFirstName").value : ""),
+            motherMiddleName: upperTextOrNull(byId("motherMiddleName") ? byId("motherMiddleName").value : ""),
+            motherMaidenName: upperTextOrNull(byId("motherMaidenName") ? byId("motherMaidenName").value : ""),
+            fatherAddress: upperTextOrNull(byId("fatherAddress") ? byId("fatherAddress").value : ""),
+            motherAddress: upperTextOrNull(byId("motherAddress") ? byId("motherAddress").value : ""),
+            fatherOccupation: upperTextOrNull(byId("fatherOccupation") ? byId("fatherOccupation").value : ""),
             fatherEducationAttainment: nullIfBlank(byId("fatherEducationAttainment") ? byId("fatherEducationAttainment").value : ""),
             gwa: nullIfBlank(byId("gwa") ? byId("gwa").value : ""),
-            motherOccupation: nullIfBlank(byId("motherOccupation") ? byId("motherOccupation").value : ""),
+            motherOccupation: upperTextOrNull(byId("motherOccupation") ? byId("motherOccupation").value : ""),
             motherEducationAttainment: nullIfBlank(byId("motherEducationAttainment") ? byId("motherEducationAttainment").value : ""),
             totalParentsGrossIncome: nullIfBlank(byId("totalParentsGrossIncome") ? byId("totalParentsGrossIncome").value : ""),
             childrenInFamily: nullIfBlank(byId("childrenInFamily") ? byId("childrenInFamily").value : ""),
             brotherCount: nullIfBlank(byId("brotherCount") ? byId("brotherCount").value : ""),
             sisterCount: nullIfBlank(byId("sisterCount") ? byId("sisterCount").value : ""),
             isMarriedApplicant: hasSpouseDetails,
-            spouseName: nullIfBlank(byId("spouseName") ? byId("spouseName").value : ""),
+            spouseName: upperTextOrNull(byId("spouseName") ? byId("spouseName").value : ""),
             spouseChildrenCount: nullIfBlank(byId("spouseChildrenCount") ? byId("spouseChildrenCount").value : ""),
-            spouseOccupation: nullIfBlank(byId("spouseOccupation") ? byId("spouseOccupation").value : ""),
-            spouseEducation: nullIfBlank(byId("spouseEducation") ? byId("spouseEducation").value : ""),
-            intendedSchool: nullIfBlank(byId("intendedSchool") ? byId("intendedSchool").value : ""),
-            degreeProgramCourse: nullIfBlank(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "")
+            spouseOccupation: upperTextOrNull(byId("spouseOccupation") ? byId("spouseOccupation").value : ""),
+            spouseEducation: upperTextOrNull(byId("spouseEducation") ? byId("spouseEducation").value : ""),
+            intendedSchool: upperTextOrNull(byId("intendedSchool") ? byId("intendedSchool").value : ""),
+            degreeProgramCourse: upperTextOrNull(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "")
         };
         try {
             localStorage.setItem(auxMetaKey(userId, applicationId), JSON.stringify(payload));
@@ -766,7 +804,7 @@
     function collectApplicationPayload() {
         const schoolYear = nullIfBlank(byId("schoolYear") ? byId("schoolYear").value : "");
         const hiddenScholarshipType = nullIfBlank(byId("scholarshipType") ? byId("scholarshipType").value : "");
-        const degreeProgramCourse = nullIfBlank(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "");
+        const degreeProgramCourse = upperTextOrNull(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "");
         const scholarshipType = degreeProgramCourse || hiddenScholarshipType;
 
         return {
@@ -788,7 +826,7 @@
             byId("fatherLastName") ? byId("fatherLastName").value : ""
         ]
             .map(function (value) {
-                return (value || "").toString().trim();
+                return (value || "").toString().trim().toUpperCase();
             })
             .filter(function (value) {
                 return value.length > 0;
@@ -799,20 +837,20 @@
         }
 
         return {
-            first_name: nullIfBlank(byId("firstName") ? byId("firstName").value : ""),
+            first_name: upperTextOrNull(byId("firstName") ? byId("firstName").value : ""),
             middle_name: normalizedMiddleName,
-            last_name: nullIfBlank(byId("lastName") ? byId("lastName").value : ""),
+            last_name: upperTextOrNull(byId("lastName") ? byId("lastName").value : ""),
             sex: nullIfBlank(byId("sex") ? byId("sex").value : ""),
             civil_status: nullIfBlank(byId("civilStatus") ? byId("civilStatus").value : ""),
             date_of_birth: nullIfBlank(byId("dateOfBirth") ? byId("dateOfBirth").value : ""),
-            address: nullIfBlank(byId("permanentAddress") ? byId("permanentAddress").value : ""),
+            address: upperTextOrNull(byId("permanentAddress") ? byId("permanentAddress").value : ""),
             mobile_number: normalizeMobileForStorage(byId("contactNumber") ? byId("contactNumber").value : ""),
             email: nullIfBlank(byId("emailAddress") ? byId("emailAddress").value.toLowerCase() : ""),
-            school_name: nullIfBlank(byId("schoolName") ? byId("schoolName").value : ""),
-            course_or_strand: nullIfBlank(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : ""),
+            school_name: upperTextOrNull(byId("schoolName") ? byId("schoolName").value : ""),
+            course_or_strand: upperTextOrNull(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : ""),
             year_level: nullIfBlank(byId("highestGradeYearLevel") ? byId("highestGradeYearLevel").value : ""),
             guardian_name: fatherNameParts.length > 0 ? fatherNameParts.join(" ") : null,
-            guardian_occupation: nullIfBlank(byId("fatherOccupation") ? byId("fatherOccupation").value : ""),
+            guardian_occupation: upperTextOrNull(byId("fatherOccupation") ? byId("fatherOccupation").value : ""),
             monthly_income: Number.isNaN(monthlyIncomeParsed) ? null : monthlyIncomeParsed
         };
     }
@@ -2004,9 +2042,11 @@
                 return;
             }
             input.addEventListener("input", function () {
+                enforceUppercaseFieldValue(input);
                 input.classList.remove("is-invalid");
             });
             input.addEventListener("change", function () {
+                enforceUppercaseFieldValue(input);
                 input.classList.remove("is-invalid");
             });
         });
@@ -2077,12 +2117,14 @@
             awardsContainer.addEventListener("input", function (event) {
                 const target = event.target;
                 if (target && target.matches("[data-award-input='true']")) {
+                    enforceUppercaseFieldValue(target);
                     target.classList.remove("is-invalid");
                 }
             });
             awardsContainer.addEventListener("change", function (event) {
                 const target = event.target;
                 if (target && target.matches("[data-award-input='true']")) {
+                    enforceUppercaseFieldValue(target);
                     target.classList.remove("is-invalid");
                 }
             });

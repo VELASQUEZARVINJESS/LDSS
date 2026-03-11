@@ -144,65 +144,69 @@
         showStatus(message, "alert-warning");
     }
 
-    async function loadApplicantCourse(context) {
-        const result = await context.client
-            .from("profiles")
-            .select("course_or_strand")
-            .eq("id", context.user.id)
-            .maybeSingle();
-
-        if (result.error) {
-            return "";
-        }
-
-        return result.data && result.data.course_or_strand
-            ? result.data.course_or_strand
-            : "";
+    function canEditApplication(status) {
+        return EDITABLE_STATUSES.includes((status || "").toString());
     }
 
-    function dropdownId(rowId) {
-        const normalized = (rowId || "")
-            .toString()
-            .replace(/[^a-zA-Z0-9_-]/g, "");
-        return "applicationActionsMenu-" + (normalized || "row");
+    function canDownloadApplication(status) {
+        return (status || "").toString() !== "draft";
     }
 
     function actionButtonMarkup(row) {
-        const menuId = dropdownId(row.id);
         const encodedId = encodeURIComponent(row.id);
+        const actionMenuId = "applicationActions-" + String(row.id).replace(/[^a-zA-Z0-9_-]/g, "");
+        const editHref = "applicant-application-form.html?application_id=" + encodedId;
+        const trackHref = "application-detail.html?id=" + encodedId;
+        const downloadHref = "applicant-print-form.html?id=" + encodedId + "&download=1";
+        const editAction = canEditApplication(row.status)
+            ? '<a class="dropdown-item" href="' + editHref + '">Edit</a>'
+            : '<span class="dropdown-item disabled" title="Only draft or returned applications can be edited.">Edit</span>';
+        const downloadAction = canDownloadApplication(row.status)
+            ? '<a class="dropdown-item" href="' + downloadHref + '" target="_blank" rel="noopener">Download</a>'
+            : '<span class="dropdown-item disabled" title="Submit the application first to download the printable form.">Download</span>';
 
-        if (row.status === "draft") {
-            return (
-                '<div class="dropdown dropup">' +
-                '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + menuId + '" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
-                '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="' + menuId + '">' +
-                '<li><a class="dropdown-item" href="applicant-application-form.html?application_id=' + encodedId + '">Continue Draft</a></li>' +
-                '<li><hr class="dropdown-divider" /></li>' +
-                '<li><button class="dropdown-item text-danger" type="button" data-action="delete-draft" data-id="' + escapeHtml(row.id) + '">Delete Draft</button></li>' +
-                "</ul>" +
-                "</div>"
-            );
+        return (
+            '<div class="dropdown ldss-row-actions">' +
+            '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + actionMenuId + '" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>' +
+            '<div class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="' + actionMenuId + '">' +
+            '<a class="dropdown-item" href="' + trackHref + '">Track</a>' +
+            editAction +
+            downloadAction +
+            "</div>" +
+            "</div>"
+        );
+    }
+
+    function submittedOnMarkup(row) {
+        if (row.submitted_at) {
+            return '<div class="fw-600">' + escapeHtml(formatDate(row.submitted_at)) + "</div>";
+        }
+        return (
+            '<div class="fw-600">Not yet submitted</div>' +
+            '<div class="small text-muted">Created ' + escapeHtml(formatDate(row.created_at)) + "</div>"
+        );
+    }
+
+    function examResultMarkup(row) {
+        const examSummary = workflow().examSummaryFromRecord(row.exam_record || null);
+        if (!row.exam_record) {
+            return '<span class="ldss-chip ldss-chip-neutral">Not Taken</span>';
         }
 
-        if (row.status === "returned_for_correction") {
-            return (
-                '<div class="dropdown dropup">' +
-                '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + menuId + '" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
-                '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="' + menuId + '">' +
-                '<li><a class="dropdown-item" href="applicant-application-form.html?application_id=' + encodedId + '">Edit and Resubmit</a></li>' +
-                '<li><a class="dropdown-item" href="application-detail.html?id=' + encodedId + '">Track Application</a></li>' +
-                "</ul>" +
-                "</div>"
-            );
+        let extra = "";
+        if (examSummary.scoreText !== "-" && examSummary.percentageText !== "-") {
+            extra = "Raw: " + examSummary.scoreText + " | " + examSummary.percentageText;
+        } else if (examSummary.percentageText !== "-") {
+            extra = "Score: " + examSummary.percentageText;
+        } else if (examSummary.scoreText !== "-") {
+            extra = "Raw Score: " + examSummary.scoreText;
+        } else if ((examSummary.result || "").toString() === "pending") {
+            extra = "Result not yet encoded";
         }
 
         return (
-            '<div class="dropdown dropup">' +
-            '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + menuId + '" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
-            '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="' + menuId + '">' +
-            '<li><a class="dropdown-item" href="application-detail.html?id=' + encodedId + '">Track Application</a></li>' +
-            "</ul>" +
-            "</div>"
+            '<span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span>" +
+            (extra ? '<div class="small text-muted mt-1">' + escapeHtml(extra) + "</div>" : "")
         );
     }
 
@@ -239,21 +243,16 @@
         tbody.innerHTML = rows
             .map(function (row) {
                 const meta = statusMeta(row.status);
-                const examSummary = workflow().examSummaryFromRecord(row.exam_record || null);
-                const hasExamValue = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
-                const examText = hasExamValue
-                    ? ("Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText)
-                    : "No score yet";
 
                 return (
                     "<tr>" +
-                    "<td>" + escapeHtml(row.application_no) + "</td>" +
-                    "<td>" + escapeHtml(row.degree_course || "-") + "</td>" +
-                    "<td>" + escapeHtml(formatDate(row.submitted_at || row.created_at)) + "</td>" +
-                    '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
-                    '<td><div class="small">' + escapeHtml(examText) + '</div><span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span></td>" +
-                    '<td><div class="small">' + escapeHtml(workflow().nextStepForApplicant(row.status)) + "</div></td>" +
-                    "<td>" + actionButtonMarkup(row) + "</td>" +
+                    '<td data-label="Application ID"><div class="fw-700">' + escapeHtml(row.application_no) + "</div></td>" +
+                    '<td data-label="Grant Applied For"><div class="small fw-600">DEGREE COURSE</div></td>' +
+                    '<td data-label="Submitted On">' + submittedOnMarkup(row) + "</td>" +
+                    '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
+                    '<td data-label="Exam Result">' + examResultMarkup(row) + "</td>" +
+                    '<td data-label="Next Step"><div class="small ldss-next-step-text">' + escapeHtml(workflow().nextStepForApplicant(row.status)) + "</div></td>" +
+                    '<td data-label="Action" class="ldss-actions-cell">' + actionButtonMarkup(row) + "</td>" +
                     "</tr>"
                 );
             })
@@ -469,14 +468,12 @@
         }
 
         const rows = result.data || [];
-        const applicantCourse = await loadApplicantCourse(context);
         const appIds = rows.map(function (row) { return row.id; }).filter(Boolean);
         const examMap = await loadExamMap(context, appIds);
 
         applicationRows = rows.map(function (row) {
             return Object.assign({}, row, {
-                exam_record: examMap[row.id] || null,
-                degree_course: applicantCourse || ""
+                exam_record: examMap[row.id] || null
             });
         });
 

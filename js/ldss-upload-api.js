@@ -36,19 +36,31 @@
         }
 
         let message = "Upload server request failed.";
+        let responseText = "";
         try {
-            const payload = await response.json();
-            if (payload && payload.error) {
-                message = payload.error;
+            responseText = await response.text();
+            if (responseText) {
+                const payload = JSON.parse(responseText);
+                if (payload && payload.error) {
+                    message = payload.error;
+                }
             }
         } catch (error) {
-            // Ignore JSON parse failure and keep default message.
+            // Ignore parse failure and keep default message.
         }
 
         if (response.status === 413) {
             message = "File exceeds the 10MB upload limit.";
+        } else if (response.status === 404) {
+            message = "Upload API route was not found. Open the site through the Node app and make sure /api/uploads is routed to server.js.";
+        } else if (response.status === 401 || response.status === 403) {
+            message = message === "Upload server request failed."
+                ? "Upload request was rejected. Please sign in again and retry."
+                : message;
         } else if (response.status >= 500) {
             message = "Upload server is not available right now.";
+        } else if (/<(!doctype|html)\b/i.test(responseText)) {
+            message = "Upload API returned an HTML page instead of JSON. The domain is likely not routed through the Node upload server.";
         }
 
         throw new Error(message);

@@ -390,8 +390,137 @@ body {
     overflow: visible;
 }
 
+.ldss-profile-overview-card .card-body {
+    padding: 1.3rem 1.35rem;
+}
+
+.ldss-profile-avatar {
+    width: 140px;
+    height: 140px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    object-fit: cover;
+}
+
+.ldss-profile-avatar-image {
+    border: 1px solid #dbe4f0;
+    background: #ffffff;
+    padding: 0.7rem;
+    object-fit: contain;
+}
+
+.ldss-profile-avatar-photo {
+    border: 1px solid #dbe4f0;
+    background: #ffffff;
+    padding: 0;
+    object-fit: cover;
+}
+
+.ldss-profile-avatar-icon {
+    color: #fafafa;
+}
+
+.ldss-profile-avatar-icon svg {
+    width: 4.25rem;
+    height: 4.25rem;
+    stroke-width: 1.3;
+}
+
+.ldss-profile-name {
+    font-size: 1.32rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #111827;
+}
+
+.ldss-profile-subcopy {
+    margin-top: 0.25rem;
+    font-size: 0.9rem;
+    color: var(--ldss-muted);
+}
+
+.ldss-profile-summary-item {
+    height: 100%;
+    padding: 0.9rem 0.95rem;
+    border: 1px solid #e5edf6;
+    border-radius: 0.9rem;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.ldss-profile-summary-label {
+    margin-bottom: 0.35rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ldss-muted);
+}
+
+.ldss-profile-summary-value {
+    font-size: 0.97rem;
+    font-weight: 600;
+    color: #111827;
+    word-break: break-word;
+}
+
+.ldss-profile-detail-card .card-body {
+    display: grid;
+    gap: 1rem;
+}
+
+.ldss-profile-field {
+    display: grid;
+    gap: 0.18rem;
+}
+
+.ldss-profile-field-label {
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ldss-muted);
+}
+
+.ldss-profile-field-value {
+    color: #111827;
+    font-weight: 600;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.ldss-applications-table th,
+.ldss-applications-table td {
+    vertical-align: top;
+}
+
+.ldss-applications-table .ldss-next-step-text {
+    min-width: 12rem;
+    white-space: normal;
+}
+
+.ldss-row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: flex-start;
+}
+
+.ldss-row-actions .btn {
+    min-width: 7rem;
+}
+
+.ldss-actions-cell {
+    min-width: 8.5rem;
+}
+
 .ldss-applications-table-wrap .dropdown-menu {
     z-index: 1085;
+}
+
+.ldss-row-actions .dropdown-menu {
+    min-width: 11rem;
 }
 
 .ldss-verification-table-wrap {
@@ -502,6 +631,16 @@ body {
     border-radius: 0.6rem;
     box-shadow: 0 0.18rem 0.9rem rgba(15, 23, 42, 0.06);
     padding: 1.15rem 1.15rem 1.25rem;
+}
+
+.ldss-paper-form input.form-control:not([type="email"]):not([type="date"]):not([type="file"]),
+.ldss-paper-form textarea.form-control,
+.ldss-paper-form select.form-select {
+    text-transform: uppercase;
+}
+
+.ldss-paper-form input.form-control[type="email"] {
+    text-transform: none;
 }
 
 .ldss-paper-form-header {
@@ -880,9 +1019,102 @@ body {
     gap: 1rem;
 }
 
+.ldss-applicant-print-sheet {
+    position: relative;
+    min-height: 0;
+    text-transform: uppercase;
+}
+
+.ldss-applicant-print-sheet #appSheetEmail {
+    text-transform: none !important;
+}
+
+.ldss-applicant-print-head {
+    padding-right: 0;
+}
+
+.ldss-applicant-print-head-main {
+    display: grid;
+    grid-template-columns: 1.3in 1fr 1.3in;
+    align-items: start;
+    gap: 0.35in;
+}
+
+.ldss-applicant-print-head-copy {
+    display: flex;
+    justify-content: center;
+}
+
+.ldss-applicant-print-head-spacer {
+    min-height: 1px;
+}
+
+.ldss-applicant-print-photo-slot {
+    position: static;
+    justify-self: end;
+    margin-top: 0.08in;
+}
+
+.ldss-applicant-print-bottom {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    margin-top: 0.4rem;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.ldss-applicant-print-bottom td {
+    padding: 0;
+    vertical-align: bottom;
+    border: 0;
+}
+
+.ldss-applicant-print-footer-brand {
+    width: 0.95in;
+    overflow: hidden;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.ldss-applicant-print-footer-logo {
+    display: block;
+    width: 0.86in !important;
+    max-width: 0.86in !important;
+    height: 0.17in !important;
+    max-height: 0.17in !important;
+    object-fit: contain;
+    object-position: left center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+}
+
+.ldss-applicant-print-signature-cell {
+    padding-left: 0.2in !important;
+    padding-right: 0.18in !important;
+}
+
+.ldss-applicant-print-date-cell {
+    width: 1.05in;
+    padding-left: 0.12in !important;
+}
+
+.ldss-applicant-print-signature-block,
+.ldss-applicant-print-date-block {
+    display: block;
+    width: 100%;
+}
+
+.ldss-applicant-print-signature-label {
+    margin-top: 0.15rem;
+    line-height: 1.1;
+    font-size: 0.56rem !important;
+    white-space: nowrap;
+}
+
 .ldss-sign-line {
     border-bottom: 1px solid #334155;
-    height: 2rem;
+    height: 1.15rem;
 }
 
 #layoutSidenav #layoutSidenav_nav,
@@ -914,7 +1146,8 @@ body {
     line-height: 1;
 }
 
-.dropdown-menu[aria-labelledby="applicantUser"] {
+.dropdown-menu[aria-labelledby="applicantUser"],
+.ldss-account-menu {
     margin-right: 0.4rem;
     min-width: 12rem;
 }
@@ -1029,6 +1262,10 @@ body.ldss-ready .ldss-auth-card {
     .ldss-paper-action-grid {
         grid-template-columns: 1fr;
     }
+
+    .ldss-profile-overview-card .card-body {
+        padding: 1.05rem;
+    }
 }
 
 @media (max-width: 767.98px) {
@@ -1051,6 +1288,95 @@ body.ldss-ready .ldss-auth-card {
     .table > :not(caption) > * > * {
         white-space: nowrap;
     }
+
+    .ldss-applications-table {
+        min-width: 100%;
+    }
+
+    .ldss-applications-table thead {
+        display: none;
+    }
+
+    .ldss-applications-table,
+    .ldss-applications-table tbody,
+    .ldss-applications-table tr,
+    .ldss-applications-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .ldss-applications-table tbody {
+        padding: 0.85rem;
+    }
+
+    .ldss-applications-table tr {
+        border: 1px solid #dbe4f0;
+        border-radius: 0.9rem;
+        background: #fff;
+        margin-bottom: 0.85rem;
+        overflow: visible;
+    }
+
+    .ldss-applications-table tr:last-child {
+        margin-bottom: 0;
+    }
+
+    .ldss-applications-table td {
+        border: 0;
+        border-bottom: 1px solid #eef2f7;
+        padding: 0.8rem 1rem;
+        white-space: normal !important;
+    }
+
+    .ldss-applications-table td:last-child {
+        border-bottom: 0;
+    }
+
+    .ldss-applications-table td[data-label]::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 0.35rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: var(--ldss-muted);
+    }
+
+    .ldss-applications-table .ldss-next-step-text {
+        min-width: 0;
+    }
+
+    .ldss-actions-cell {
+        min-width: 0;
+    }
+
+    .ldss-row-actions {
+        justify-content: stretch;
+    }
+
+    .ldss-row-actions .btn {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+
+    .ldss-profile-name {
+        font-size: 1.12rem;
+    }
+
+    .ldss-profile-summary-item {
+        padding: 0.78rem 0.82rem;
+    }
+
+    .ldss-profile-avatar {
+        width: 118px;
+        height: 118px;
+    }
+
+    .ldss-profile-avatar-icon svg {
+        width: 3.7rem;
+        height: 3.7rem;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1064,7 +1390,15 @@ body.ldss-ready .ldss-auth-card {
 }
 
 @media print {
+    @page {
+        size: 8.5in 13in;
+        margin: 0.18in 0.28in 0.28in 0.28in;
+    }
+
+    html,
     body {
+        margin: 0 !important;
+        padding: 0 !important;
         background: #ffffff !important;
     }
 
@@ -1078,6 +1412,7 @@ body.ldss-ready .ldss-auth-card {
 
     #layoutSidenav,
     #layoutSidenav_content,
+    main,
     .container-xl,
     .card,
     .card-body {
@@ -1095,11 +1430,21 @@ body.ldss-ready .ldss-auth-card {
 
     .ldss-print-sheet {
         width: 100% !important;
-        min-height: auto !important;
+        min-height: 0 !important;
+        height: auto !important;
         margin: 0 !important;
         border: 0 !important;
         box-shadow: none !important;
-        padding: 0.35in !important;
+        padding: 0.16in 0.22in 0.24in !important;
+    }
+
+    .ldss-applicant-print-head {
+        margin-bottom: 0.45rem !important;
+    }
+
+    .ldss-applicant-print-head-main {
+        grid-template-columns: 1.15in 1fr 1.15in;
+        gap: 0.2in;
     }
 }
 

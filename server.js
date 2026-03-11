@@ -30,6 +30,13 @@ const upload = multer({
     limits: { fileSize: MAX_FILE_SIZE_BYTES }
 });
 
+function applyUploadCors(response) {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    response.setHeader("Access-Control-Max-Age", "86400");
+}
+
 function createSupabaseClient(accessToken) {
     const options = {
         auth: {
@@ -257,6 +264,22 @@ function writeJsonError(response, statusCode, message) {
 app.use(express.json({ limit: "1mb" }));
 app.use(["/uploads", "/node_modules"], function (_request, response) {
     response.status(404).send("Not found");
+});
+
+app.use("/api/uploads", function (request, response, next) {
+    applyUploadCors(response);
+    if (request.method === "OPTIONS") {
+        response.status(204).end();
+        return;
+    }
+    next();
+});
+
+app.get("/api/uploads/health", function (_request, response) {
+    response.json({
+        ok: true,
+        service: "ldss-uploads"
+    });
 });
 
 app.post("/api/uploads", authenticate, upload.single("file"), async function (request, response) {

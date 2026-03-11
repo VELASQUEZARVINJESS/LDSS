@@ -82,115 +82,136 @@
                     </header>
                     <div class="container-xl px-4 mt-4">
                         <div class="alert d-none" id="profileStatus" role="alert"></div>
-                        <div class="row g-4">
-                            <div class="col-lg-4">
-                                <div class="card h-100">
-                                    <div class="card-header">Profile Overview</div>
-                                    <div class="card-body">
-                                        <div class="text-center mb-3">
-                                            <img class="rounded-circle border" src="../img/daet-lgu.png" alt="Applicant Photo" style="width: 84px; height: 84px; object-fit: cover;" />
-                                        </div>
-                                        <div class="small text-muted text-uppercase mb-1">Applicant Name</div>
-                                        <div class="fw-700 mb-2" id="profileNameDisplay">Juan Dela Cruz</div>
-                                        <div class="small text-muted text-uppercase mb-1">Application ID</div>
-                                        <div class="mb-2" id="profileLatestApplicationNo">-</div>
-                                        <div class="small text-muted text-uppercase mb-1">Scholarship Type</div>
-                                        <div id="profileLatestScholarshipType">-</div>
-                                        <hr />
-                                        <div class="small text-muted text-uppercase mb-1">Photo Verification</div>
-                                        <div class="small">Applicant-submitted photo: <span class="ldss-chip ldss-chip-success">On File</span></div>
-                                        <div class="small mt-1">Secretary verified/interview photo: <span class="ldss-chip ldss-chip-neutral">Pending</span></div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-lg-8">
-                                <div class="card mb-4">
-                                    <div class="card-header d-flex align-items-center justify-content-between">
-                                        <span>Personal Information</span>
-                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditPersonal">Edit</button>
-                                    </div>
-                                    <div class="card-body row g-3">
-                                        <div class="col-md-6">
-                                            <div class="small text-muted">Date of Birth</div>
-                                            <div id="profileDobDisplay">August 9, 2006</div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="small text-muted">Civil Status</div>
-                                            <div id="profileCivilStatusDisplay">Single</div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="small text-muted">Sex</div>
-                                            <div id="profileSexDisplay">Male</div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="small text-muted">Barangay</div>
-                                            <div id="profileBarangayDisplay">Barangay Alawihao, Daet</div>
+                        <div class="card ldss-profile-overview-card mb-4">
+                            <div class="card-header">Profile Overview</div>
+                            <div class="card-body">
+                                <div class="row g-4 align-items-center">
+                                    <div class="col-12 col-md-auto">
+                                        <div class="text-center">
+                                            <img class="ldss-profile-avatar ldss-profile-avatar-image" id="profileOverviewPhoto" src="../img/daet-lgu.png" alt="Applicant Profile Photo" />
                                         </div>
                                     </div>
-                                </div>
-                                <div class="card mb-4">
-                                    <div class="card-header d-flex align-items-center justify-content-between">
-                                        <span>Contact Information</span>
-                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditContact">Edit</button>
-                                    </div>
-                                    <div class="card-body row g-3">
-                                        <div class="col-md-6">
-                                            <div class="small text-muted">Email</div>
-                                            <div id="profileEmailDisplay">juan.delacruz@example.com</div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="small text-muted">Mobile Number</div>
-                                            <div id="profileMobileDisplay">0917 123 4567</div>
-                                        </div>
-                                        <div class="col-12">
-                                            <div class="small text-muted">Address</div>
-                                            <div id="profileAddressDisplay">Purok 4, Barangay Alawihao, Daet, Camarines Norte</div>
+                                    <div class="col">
+                                        <div class="ldss-profile-name" id="profileNameDisplay">Juan Dela Cruz</div>
+                                        <div class="ldss-profile-subcopy">Review your latest scholarship profile details below.</div>
+                                        <div class="row g-3 mt-1">
+                                            <div class="col-12 col-sm-6 col-xl-3">
+                                                <div class="ldss-profile-summary-item">
+                                                    <div class="ldss-profile-summary-label">Application ID</div>
+                                                    <div class="ldss-profile-summary-value" id="profileLatestApplicationNo">-</div>
+                                                </div>
+                                            </div>
+                                            <div class="col-12 col-sm-6 col-xl-3">
+                                                <div class="ldss-profile-summary-item">
+                                                    <div class="ldss-profile-summary-label">Scholarship Type</div>
+                                                    <div class="ldss-profile-summary-value" id="profileLatestScholarshipType">DEGREE COURSE</div>
+                                                </div>
+                                            </div>
+                                            <div class="col-12 col-sm-6 col-xl-3">
+                                                <div class="ldss-profile-summary-item">
+                                                    <div class="ldss-profile-summary-label">Applicant Photo</div>
+                                                    <div class="ldss-profile-summary-value"><span class="ldss-chip ldss-chip-success">On File</span></div>
+                                                </div>
+                                            </div>
+                                            <div class="col-12 col-sm-6 col-xl-3">
+                                                <div class="ldss-profile-summary-item">
+                                                    <div class="ldss-profile-summary-label">Interview Verification</div>
+                                                    <div class="ldss-profile-summary-value"><span class="ldss-chip ldss-chip-neutral">Pending</span></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="row g-4">
-                            <div class="col-lg-6">
-                                <div class="card h-100">
+                            <div class="col-12 col-lg-6">
+                                <div class="card h-100 ldss-profile-detail-card">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Personal Information</span>
+                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditPersonal">Edit</button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Date of Birth</div>
+                                            <div class="ldss-profile-field-value" id="profileDobDisplay">August 9, 2006</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Civil Status</div>
+                                            <div class="ldss-profile-field-value" id="profileCivilStatusDisplay">Single</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Sex</div>
+                                            <div class="ldss-profile-field-value" id="profileSexDisplay">Male</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Barangay</div>
+                                            <div class="ldss-profile-field-value" id="profileBarangayDisplay">Barangay Alawihao, Daet</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-6">
+                                <div class="card h-100 ldss-profile-detail-card">
+                                    <div class="card-header d-flex align-items-center justify-content-between">
+                                        <span>Contact Information</span>
+                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditContact">Edit</button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Email</div>
+                                            <div class="ldss-profile-field-value" id="profileEmailDisplay">juan.delacruz@example.com</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Mobile Number</div>
+                                            <div class="ldss-profile-field-value" id="profileMobileDisplay">0917 123 4567</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Address</div>
+                                            <div class="ldss-profile-field-value" id="profileAddressDisplay">Purok 4, Barangay Alawihao, Daet, Camarines Norte</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-lg-6">
+                                <div class="card h-100 ldss-profile-detail-card">
                                     <div class="card-header d-flex align-items-center justify-content-between">
                                         <span>Educational Information</span>
                                         <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditEducation">Edit</button>
                                     </div>
                                     <div class="card-body">
-                                        <div class="small text-muted">School</div>
-                                        <div class="mb-2" id="profileSchoolDisplay">Camarines Norte State College</div>
-                                        <div class="small text-muted">Course / Year</div>
-                                        <div class="mb-2" id="profileCourseYearDisplay">BS Information Technology - 1st Year</div>
-                                        <div class="small text-muted">Student Number</div>
-                                        <div id="profileStudentNoDisplay">2026-001234</div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">School</div>
+                                            <div class="ldss-profile-field-value" id="profileSchoolDisplay">Camarines Norte State College</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Course / Year</div>
+                                            <div class="ldss-profile-field-value" id="profileCourseYearDisplay">BS Information Technology - 1st Year</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-lg-6">
-                                <div class="card h-100">
-                                    <div class="card-header d-flex align-items-center justify-content-between">
-                                        <span>Family Background</span>
-                                        <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditFamily">Edit</button>
-                                    </div>
+                            <div class="col-12 col-lg-6">
+                                <div class="card h-100 ldss-profile-detail-card">
+                                    <div class="card-header">Family Background</div>
                                     <div class="card-body">
-                                        <div class="small text-muted">Guardian Name</div>
-                                        <div class="mb-2" id="profileGuardianDisplay">Maria Dela Cruz</div>
-                                        <div class="small text-muted">Guardian Occupation</div>
-                                        <div class="mb-2" id="profileOccupationDisplay">Vendor</div>
-                                        <div class="small text-muted">Combined Monthly Income</div>
-                                        <div id="profileIncomeDisplay">PHP 15,000.00</div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Father Name</div>
+                                            <div class="ldss-profile-field-value" id="profileFatherNameDisplay">-</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Mother Name</div>
+                                            <div class="ldss-profile-field-value" id="profileMotherNameDisplay">-</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Sector Classification</div>
+                                            <div class="ldss-profile-field-value" id="profileSectorClassificationDisplay">-</div>
+                                        </div>
+                                        <div class="ldss-profile-field">
+                                            <div class="ldss-profile-field-label">Combined Monthly Income</div>
+                                            <div class="ldss-profile-field-value" id="profileIncomeDisplay">PHP 15,000.00</div>
+                                        </div>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="card mt-4">
-                            <div class="card-header">Document Summary</div>
-                            <div class="card-body">
-                                <div class="row g-3">
-                                    <div class="col-sm-6 col-lg-4"><span class="ldss-chip ldss-chip-success">Applicant 1x1 Photo Uploaded</span></div>
-                                    <div class="col-sm-6 col-lg-4"><span class="ldss-chip ldss-chip-accent">Tax Exemption Certificate For Validation</span></div>
-                                    <div class="col-sm-6 col-lg-4"><span class="ldss-chip ldss-chip-neutral">Verified Interview Photo Pending</span></div>
                                 </div>
                             </div>
                         </div>
@@ -314,10 +335,6 @@
                                     <option>4th Year</option>
                                 </select>
                             </div>
-                            <div class="col-12">
-                                <label class="small mb-1" for="modalStudentNo">Student Number</label>
-                                <input class="form-control" id="modalStudentNo" type="text" value="2026-001234" />
-                            </div>
                         </form>
                     </div>
                     <div class="modal-footer">
@@ -363,6 +380,7 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/ldss-upload-api.js"></script>
         <script src="../js/supabase-applicant-profile.js"></script>
         <script src="../js/scripts.js"></script>
     </body>

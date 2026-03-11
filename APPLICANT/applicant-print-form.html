@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSP applicant printable application form" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSP | Printable Application Form</title>
+        <link href="../css/styles.css" rel="stylesheet" />
+        <link href="../css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="../img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="nav-fixed">
+        <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
+            <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
+            <a class="navbar-brand d-flex align-items-center" href="applicant-dashboard.html">
+                <img class="ldss-brand-icon me-2" src="../img/icon.png" alt="LDSP Icon" />
+                LDSP
+                <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
+            </a>
+            <ul class="navbar-nav align-items-center ms-auto">
+                <li class="nav-item me-2">
+                    <a class="btn btn-icon btn-transparent-dark ldss-bell-alert" href="applicant-notifications.html"><i data-feather="bell"></i></a>
+                </li>
+                <li class="nav-item dropdown no-caret">
+                    <a class="btn btn-outline-dark btn-sm d-inline-flex align-items-center gap-2 dropdown-toggle ldss-account-trigger" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i><span class="ldss-account-trigger-label">My Profile</span></a>
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
+                        <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
+                        <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
+                        <a class="dropdown-item" href="applicant-certification.html">Certification</a>
+                        <a class="dropdown-item" href="applicant-renewal.html">Renewal</a>
+                        <a class="dropdown-item" href="applicant-help.html">Help</a>
+                        <div class="dropdown-divider"></div>
+                        <a class="dropdown-item" href="../logout.html">Logout</a>
+                    </div>
+                </li>
+            </ul>
+        </nav>
+        <div id="layoutSidenav">
+            <div id="layoutSidenav_nav">
+                <nav class="sidenav shadow-right sidenav-light">
+                    <div class="sidenav-menu">
+                        <div class="nav accordion">
+                            <div class="sidenav-menu-heading">Applicant</div>
+                            <a class="nav-link" href="applicant-dashboard.html">
+                                <div class="nav-link-icon"><i data-feather="home"></i></div>
+                                Dashboard
+                            </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
+                                My Applications
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            </div>
+            <div id="layoutSidenav_content">
+                <main>
+                    <header class="page-header page-header-compact page-header-light border-bottom bg-white mb-4">
+                        <div class="container-xl px-4">
+                            <div class="page-header-content">
+                                <div class="row align-items-center justify-content-between pt-3">
+                                    <div class="col-auto mb-3">
+                                        <h1 class="page-header-title">
+                                            <div class="page-header-icon"><i data-feather="download"></i></div>
+                                            Printable Application Form
+                                        </h1>
+                                        <div class="small ldss-muted" id="applicantPrintApplicationIdDisplay">Application ID: -</div>
+                                        <ol class="ldss-breadcrumb mt-1">
+                                            <li><a href="applicant-dashboard.html">Dashboard</a></li>
+                                            <li><a href="applicant-applications.html">My Applications</a></li>
+                                            <li>Printable Form</li>
+                                        </ol>
+                                    </div>
+                                    <div class="col-12 col-xl-auto mb-3 ldss-print-hide d-flex flex-wrap gap-2">
+                                        <a class="btn btn-outline-dark btn-sm" href="applicant-applications.html">Back to Applications</a>
+                                        <button class="btn btn-dark btn-sm" id="applicantPrintBtn" type="button">Print / Save as PDF</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="container-xl px-4 mt-4">
+                        <div class="alert d-none ldss-print-hide" id="applicantPrintStatus" role="alert"></div>
+                        <div class="card">
+                            <div class="card-header ldss-print-hide d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+                                <span>Print Preview</span>
+                                <span class="small text-muted ldss-print-hide">Use browser Print and choose Save as PDF for the signed copy.</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="ldss-print-zone">
+                                    <section class="ldss-print-sheet ldss-applicant-print-sheet" id="applicantPrintableSheet">
+                                        <div class="ldss-print-letter-head ldss-applicant-print-head">
+                                            <div class="ldss-applicant-print-head-main">
+                                                <div class="ldss-applicant-print-head-spacer" aria-hidden="true"></div>
+                                                <div class="ldss-applicant-print-head-copy">
+                                                    <div class="ldss-print-head-row">
+                                                        <img class="ldss-print-head-logo" src="../img/daet-lgu.png" alt="Municipality of Daet" />
+                                                        <div class="ldss-print-center-lines">
+                                                            <div>Republic of the Philippines</div>
+                                                            <div>Province of Camarines Norte</div>
+                                                            <div class="fw-700">Municipality of Daet</div>
+                                                            <div class="ldss-print-program-title">Revised Daet Expanded Scholarship Program</div>
+                                                            <div class="small">(Per Municipal Ordinance No. 327 S. 2018)</div>
+                                                            <div class="ldss-print-form-label">Application Form</div>
+                                                        </div>
+                                                        <img class="ldss-print-head-logo" src="../img/icon.png" alt="LDSP" />
+                                                    </div>
+                                                </div>
+                                                <div class="ldss-print-photo-slot ldss-applicant-print-photo-slot">
+                                                    <div class="ldss-print-photo-box">
+                                                        <img class="d-none" id="applicantSheetPhoto" alt="Applicant 1x1 photo" />
+                                                        <div class="ldss-print-photo-placeholder" id="applicantSheetPhotoPlaceholder">1x1</div>
+                                                    </div>
+                                                    <div class="small text-muted mt-1">Applicant 1x1</div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="ldss-print-section">Application Information</div>
+                                        <table class="ldss-print-table">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="ldss-print-label">Application No.</td>
+                                                    <td id="appSheetApplicationNo">-</td>
+                                                    <td class="ldss-print-label">Date Filed</td>
+                                                    <td id="appSheetDateFiled">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Grant Applied For</td>
+                                                    <td id="appSheetScholarshipType">-</td>
+                                                    <td class="ldss-print-label">School Year</td>
+                                                    <td id="appSheetSchoolYear">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Application Type</td>
+                                                    <td colspan="3" id="appSheetApplicationType">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+
+                                        <div class="ldss-print-section">Personal Information</div>
+                                        <table class="ldss-print-table">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="ldss-print-label">Full Name</td>
+                                                    <td id="appSheetFullName">-</td>
+                                                    <td class="ldss-print-label">Date of Birth</td>
+                                                    <td id="appSheetDateOfBirth">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Sex</td>
+                                                    <td id="appSheetSex">-</td>
+                                                    <td class="ldss-print-label">Civil Status</td>
+                                                    <td id="appSheetCivilStatus">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Religion</td>
+                                                    <td id="appSheetReligion">-</td>
+                                                    <td class="ldss-print-label">Sector Classification</td>
+                                                    <td id="appSheetSectorClassification">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Address</td>
+                                                    <td colspan="3" id="appSheetAddress">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Contact</td>
+                                                    <td id="appSheetContact">-</td>
+                                                    <td class="ldss-print-label">Email</td>
+                                                    <td id="appSheetEmail">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+
+                                        <div class="ldss-print-section">Education</div>
+                                        <table class="ldss-print-table">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="ldss-print-label">School Name</td>
+                                                    <td id="appSheetSchoolName">-</td>
+                                                    <td class="ldss-print-label">Year Level</td>
+                                                    <td id="appSheetYearLevel">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Course / Strand</td>
+                                                    <td colspan="3" id="appSheetCourse">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+
+                                        <div class="ldss-print-section">Family Background</div>
+                                        <table class="ldss-print-table">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="ldss-print-label">Father</td>
+                                                    <td id="appSheetFatherName">-</td>
+                                                    <td class="ldss-print-label">Status</td>
+                                                    <td id="appSheetFatherStatus">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Father Occupation</td>
+                                                    <td id="appSheetFatherOccupation">-</td>
+                                                    <td class="ldss-print-label">Father Address</td>
+                                                    <td id="appSheetFatherAddress">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Mother</td>
+                                                    <td id="appSheetMotherName">-</td>
+                                                    <td class="ldss-print-label">Status</td>
+                                                    <td id="appSheetMotherStatus">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Mother Occupation</td>
+                                                    <td id="appSheetMotherOccupation">-</td>
+                                                    <td class="ldss-print-label">Mother Address</td>
+                                                    <td id="appSheetMotherAddress">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Parents Gross Income</td>
+                                                    <td id="appSheetGrossIncome">-</td>
+                                                    <td class="ldss-print-label">No. of Children</td>
+                                                    <td id="appSheetChildrenInFamily">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">No. of Brothers</td>
+                                                    <td id="appSheetBrotherCount">-</td>
+                                                    <td class="ldss-print-label">No. of Sisters</td>
+                                                    <td id="appSheetSisterCount">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+
+                                        <div class="ldss-print-section">For Married or Living Together Applicant</div>
+                                        <table class="ldss-print-table">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="ldss-print-label">Spouse Name</td>
+                                                    <td id="appSheetSpouseName">-</td>
+                                                    <td class="ldss-print-label">No. of Children</td>
+                                                    <td id="appSheetSpouseChildrenCount">-</td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="ldss-print-label">Spouse Occupation</td>
+                                                    <td id="appSheetSpouseOccupation">-</td>
+                                                    <td class="ldss-print-label">Spouse Educational Attainment</td>
+                                                    <td id="appSheetSpouseEducation">-</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+
+                                        <p class="ldss-print-note mt-3 mb-4">I certify that all information provided in this application is true and correct.</p>
+
+                                        <table class="ldss-applicant-print-bottom" role="presentation" style="width:100%;table-layout:fixed;border-collapse:collapse;margin-top:0.4rem;">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="ldss-applicant-print-footer-brand" style="width:86px;vertical-align:bottom;overflow:hidden;padding:0;">
+                                                        <img class="ldss-applicant-print-footer-logo" src="../img/maogma.png" alt="Maogma logo" style="display:block;width:78px;max-width:78px;height:14px;max-height:14px;object-fit:contain;object-position:left center;" />
+                                                    </td>
+                                                    <td class="ldss-applicant-print-signature-cell" style="vertical-align:bottom;padding:0 18px 0 14px;">
+                                                        <div class="ldss-applicant-print-signature-block">
+                                                            <div class="ldss-sign-line"></div>
+                                                            <div class="small text-muted text-center ldss-applicant-print-signature-label">Signature over Printed Name</div>
+                                                        </div>
+                                                    </td>
+                                                    <td class="ldss-applicant-print-date-cell" style="width:82px;vertical-align:bottom;padding:0 0 0 10px;">
+                                                        <div class="ldss-applicant-print-date-block">
+                                                            <div class="ldss-sign-line"></div>
+                                                            <div class="small text-muted text-center ldss-applicant-print-signature-label">Date</div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </section>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+                <footer class="footer-admin mt-auto footer-light">
+                    <div class="container-xl px-4">
+                        <div class="row">
+                            <div class="col-md-6 small">Copyright &copy; LGU Daet 2026</div>
+                            <div class="col-md-6 text-md-end small">LDSP Applicant Portal</div>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="../js/supabase-config.js"></script>
+        <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/ldss-upload-api.js"></script>
+        <script src="../js/ldss-workflow.js"></script>
+        <script src="../js/supabase-applicant-print-form.js"></script>
+        <script src="../js/scripts.js"></script>
+    </body>
+</html>
