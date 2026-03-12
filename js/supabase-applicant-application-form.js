@@ -1310,17 +1310,6 @@
 
         if (childrenInvalid) {
             errors.push("Children/Brother/Sister counts must be valid non-negative numbers.");
-        } else if (
-            submitting &&
-            childrenInFamily !== null &&
-            brotherCount !== null &&
-            sisterCount !== null &&
-            childrenInFamily !== brotherCount + sisterCount
-        ) {
-            errors.push("No. of Children in Family must equal Brothers + Sisters.");
-            setInputValidity("childrenInFamily", true);
-            setInputValidity("brotherCount", true);
-            setInputValidity("sisterCount", true);
         }
 
         ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"].forEach(function (id) {
