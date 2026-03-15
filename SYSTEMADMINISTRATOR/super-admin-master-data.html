@@ -128,6 +128,26 @@
                                         </div>
                                         <div class="small text-muted mb-2">Current Tags</div>
                                         <div class="d-flex flex-wrap gap-2" id="masterDataSectorList"></div>
+                                        <hr class="my-4" />
+                                        <div class="small text-muted mb-3">These counselor names appear in Secretary Checking when endorsing applicants after review.</div>
+                                        <div class="row g-2 mb-3">
+                                            <div class="col-sm-9">
+                                                <label class="small mb-1" for="masterDataCounselorInput">Add Counselor Name</label>
+                                                <input class="form-control" id="masterDataCounselorInput" type="text" placeholder="Example: Guidance Counselor Maria Santos" maxlength="60" />
+                                            </div>
+                                            <div class="col-sm-3 d-flex align-items-end">
+                                                <button class="btn btn-outline-dark w-100 ldss-btn-medium" id="masterDataAddCounselorBtn" type="button">Add</button>
+                                            </div>
+                                        </div>
+                                        <div class="small text-muted mb-2">Current Counselors</div>
+                                        <div class="d-flex flex-wrap gap-2" id="masterDataCounselorList"></div>
+                                        <hr class="my-4" />
+                                        <label class="small mb-1" for="masterDataInterviewSchedule">Default Interview Schedule for Secretary Checking</label>
+                                        <input class="form-control" id="masterDataInterviewSchedule" type="datetime-local" />
+                                        <div class="small text-muted mt-2 mb-3">This auto-fills the Interview Schedule field in Secretary Checking and Interview.</div>
+                                        <label class="small mb-1" for="masterDataInterviewVenue">Default Venue for Secretary Checking</label>
+                                        <input class="form-control" id="masterDataInterviewVenue" type="text" placeholder="LGU Daet Session Hall" maxlength="120" />
+                                        <div class="small text-muted mt-2">This auto-fills the Venue field in Secretary Checking and Interview.</div>
                                     </div>
                                 </div>
                             </div>
@@ -169,7 +189,7 @@
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/supabase-superadmin-master-data.js"></script>
+        <script src="../js/supabase-superadmin-master-data.js?v=20260314-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

@@ -93,11 +93,15 @@
                                     <div class="row g-3 align-items-start mb-3">
                                         <div class="col-12 col-lg-3">
                                             <label class="small mb-1 d-block" for="reqApplicantPhoto">Applicant 1x1 Picture</label>
-                                            <div class="ldss-paper-photo-box mb-2">
-                                                <img class="d-none" id="reqApplicantPhotoPreview" alt="Applicant 1x1 preview" />
-                                                <div id="reqApplicantPhotoPlaceholder">1x1</div>
+                                            <div class="ldss-applicant-form-photo-stack mb-2">
+                                                <div class="ldss-photo-1x1-wrap">
+                                                    <div class="ldss-photo-1x1">
+                                                        <img class="d-none" id="reqApplicantPhotoPreview" alt="Applicant 1x1 preview" />
+                                                        <div class="ldss-photo-1x1-placeholder" id="reqApplicantPhotoPlaceholder">1x1 Photo</div>
+                                                    </div>
+                                                </div>
                                             </div>
-                                            <input class="form-control" id="reqApplicantPhoto" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" />
+                                            <input class="form-control" id="reqApplicantPhoto" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
                                             <div class="form-text" id="reqApplicantPhotoFeedback"></div>
                                         </div>
                                         <div class="col-12 col-md-4 col-lg-3">
@@ -142,8 +146,8 @@
                                         <input class="form-control" id="middleName" type="text" placeholder="Optional; leave blank for N/A" />
                                     </div>
                                     <div class="col-md-4">
-                                        <label class="small mb-1" for="sex">Sex</label>
-                                        <select class="form-select" id="sex">
+                                        <label class="small mb-1" for="sex">Gender</label>
+                                        <select class="form-select" id="sex" required>
                                             <option value="">Select</option>
                                             <option value="Male">Male</option>
                                             <option value="Female">Female</option>
@@ -190,9 +194,25 @@
                                             <option value="None of the above">None of the above</option>
                                         </select>
                                     </div>
-                                    <div class="col-md-12">
-                                        <label class="small mb-1" for="permanentAddress">Permanent Address</label>
-                                        <input class="form-control" id="permanentAddress" type="text" />
+                                    <div class="col-12">
+                                        <div class="small fw-600 text-uppercase text-muted">Permanent Address</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="permanentAddressMunicipality">Municipality</label>
+                                        <select class="form-select" id="permanentAddressMunicipality">
+                                            <option value="DAET" selected>DAET</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="permanentAddressBarangay">Barangay</label>
+                                        <select class="form-select" id="permanentAddressBarangay">
+                                            <option value="">Select barangay</option>
+                                        </select>
+                                        <div class="form-text" id="permanentAddressBarangayFeedback">Required before submission.</div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="small mb-1" for="permanentAddressLine">House No. / Purok / Sitio</label>
+                                        <input class="form-control" id="permanentAddressLine" type="text" placeholder="e.g. PUROK 2, HOUSE 14" />
                                     </div>
                                     <div class="col-md-6">
                                         <label class="small mb-1" for="contactNumber">Contact Number</label>
@@ -365,21 +385,13 @@
                                         <label class="small mb-1" for="spouseName">Name of Husband / Wife</label>
                                         <input class="form-control" id="spouseName" type="text" />
                                     </div>
-                                    <div class="col-12 col-sm-6 col-lg-2">
+                                    <div class="col-12 col-sm-6 col-lg-4">
                                         <label class="small mb-1" for="spouseChildrenCount">No. of Children</label>
                                         <input class="form-control" id="spouseChildrenCount" type="number" min="0" step="1" />
                                     </div>
-                                    <div class="col-12 col-sm-6 col-lg-2">
+                                    <div class="col-12 col-sm-6 col-lg-4">
                                         <label class="small mb-1" for="spouseOccupation">Occupation</label>
                                         <input class="form-control" id="spouseOccupation" type="text" />
-                                    </div>
-                                    <div class="col-12 col-sm-6 col-lg-2">
-                                        <label class="small mb-1" for="spouseEducation">Educational Attainment</label>
-                                        <input class="form-control" id="spouseEducation" type="text" />
-                                    </div>
-                                    <div class="col-12 col-sm-6 col-lg-2">
-                                        <label class="small mb-1" for="intendedSchool">School Intended to Enroll In</label>
-                                        <input class="form-control" id="intendedSchool" type="text" />
                                     </div>
                                 </div>
                             </div>
@@ -438,6 +450,23 @@
                     <div class="modal-footer">
                         <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Close</button>
                         <button class="btn btn-dark" id="applicationSubmittedModalOpenBtn" type="button">Open Tracking Page</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="applicationSubmitErrorModal" tabindex="-1" aria-labelledby="applicationSubmitErrorModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="applicationSubmitErrorModalLabel">Cannot Submit Application</h5>
+                        <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body text-danger" id="applicationSubmitErrorModalMessage">
+                        Please review your application and try again.
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline-dark d-none" id="applicationSubmitErrorActionBtn" type="button"></button>
+                        <button class="btn btn-dark" type="button" data-bs-dismiss="modal">Close</button>
                     </div>
                 </div>
             </div>
@@ -513,7 +542,7 @@
         <script src="../js/supabase-config.js?v=20260312-1"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js?v=20260312-1"></script>
-        <script src="../js/supabase-applicant-application-form.js?v=20260312-1"></script>
+        <script src="../js/supabase-applicant-application-form.js?v=20260315-3"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

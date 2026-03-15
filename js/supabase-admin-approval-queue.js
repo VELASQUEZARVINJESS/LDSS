@@ -17,17 +17,23 @@
     ];
 
     const FINAL_DECISION_STATUSES = ["approved", "rejected", "for_release", "released"];
+    const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const DECISION_META = {
         pending: { label: "Pending", chipClass: "ldss-chip-neutral" },
         approved: { label: "Approved", chipClass: "ldss-chip-success" },
         waitlisted: { label: "Waitlisted", chipClass: "ldss-chip-accent" },
         rejected: { label: "Rejected", chipClass: "ldss-chip-danger" }
     };
+    const DEFAULT_WORKFLOW_CONTROLS = {
+        allow_special_endorsement: true,
+        allow_secretary_applicant_edits: false
+    };
 
     let authContext = null;
     let rows = [];
     let filteredRows = [];
     let isProcessing = false;
+    let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
 
     function byId(id) {
         return document.getElementById(id);
@@ -41,6 +47,71 @@
                 return { controlNo: "-", scoreText: "-", percentageText: "-", resultLabel: "Pending", resultChipClass: "ldss-chip-neutral" };
             }
         };
+    }
+
+    function readFallbackControls() {
+        try {
+            const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+            if (!raw) {
+                return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+            }
+            const parsed = JSON.parse(raw);
+            const controls = parsed && parsed.ranking_basis && parsed.ranking_basis.controls
+                ? parsed.ranking_basis.controls
+                : {};
+            return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS, controls);
+        } catch (error) {
+            return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+        }
+    }
+
+    async function loadWorkflowControls() {
+        const fallback = readFallbackControls();
+        const result = await authContext.client
+            .from("ranking_settings")
+            .select("ranking_basis")
+            .eq("is_active", true)
+            .order("updated_at", { ascending: false })
+            .limit(1);
+
+        if (result.error) {
+            if (/does not exist|relation/i.test(result.error.message || "")) {
+                workflowControls = fallback;
+                return workflowControls;
+            }
+            throw new Error("Failed to load workflow controls: " + result.error.message);
+        }
+
+        const active = result.data && result.data.length ? result.data[0] : null;
+        const controls = active && active.ranking_basis && active.ranking_basis.controls
+            ? active.ranking_basis.controls
+            : {};
+        workflowControls = Object.assign({}, fallback, controls);
+        return workflowControls;
+    }
+
+    function setWorkflowMeta() {
+        const target = byId("adminApprovalWorkflowMeta");
+        if (!target) {
+            return;
+        }
+        target.textContent = "Special Endorsement is " + (workflowControls.allow_special_endorsement ? "enabled" : "disabled") + " by System Administrator.";
+    }
+
+    function applyWorkflowVisibility() {
+        const batchSelect = byId("adminApprovalBatchAction");
+        if (batchSelect) {
+            const specialOption = Array.from(batchSelect.options).find(function (option) {
+                return option.value === "special_endorsement_review";
+            });
+            if (specialOption) {
+                specialOption.hidden = !workflowControls.allow_special_endorsement;
+            }
+            if (!workflowControls.allow_special_endorsement && batchSelect.value === "special_endorsement_review") {
+                batchSelect.value = "";
+            }
+        }
+        setWorkflowMeta();
     }
 
     function escapeHtml(value) {
@@ -400,19 +471,22 @@
         const status = normalizeStatus(row.status);
         const isFinal = isStatusFinal(row);
         const buttons = [];
+        const allowSpecialEndorsement = workflowControls.allow_special_endorsement !== false;
+        const isFailedExam = status === "failed_exam";
 
         if (!isFinal) {
-            buttons.push('<button class="btn btn-sm btn-dark" type="button" data-row-action="approved" data-app-id="' + escapeHtml(row.id) + '">Approve</button>');
-            buttons.push('<button class="btn btn-sm btn-outline-dark" type="button" data-row-action="waitlisted" data-app-id="' + escapeHtml(row.id) + '">Waitlist</button>');
+            if (!isFailedExam) {
+                buttons.push('<button class="btn btn-sm btn-dark" type="button" data-row-action="approved" data-app-id="' + escapeHtml(row.id) + '">Approve</button>');
+                buttons.push('<button class="btn btn-sm btn-outline-dark" type="button" data-row-action="waitlisted" data-app-id="' + escapeHtml(row.id) + '">Waitlist</button>');
+            }
             buttons.push('<button class="btn btn-sm btn-outline-secondary" type="button" data-row-action="rejected" data-app-id="' + escapeHtml(row.id) + '">Reject</button>');
         }
 
-        if (status === "failed_exam") {
+        if (isFailedExam && allowSpecialEndorsement) {
             buttons.push('<button class="btn btn-sm btn-outline-dark" type="button" data-row-action="special_endorsement_review" data-app-id="' + escapeHtml(row.id) + '">Special Endorsement Review</button>');
         }
-
-        if (status === "special_endorsement_review") {
-            buttons.push('<button class="btn btn-sm btn-outline-dark" type="button" data-row-action="for_interview" data-app-id="' + escapeHtml(row.id) + '">Forward to Interview</button>');
+        if (isFailedExam && !allowSpecialEndorsement) {
+            buttons.push('<span class="small text-muted">Special endorsement is off.</span>');
         }
 
         if (!buttons.length) {
@@ -532,14 +606,6 @@
                 notifyMessage: "Your application is under Special Endorsement Review."
             };
         }
-        if (action === "for_interview") {
-            return {
-                targetStatus: "for_interview",
-                decisionStatus: "pending",
-                notifyTitle: "Proceed to Interview",
-                notifyMessage: "Your application may proceed to interview. Wait for secretary scheduling."
-            };
-        }
         return null;
     }
 
@@ -633,6 +699,14 @@
             throw new Error("Unsupported action.");
         }
 
+        if (action === "special_endorsement_review" && workflowControls.allow_special_endorsement === false) {
+            throw new Error("Special Endorsement is currently disabled in System Administrator settings.");
+        }
+
+        if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action)) {
+            throw new Error("Failed exam records must go through Special Endorsement Review before approval or waitlist.");
+        }
+
         await updateApplication(row, config);
         await upsertApprovalRecord(row, action, notes, config);
         await notifyApplicant(row, config);
@@ -640,6 +714,8 @@
 
     async function loadData() {
         showStatus("");
+        await loadWorkflowControls();
+        applyWorkflowVisibility();
 
         const applications = await fetchApplications();
         const applicationIds = applications.map(function (row) { return row.id; }).filter(Boolean);
@@ -679,10 +755,17 @@
             return;
         }
 
+        const trimmedNotes = notes.trim();
+        const needsAuditNote = action === "special_endorsement_review" || normalizeStatus(row.status) === "special_endorsement_review";
+        if (needsAuditNote && !trimmedNotes) {
+            showStatus("Decision notes are required for Special Endorsement actions.", "alert-warning");
+            return;
+        }
+
         isProcessing = true;
         showStatus("");
         try {
-            await executeAction(row, action, notes.trim());
+            await executeAction(row, action, trimmedNotes);
             await loadData();
             showStatus("Decision applied successfully.", "alert-success");
         } catch (error) {
@@ -705,8 +788,16 @@
             showStatus("Select a batch action first.", "alert-warning");
             return;
         }
+        if (action === "special_endorsement_review" && workflowControls.allow_special_endorsement === false) {
+            showStatus("Special Endorsement is currently disabled in System Administrator settings.", "alert-warning");
+            return;
+        }
         if (!ids.length) {
             showStatus("Select at least one record from the queue table.", "alert-warning");
+            return;
+        }
+        if (action === "special_endorsement_review" && !notes) {
+            showStatus("Batch decision notes are required for Special Endorsement Review.", "alert-warning");
             return;
         }
 
@@ -723,6 +814,12 @@
                 continue;
             }
             try {
+                if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action)) {
+                    throw new Error("Failed exam records must go through Special Endorsement Review first.");
+                }
+                if (normalizeStatus(row.status) === "special_endorsement_review" && !notes) {
+                    throw new Error("Decision notes are required for Special Endorsement actions.");
+                }
                 await executeAction(row, action, notes);
                 successCount += 1;
             } catch (error) {

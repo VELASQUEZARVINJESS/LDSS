@@ -2,8 +2,10 @@
     "use strict";
 
     const PHOTO_DOC_TYPE = "applicant_photo";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     let autoPrintTriggered = false;
     let profilesSupportsPlaceOfBirth = true;
+    let applicationAuxDataAvailable = true;
 
     function byId(id) {
         return document.getElementById(id);
@@ -88,9 +90,64 @@
         return fullName || (profile && profile.email ? profile.email : "-");
     }
 
+    function normalizeAddressSegment(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .replace(/\.+$/g, "")
+            .toLowerCase();
+    }
+
+    function cleanupAddressDisplay(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function dedupeAddressSegments(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
+    function normalizeBarangayDisplay(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || key === "daet" || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
     function buildAddress(profile) {
-        const address = profile && profile.address ? profile.address : "";
-        const barangay = profile && profile.barangay ? profile.barangay : "";
+        const address = dedupeAddressSegments(profile && profile.address ? profile.address : "");
+        const barangay = normalizeBarangayDisplay(profile && profile.barangay ? profile.barangay : "");
         if (!address && !barangay) {
             return "-";
         }
@@ -101,13 +158,16 @@
             return address;
         }
 
-        const addressLower = address.toLowerCase();
-        const barangayLower = barangay.toLowerCase();
-        if (addressLower.includes(barangayLower)) {
+        const addressSegments = address
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const barangayKey = normalizeAddressSegment(barangay);
+        if (barangayKey && addressSegments.includes(barangayKey)) {
             return address;
         }
 
-        return [address, barangay].filter(Boolean).join(", ");
+        return cleanupAddressDisplay([address, barangay].filter(Boolean).join(", "));
     }
 
     function statusLabel(status) {
@@ -139,6 +199,41 @@
         } catch (error) {
             return {};
         }
+    }
+
+    function normalizeAuxMetaPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return {};
+        }
+        return payload;
+    }
+
+    function isMissingAuxDataTableError(error) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        return text.includes(APPLICATION_AUX_DATA_TABLE) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
+    }
+
+    async function fetchSharedAuxMeta(context, applicationId) {
+        if (!context || !context.client || !applicationId || !applicationAuxDataAvailable) {
+            return null;
+        }
+
+        const result = await context.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .select("payload")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (result.error) {
+            if (isMissingAuxDataTableError(result.error)) {
+                applicationAuxDataAvailable = false;
+            }
+            return null;
+        }
+
+        return result.data && result.data.payload
+            ? normalizeAuxMetaPayload(result.data.payload)
+            : null;
     }
 
     function cleanNamePart(value) {
@@ -386,7 +481,6 @@
         setText("appSheetSpouseName", safeMeta.spouseName || "");
         setText("appSheetSpouseChildrenCount", safeMeta.spouseChildrenCount || "");
         setText("appSheetSpouseOccupation", safeMeta.spouseOccupation || "");
-        setText("appSheetSpouseEducation", safeMeta.spouseEducation || "");
     }
 
     async function loadRecord(context, query) {
@@ -404,7 +498,7 @@
             fetchProfile(context),
             fetchDocuments(context, application.id)
         ]);
-        const auxMeta = readAuxMeta(context.user.id, application.id);
+        const auxMeta = (await fetchSharedAuxMeta(context, application.id)) || readAuxMeta(context.user.id, application.id);
 
         const latestDocs = latestDocumentsByType(docs);
         const photoDoc = latestDocs[PHOTO_DOC_TYPE] || null;

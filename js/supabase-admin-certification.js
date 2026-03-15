@@ -115,10 +115,84 @@
         return fullName || (profile && profile.email ? profile.email : "-");
     }
 
+    function normalizeAddressSegment(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .replace(/\.+$/g, "")
+            .toLowerCase();
+    }
+
+    function cleanupAddressDisplay(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function dedupeAddressSegments(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
+    function normalizeBarangayDisplay(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || key === "daet" || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
     function buildAddress(profile) {
-        const address = profile && profile.address ? profile.address : "";
-        const barangay = profile && profile.barangay ? profile.barangay : "";
-        return [address, barangay].filter(Boolean).join(", ") || "-";
+        const address = dedupeAddressSegments(profile && profile.address ? profile.address : "");
+        const barangay = normalizeBarangayDisplay(profile && profile.barangay ? profile.barangay : "");
+        if (!address && !barangay) {
+            return "-";
+        }
+        if (!address) {
+            return barangay || "-";
+        }
+        if (!barangay) {
+            return address;
+        }
+
+        const addressSegments = address
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const barangayKey = normalizeAddressSegment(barangay);
+        if (barangayKey && addressSegments.includes(barangayKey)) {
+            return address;
+        }
+
+        return cleanupAddressDisplay([address, barangay].filter(Boolean).join(", ")) || "-";
     }
 
     function statusLabel(status) {

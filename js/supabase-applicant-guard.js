@@ -8,6 +8,89 @@
         admin: "../ADMIN/",
         super_admin: "../SYSTEMADMINISTRATOR/"
     };
+    const DESKTOP_ONLY_ROLE_LABELS = {
+        secretary: "Secretary",
+        admin: "Admin",
+        super_admin: "System Administrator"
+    };
+    const DESKTOP_ONLY_MIN_WIDTH = 992;
+
+    function roleRequiresDesktop(role) {
+        return Object.prototype.hasOwnProperty.call(DESKTOP_ONLY_ROLE_LABELS, role || "");
+    }
+
+    function ensureDesktopOnlyStyles() {
+        if (document.getElementById("ldssDesktopOnlyStyle")) {
+            return;
+        }
+
+        const style = document.createElement("style");
+        style.id = "ldssDesktopOnlyStyle";
+        style.textContent = [
+            ".ldss-desktop-only-overlay{position:fixed;inset:0;z-index:5000;display:flex;align-items:center;justify-content:center;padding:1.25rem;background:rgba(241,245,249,.97);backdrop-filter:blur(8px);}",
+            ".ldss-desktop-only-card{width:min(100%,30rem);padding:1.75rem;border:1px solid #dde1e6;border-radius:1rem;background:#ffffff;box-shadow:0 1rem 2.5rem rgba(15,23,42,.12);text-align:center;}",
+            ".ldss-desktop-only-badge{display:inline-flex;align-items:center;justify-content:center;padding:.35rem .75rem;border-radius:999px;background:#fff3e6;color:#b45309;font-size:.78rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;}",
+            ".ldss-desktop-only-title{margin:.9rem 0 .55rem;color:#1f2937;font-size:1.35rem;font-weight:700;line-height:1.3;}",
+            ".ldss-desktop-only-copy{margin:0;color:#667085;font-size:.96rem;line-height:1.65;}",
+            "body.ldss-desktop-only-active{overflow:hidden;}"
+        ].join("");
+        document.head.appendChild(style);
+    }
+
+    function ensureDesktopOnlyOverlay(role) {
+        const roleLabel = DESKTOP_ONLY_ROLE_LABELS[role] || "Staff";
+        let overlay = document.getElementById("ldssDesktopOnlyOverlay");
+        if (overlay) {
+            const title = document.getElementById("ldssDesktopOnlyTitle");
+            if (title) {
+                title.textContent = roleLabel + " pages are available on desktop only";
+            }
+            return overlay;
+        }
+
+        overlay = document.createElement("div");
+        overlay.id = "ldssDesktopOnlyOverlay";
+        overlay.className = "ldss-desktop-only-overlay d-none";
+        overlay.setAttribute("role", "dialog");
+        overlay.setAttribute("aria-modal", "true");
+        overlay.setAttribute("aria-labelledby", "ldssDesktopOnlyTitle");
+        overlay.innerHTML = [
+            '<div class="ldss-desktop-only-card">',
+            '<div class="ldss-desktop-only-badge">Desktop Only</div>',
+            '<h1 class="ldss-desktop-only-title" id="ldssDesktopOnlyTitle">' + roleLabel + " pages are available on desktop only</h1>",
+            '<p class="ldss-desktop-only-copy">Please open this page on a laptop or desktop browser. Staff tools are hidden on phone screens to keep review, approval, and records work readable and secure.</p>',
+            "</div>"
+        ].join("");
+        document.body.appendChild(overlay);
+        return overlay;
+    }
+
+    function setupDesktopOnlyGuard(role) {
+        if (!roleRequiresDesktop(role)) {
+            return;
+        }
+
+        const applyState = function () {
+            const body = document.body;
+            if (!body) {
+                return;
+            }
+            ensureDesktopOnlyStyles();
+            const overlay = ensureDesktopOnlyOverlay(role);
+            const blocked = window.innerWidth < DESKTOP_ONLY_MIN_WIDTH;
+            overlay.classList.toggle("d-none", !blocked);
+            body.classList.toggle("ldss-desktop-only-active", blocked);
+        };
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", applyState, { once: true });
+        } else {
+            applyState();
+        }
+
+        window.addEventListener("resize", applyState);
+        window.addEventListener("orientationchange", applyState);
+    }
 
     function hasPlaceholderConfig(url, anonKey) {
         return CONFIG_PLACEHOLDERS.some(function (token) {
@@ -86,6 +169,8 @@
             window.location.replace(redirect);
             return null;
         }
+
+        setupDesktopOnlyGuard(role);
 
         const authContext = {
             client: client,

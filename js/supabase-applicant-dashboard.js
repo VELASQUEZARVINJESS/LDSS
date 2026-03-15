@@ -2,7 +2,9 @@
     "use strict";
 
     const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
-
+    const PROFILE_REMINDER_SESSION_PREFIX = "ldss:profile-reminder:";
+    const DISMISSED_NOTIFICATIONS_STORAGE_PREFIX = "ldss:dismissed-notifications:";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const DOC_LABELS = {
         income_certificate: "Tax Exemption Certificate (PDF)"
     };
@@ -25,6 +27,48 @@
         no_show: { label: "No Show", chipClass: "ldss-chip-danger" },
         cancelled: { label: "Cancelled", chipClass: "ldss-chip-danger" }
     };
+
+    const APPLICATION_REMINDER_GROUPS = [
+        { label: "Place of Birth", keys: ["placeOfBirth"] },
+        { label: "Religion", keys: ["religion"] },
+        { label: "Sector Classification", keys: ["additionalData"] },
+        {
+            label: "Education Background",
+            keys: ["highestEducationAttainment", "highestGradeYearLevel", "schoolType", "degreeProgramCourse"]
+        },
+        {
+            label: "Father's Information",
+            keys: [
+                "fatherStatus",
+                "fatherFirstName",
+                "fatherMiddleName",
+                "fatherLastName",
+                "fatherAddress",
+                "fatherOccupation",
+                "fatherEducationAttainment"
+            ]
+        },
+        {
+            label: "Mother's Information",
+            keys: [
+                "motherStatus",
+                "motherFirstName",
+                "motherMiddleName",
+                "motherMaidenName",
+                "motherAddress",
+                "motherOccupation",
+                "motherEducationAttainment"
+            ]
+        },
+        {
+            label: "Family Counts and Income",
+            keys: ["totalParentsGrossIncome", "childrenInFamily", "brotherCount", "sisterCount"]
+        }
+    ];
+
+    const TERMINAL_APPLICATION_STATUSES = ["approved", "waitlisted", "rejected", "released"];
+
+    let notificationsSupportDismissedAt = true;
 
     function byId(id) {
         return document.getElementById(id);
@@ -59,6 +103,45 @@
         return PROFILE_CACHE_PREFIX + userId;
     }
 
+    function profileReminderSessionKey(userId) {
+        return PROFILE_REMINDER_SESSION_PREFIX + userId;
+    }
+
+    function dismissedNotificationsStorageKey(userId) {
+        return DISMISSED_NOTIFICATIONS_STORAGE_PREFIX + userId;
+    }
+
+    function readDismissedNotificationIds(userId) {
+        if (!userId) {
+            return new Set();
+        }
+        try {
+            const raw = localStorage.getItem(dismissedNotificationsStorageKey(userId));
+            const parsed = raw ? JSON.parse(raw) : [];
+            return new Set(Array.isArray(parsed) ? parsed : []);
+        } catch (_error) {
+            return new Set();
+        }
+    }
+
+    function filterDismissedNotifications(rows, userId) {
+        if (notificationsSupportDismissedAt) {
+            return rows;
+        }
+        const dismissedIds = readDismissedNotificationIds(userId);
+        if (dismissedIds.size === 0) {
+            return rows;
+        }
+        return (rows || []).filter(function (row) {
+            return !dismissedIds.has(row.id);
+        });
+    }
+
+    function isMissingDismissedAtColumnError(error) {
+        const message = error && error.message ? error.message : "";
+        return /dismissed_at/i.test(message) && /column/i.test(message);
+    }
+
     function valueOrDash(value) {
         const text = (value || "").toString().trim();
         return text || "-";
@@ -72,6 +155,240 @@
             .replace(/>/g, "&gt;")
             .replace(/\"/g, "&quot;")
             .replace(/'/g, "&#039;");
+    }
+
+    function hasValue(value) {
+        if (Array.isArray(value)) {
+            return value.length > 0;
+        }
+        if (typeof value === "number") {
+            return !Number.isNaN(value);
+        }
+        if (typeof value === "boolean") {
+            return true;
+        }
+        return !!(value || "").toString().trim();
+    }
+
+    function joinLabels(labels, limit) {
+        const items = (labels || []).filter(Boolean);
+        if (!items.length) {
+            return "";
+        }
+        const max = Math.max(1, limit || items.length);
+        const visible = items.slice(0, max);
+        if (items.length > max) {
+            return visible.join(", ") + ", and " + (items.length - max) + " more";
+        }
+        if (visible.length === 1) {
+            return visible[0];
+        }
+        if (visible.length === 2) {
+            return visible[0] + " and " + visible[1];
+        }
+        return visible.slice(0, -1).join(", ") + ", and " + visible[visible.length - 1];
+    }
+
+    function buildReminderListHtml(labels) {
+        if (!labels || !labels.length) {
+            return "";
+        }
+        return '<ul class="text-danger ps-3 mb-0">' + labels.map(function (label) {
+            return "<li>" + escapeHtml(label) + "</li>";
+        }).join("") + "</ul>";
+    }
+
+    function profileNeedsGenderReminder(profile) {
+        if (!profile) {
+            return false;
+        }
+
+        return !(profile.sex || "").toString().trim();
+    }
+
+    function profileNeedsBarangayReminder(profile) {
+        if (!profile) {
+            return false;
+        }
+
+        const barangay = (profile.barangay || "").toString().trim();
+        if (barangay) {
+            return false;
+        }
+
+        const address = (profile.address || "").toString().trim();
+        if (!address) {
+            return false;
+        }
+        return true;
+    }
+
+    function getProfileReminderFields(profile) {
+        const fields = [];
+        if (profileNeedsGenderReminder(profile)) {
+            fields.push("gender");
+        }
+        if (profileNeedsBarangayReminder(profile)) {
+            fields.push("barangay");
+        }
+        return fields;
+    }
+
+    function getProfileReminderTarget(profile) {
+        const fields = getProfileReminderFields(profile);
+        if (fields.indexOf("gender") !== -1) {
+            return "gender";
+        }
+        if (fields.indexOf("barangay") !== -1) {
+            return "barangay";
+        }
+        return "personal";
+    }
+
+    function shouldCheckApplicationReminder(latestApplication) {
+        if (!latestApplication || !latestApplication.id) {
+            return false;
+        }
+        const normalizedStatus = workflow().normalizeStatus(latestApplication.status);
+        return TERMINAL_APPLICATION_STATUSES.indexOf(normalizedStatus) === -1;
+    }
+
+    function getApplicationReminderFields(latestApplication, auxMetaState) {
+        if (!shouldCheckApplicationReminder(latestApplication) || !auxMetaState || !auxMetaState.available) {
+            return [];
+        }
+
+        const payload = auxMetaState.payload || {};
+        return APPLICATION_REMINDER_GROUPS.reduce(function (labels, group) {
+            const isMissing = group.keys.some(function (key) {
+                return !hasValue(payload[key]);
+            });
+            if (isMissing) {
+                labels.push(group.label);
+            }
+            return labels;
+        }, []);
+    }
+
+    function buildCompletionReminder(profile, latestApplication, auxMetaState) {
+        const profileFields = getProfileReminderFields(profile);
+        const applicationFields = getApplicationReminderFields(latestApplication, auxMetaState);
+        const combinedFields = profileFields.slice();
+
+        if (applicationFields.length) {
+            combinedFields.push.apply(combinedFields, applicationFields);
+        }
+        if (!combinedFields.length) {
+            return null;
+        }
+
+        const hasActiveApplication = !!(latestApplication && latestApplication.id);
+        const applicationNote = hasActiveApplication && latestApplication && latestApplication.submitted_at
+            ? " Your submitted application stays active and will not be deleted."
+            : "";
+        const primaryUrl = hasActiveApplication
+            ? "applicant-application-form.html?application_id=" + encodeURIComponent(latestApplication.id)
+            : "applicant-profile.html?complete=" + encodeURIComponent(getProfileReminderTarget(profile));
+        const buttonLabel = hasActiveApplication ? "Update Information" : "Update My Profile";
+        const summaryLabels = profileFields.map(function (field) {
+            return field === "gender" ? "Gender" : "Barangay";
+        }).concat(applicationFields);
+        const summaryText = joinLabels(summaryLabels, 3);
+        const title = applicationFields.length
+            ? (profileFields.length ? "Complete Your Record" : "Complete Missing Application Details")
+            : (profileFields.length === 1 && profileFields[0] === "gender" ? "Update Your Gender" : "Complete Your Profile");
+
+        let leadText = "Please update the missing information below.";
+        if (applicationFields.length && hasActiveApplication) {
+            leadText = "Please update the missing application details below.";
+        }
+        if (profileFields.length && applicationFields.length) {
+            leadText = "Please update the missing profile and application details below.";
+        }
+
+        const modalText = leadText + applicationNote + (hasActiveApplication
+            ? " Open your current application and save the missing information."
+            : " Open My Profile to complete your record.");
+
+        return {
+            title: title,
+            buttonLabel: buttonLabel,
+            buttonUrl: primaryUrl,
+            bannerHtml:
+                "Reminder: please complete " + escapeHtml(summaryText) + "." +
+                applicationNote +
+                ' <a href="' + escapeHtml(primaryUrl) + '" class="alert-link">' + escapeHtml(buttonLabel) + "</a>.",
+            modalHtml:
+                '<p class="mb-3">' + escapeHtml(modalText) + "</p>" +
+                buildReminderListHtml(summaryLabels)
+        };
+    }
+
+    function getProfileReminderModal() {
+        const modalEl = byId("profileReminderModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        return window.bootstrap.Modal.getOrCreateInstance(modalEl);
+    }
+
+    function setProfileReminderDismissed(userId) {
+        if (!userId) {
+            return;
+        }
+        try {
+            sessionStorage.setItem(profileReminderSessionKey(userId), "dismissed");
+        } catch (error) {
+            // Non-fatal: sessionStorage may be disabled.
+        }
+    }
+
+    function clearProfileReminderDismissed(userId) {
+        if (!userId) {
+            return;
+        }
+        try {
+            sessionStorage.removeItem(profileReminderSessionKey(userId));
+        } catch (error) {
+            // Non-fatal: sessionStorage may be disabled.
+        }
+    }
+
+    function shouldShowProfileReminderModal(userId, reminder) {
+        if (!userId || !reminder) {
+            return false;
+        }
+        try {
+            return sessionStorage.getItem(profileReminderSessionKey(userId)) !== "dismissed";
+        } catch (error) {
+            return true;
+        }
+    }
+
+    function showProfileReminderModal(userId, reminder) {
+        const modal = getProfileReminderModal();
+        const titleEl = byId("profileReminderModalLabel");
+        const messageEl = byId("profileReminderModalMessage");
+        const updateBtn = byId("profileReminderModalUpdateBtn");
+
+        if (!reminder) {
+            return;
+        }
+
+        if (titleEl) {
+            titleEl.textContent = reminder.title || "Complete Your Record";
+        }
+        if (messageEl) {
+            messageEl.innerHTML = reminder.modalHtml || "";
+        }
+        if (updateBtn) {
+            updateBtn.textContent = reminder.buttonLabel || "Update Now";
+            updateBtn.setAttribute("data-reminder-url", reminder.buttonUrl || "applicant-profile.html");
+        }
+        setProfileReminderDismissed(userId);
+        if (modal) {
+            modal.show();
+        }
     }
 
     function setText(id, value) {
@@ -90,7 +407,7 @@
         el.textContent = valueOrDash(label);
     }
 
-    function showStatus(message, type) {
+    function showStatus(message, type, isHtml) {
         const el = byId("dashboardStatus");
         if (!el) {
             return;
@@ -98,9 +415,14 @@
         if (!message) {
             el.className = "alert d-none";
             el.textContent = "";
+            el.innerHTML = "";
             return;
         }
         el.className = "alert " + (type || "alert-info");
+        if (isHtml) {
+            el.innerHTML = message;
+            return;
+        }
         el.textContent = message;
     }
 
@@ -334,19 +656,28 @@
 
     function renderNotificationDropdown(rows, unreadCount) {
         const bell = byId("applicantAlerts");
+        const bellCount = byId("dashboardAlertsBellCount");
         const pill = byId("dashboardAlertsUnreadPill");
         const list = byId("dashboardAlertsList");
-        if (!list || !bell || !pill) {
+        if (!list || !bell || !pill || !bellCount) {
             return;
         }
 
         if (unreadCount > 0) {
-            pill.textContent = unreadCount > 99 ? "99+" : unreadCount.toString();
+            const displayCount = unreadCount > 99 ? "99+" : unreadCount.toString();
+            pill.textContent = displayCount;
+            bellCount.textContent = displayCount;
             pill.classList.remove("d-none");
+            bellCount.classList.remove("d-none");
             bell.classList.remove("ldss-bell-muted");
+            bell.classList.add("ldss-bell-count-active");
+            bell.setAttribute("aria-label", displayCount + " unread notifications");
         } else {
             pill.classList.add("d-none");
+            bellCount.classList.add("d-none");
             bell.classList.add("ldss-bell-muted");
+            bell.classList.remove("ldss-bell-count-active");
+            bell.setAttribute("aria-label", "No unread notifications");
         }
 
         if (!rows.length) {
@@ -522,33 +853,60 @@
     }
 
     async function loadNotifications(context) {
-        const countPromise = context.client
-            .from("notifications")
-            .select("id", { count: "exact", head: true })
-            .eq("recipient_user_id", context.user.id)
-            .eq("is_read", false);
+        const userId = context.user.id;
 
-        const listPromise = context.client
+        if (notificationsSupportDismissedAt) {
+            const countPromise = context.client
+                .from("notifications")
+                .select("id", { count: "exact", head: true })
+                .eq("recipient_user_id", userId)
+                .eq("is_read", false)
+                .is("dismissed_at", null);
+
+            const listPromise = context.client
+                .from("notifications")
+                .select("id, title, message, related_application_id, related_url, is_read, created_at")
+                .eq("recipient_user_id", userId)
+                .is("dismissed_at", null)
+                .order("created_at", { ascending: false })
+                .limit(5);
+
+            const results = await Promise.all([countPromise, listPromise]);
+            const countResult = results[0];
+            const listResult = results[1];
+
+            if (!(countResult && countResult.error && isMissingDismissedAtColumnError(countResult.error))
+                && !(listResult && listResult.error && isMissingDismissedAtColumnError(listResult.error))) {
+                return {
+                    unreadCount: countResult && !countResult.error ? (countResult.count || 0) : 0,
+                    rows: listResult && !listResult.error && listResult.data ? listResult.data : []
+                };
+            }
+
+            notificationsSupportDismissedAt = false;
+        }
+
+        const fallbackResult = await context.client
             .from("notifications")
             .select("id, title, message, related_application_id, related_url, is_read, created_at")
-            .eq("recipient_user_id", context.user.id)
-            .order("created_at", { ascending: false })
-            .limit(5);
+            .eq("recipient_user_id", userId)
+            .order("created_at", { ascending: false });
 
-        const results = await Promise.all([countPromise, listPromise]);
-        const countResult = results[0];
-        const listResult = results[1];
+        if (fallbackResult.error) {
+            return { unreadCount: 0, rows: [] };
+        }
 
+        const visibleRows = filterDismissedNotifications(fallbackResult.data || [], userId);
         return {
-            unreadCount: countResult && !countResult.error ? (countResult.count || 0) : 0,
-            rows: listResult && !listResult.error && listResult.data ? listResult.data : []
+            unreadCount: visibleRows.filter(function (row) { return !row.is_read; }).length,
+            rows: visibleRows.slice(0, 5)
         };
     }
 
     async function loadProfileSummary(context) {
         const result = await context.client
             .from("profiles")
-            .select("first_name, middle_name, last_name, email")
+            .select("first_name, middle_name, last_name, email, sex, address, barangay")
             .eq("id", context.user.id)
             .single();
 
@@ -557,6 +915,27 @@
             return result.data;
         }
         return readProfileCache(context.user.id);
+    }
+
+    async function loadLatestApplicationAuxMeta(context, applicationId) {
+        if (!context || !context.client || !applicationId) {
+            return { available: false, payload: null };
+        }
+
+        const result = await context.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .select("payload")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (result.error) {
+            return { available: false, payload: null };
+        }
+
+        return {
+            available: true,
+            payload: result.data && result.data.payload ? result.data.payload : {}
+        };
     }
 
     async function loadExamRecord(context, applicationId, applicationStatus) {
@@ -655,7 +1034,7 @@
             setActionLink("dashboardQuickViewApplicationBtn", detailUrl, "View My Application", false);
         } else {
             setActionLink("dashboardHeaderViewApplicationBtn", "applicant-application-form.html", "Start Application", false);
-            setActionLink("dashboardQuickViewApplicationBtn", "applicant-application-form.html", "Start Application", false);
+            setActionLink("dashboardQuickViewApplicationBtn", "javascript:void(0);", "No Application Yet", true);
         }
 
         if (latestDraft && latestDraft.id) {
@@ -686,10 +1065,22 @@
             const latestApplication = headResults[1];
             const latestDraft = headResults[2];
             const notificationPayload = headResults[3];
+            const latestApplicationAuxMeta = latestApplication
+                ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
+                : { available: false, payload: null };
+            const completionReminder = buildCompletionReminder(profileSummary, latestApplication, latestApplicationAuxMeta);
 
             renderProfileHeader(profileSummary, context.user.email);
             renderQuickActions(latestApplication, latestDraft);
             renderNotificationDropdown(notificationPayload.rows, notificationPayload.unreadCount);
+            showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
+            if (completionReminder) {
+                if (shouldShowProfileReminderModal(context.user.id, completionReminder)) {
+                    showProfileReminderModal(context.user.id, completionReminder);
+                }
+            } else {
+                clearProfileReminderDismissed(context.user.id);
+            }
 
             if (!latestApplication) {
                 renderCards(null, null, null, null);
@@ -728,4 +1119,18 @@
     }
 
     window.addEventListener("DOMContentLoaded", init);
+    window.addEventListener("DOMContentLoaded", function () {
+        const updateBtn = byId("profileReminderModalUpdateBtn");
+        if (updateBtn) {
+            updateBtn.addEventListener("click", function () {
+                const targetUrl = updateBtn.getAttribute("data-reminder-url");
+                if (targetUrl) {
+                    window.location.href = targetUrl;
+                    return;
+                }
+                const target = updateBtn.getAttribute("data-reminder-target") || "gender";
+                window.location.href = "applicant-profile.html?complete=" + encodeURIComponent(target);
+            });
+        }
+    });
 })();

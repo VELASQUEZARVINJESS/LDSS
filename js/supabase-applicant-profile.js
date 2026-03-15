@@ -11,6 +11,14 @@
         return PROFILE_CACHE_PREFIX + userId;
     }
 
+    function parseQuery() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+            completeBarangay: params.get("complete") === "barangay",
+            completeGender: params.get("complete") === "gender"
+        };
+    }
+
     function writeProfileCache(userId, profile) {
         if (!userId || !profile) {
             return;
@@ -100,6 +108,18 @@
             return cleaned;
         }
         return raw;
+    }
+
+    function explainProfileSaveError(message) {
+        const text = (message || "").toString();
+        const normalized = text.toLowerCase();
+        if (
+            normalized.includes("profiles_mobile_number_key") ||
+            (normalized.includes("duplicate key value") && normalized.includes("mobile_number"))
+        ) {
+            return "Mobile number is already used by another account. Please enter a different contact number.";
+        }
+        return text;
     }
 
     function setText(id, value) {
@@ -463,7 +483,7 @@
     async function updateProfile(context, patch, successMessage) {
         const result = await context.client.from("profiles").update(patch).eq("id", context.user.id).select("*").single();
         if (result.error) {
-            showProfileStatus("Save failed: " + result.error.message, "alert-danger");
+            showProfileStatus("Save failed: " + explainProfileSaveError(result.error.message), "alert-danger");
             return null;
         }
         writeProfileCache(context.user.id, result.data);
@@ -499,6 +519,18 @@
         if (instance) {
             instance.hide();
         }
+    }
+
+    function openModal(modalId) {
+        if (!window.bootstrap || !window.bootstrap.Modal) {
+            return;
+        }
+        const modalElement = byId(modalId);
+        if (!modalElement) {
+            return;
+        }
+        const instance = window.bootstrap.Modal.getOrCreateInstance(modalElement);
+        instance.show();
     }
 
     function bindSaveHandlers(context) {
@@ -589,6 +621,22 @@
             await loadProfileOverviewPhoto(authContext, profile);
             await loadLatestApplicationSummary(authContext, profile);
             bindSaveHandlers(authContext);
+            const query = parseQuery();
+            if (query.completeBarangay || query.completeGender) {
+                showProfileStatus(
+                    query.completeGender
+                        ? "Please select your gender, then click Save."
+                        : "Please select your barangay, then click Save.",
+                    "alert-warning"
+                );
+                openModal("modalEditPersonal");
+                window.setTimeout(function () {
+                    const targetField = query.completeGender ? byId("modalSex") : byId("modalBarangay");
+                    if (targetField && typeof targetField.focus === "function") {
+                        targetField.focus();
+                    }
+                }, 180);
+            }
         } catch (error) {
             showProfileStatus("Failed to load profile record. Please refresh.", "alert-danger");
         }

@@ -4,22 +4,62 @@
     const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
     const CONTINUABLE_DRAFT_STATUSES = ["draft", "returned_for_correction"];
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
     const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
     const MAX_AWARDS = 5;
+    const DAET_MUNICIPALITY = "DAET";
+    const DAET_BARANGAYS = [
+        "Alawihao",
+        "Awitan",
+        "Bagasbas",
+        "Barangay I",
+        "Barangay II",
+        "Barangay III",
+        "Barangay IV",
+        "Barangay V",
+        "Barangay VI",
+        "Barangay VII",
+        "Barangay VIII",
+        "Bibirao",
+        "Borabod",
+        "Calasgasan",
+        "Camambugan",
+        "Cobangbang",
+        "Dogongan",
+        "Gahonon",
+        "Gubat",
+        "Lag-on",
+        "Magang",
+        "Mambalite",
+        "Mancruz",
+        "Pamorangon",
+        "San Isidro"
+    ];
+    const DAET_BARANGAY_ALIASES = {
+        "Barangay I": ["BRGY I", "BRGY 1", "BARANGAY 1"],
+        "Barangay II": ["BRGY II", "BRGY 2", "BARANGAY 2"],
+        "Barangay III": ["BRGY III", "BRGY 3", "BARANGAY 3"],
+        "Barangay IV": ["BRGY IV", "BRGY 4", "BARANGAY 4"],
+        "Barangay V": ["BRGY V", "BRGY 5", "BARANGAY 5"],
+        "Barangay VI": ["BRGY VI", "BRGY 6", "BARANGAY 6"],
+        "Barangay VII": ["BRGY VII", "BRGY 7", "BARANGAY 7"],
+        "Barangay VIII": ["BRGY VIII", "BRGY 8", "BARANGAY 8"]
+    };
+    const DAET_BARANGAY_MATCHERS = createDaetBarangayMatchers();
     // Balanced online default: small enough for fast queue loading,
     // still clear enough for profile display and print preview.
     const APPLICANT_PHOTO_MAX_DIMENSION = 640;
-    const APPLICANT_PHOTO_WEBP_QUALITY = 0.8;
+    const APPLICANT_PHOTO_JPEG_QUALITY = 0.82;
 
     const DOC_FIELDS = [
         {
             inputId: "reqApplicantPhoto",
             docType: "applicant_photo",
             label: "Applicant 1x1 Photo",
-            allowedExtensions: [".jpg", ".jpeg", ".png", ".webp"],
-            allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png", "image/webp"],
-            fileTypeHint: "JPG, PNG, or WEBP",
+            allowedExtensions: [".jpg", ".jpeg", ".png"],
+            allowedMimeTypes: ["image/jpeg", "image/jpg", "image/png"],
+            fileTypeHint: "JPG or PNG",
             requiredOnSubmit: true,
             syncToProfilePhoto: true
         }
@@ -34,12 +74,16 @@
     let isSubmitting = false;
     let applicantPhotoPreviewObjectUrl = "";
     let submittedModalInstance = null;
+    let submitErrorModalInstance = null;
     let privacyModalInstance = null;
     let applicationPolicyModalInstance = null;
+    let submitErrorActionHandler = null;
     let pendingSubmitContext = null;
     let submittedTrackingUrl = "";
     let applicationsSupportsSectorClassification = true;
     let profilesSupportsPlaceOfBirth = true;
+    let applicationAuxDataAvailable = true;
+    let legacyBarangayPendingAllowed = false;
     let initialPrivacyModalQueued = false;
     let formActionsBound = false;
 
@@ -55,6 +99,182 @@
     function upperTextOrNull(value) {
         const normalized = nullIfBlank(value);
         return normalized ? normalized.toUpperCase() : null;
+    }
+
+    function escapeHtml(value) {
+        return (value || "")
+            .toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+    }
+
+    function escapeRegExp(value) {
+        return (value || "").toString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function cleanupAddressText(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function stripPermanentAddressDecorators(value, selectedBarangay) {
+        let cleaned = cleanupAddressText(value);
+        if (!cleaned) {
+            return "";
+        }
+
+        cleaned = removeAddressToken(cleaned, DAET_MUNICIPALITY);
+        if (selectedBarangay) {
+            cleaned = removeAddressToken(cleaned, selectedBarangay);
+        }
+        return cleanupAddressText(cleaned);
+    }
+
+    function normalizeAddressText(value) {
+        return cleanupAddressText(value)
+            .replace(/\.+$/g, "")
+            .toLowerCase();
+    }
+
+    function normalizeBarangayValue(value) {
+        const cleaned = stripPermanentAddressDecorators(value, "");
+        if (!cleaned) {
+            return "";
+        }
+
+        const matched = DAET_BARANGAY_MATCHERS.find(function (matcher) {
+            return matcher.aliases.some(function (candidate) {
+                return normalizeAddressText(candidate) === normalizeAddressText(cleaned);
+            });
+        });
+        return matched ? matched.name : cleaned;
+    }
+
+    function createDaetBarangayMatchers() {
+        return DAET_BARANGAYS
+            .map(function (barangay) {
+                const aliases = [barangay].concat(DAET_BARANGAY_ALIASES[barangay] || []);
+                return {
+                    name: barangay,
+                    aliases: aliases.sort(function (left, right) {
+                        return right.length - left.length;
+                    })
+                };
+            })
+            .sort(function (left, right) {
+                return right.name.length - left.name.length;
+            });
+    }
+
+    function populatePermanentAddressFields() {
+        const municipalitySelect = byId("permanentAddressMunicipality");
+        if (municipalitySelect) {
+            municipalitySelect.innerHTML = "";
+            const option = document.createElement("option");
+            option.value = DAET_MUNICIPALITY;
+            option.textContent = DAET_MUNICIPALITY;
+            municipalitySelect.appendChild(option);
+            municipalitySelect.value = DAET_MUNICIPALITY;
+        }
+
+        const barangaySelect = byId("permanentAddressBarangay");
+        if (!barangaySelect) {
+            return;
+        }
+
+        const currentValue = nullIfBlank(barangaySelect.value);
+        barangaySelect.innerHTML = "";
+
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select barangay";
+        barangaySelect.appendChild(placeholder);
+
+        DAET_BARANGAYS.forEach(function (barangay) {
+            const option = document.createElement("option");
+            option.value = barangay;
+            option.textContent = barangay;
+            barangaySelect.appendChild(option);
+        });
+
+        if (currentValue) {
+            setSelectValue("permanentAddressBarangay", currentValue);
+        }
+    }
+
+    function composePermanentAddress() {
+        const municipality = nullIfBlank(byId("permanentAddressMunicipality") ? byId("permanentAddressMunicipality").value : "") || DAET_MUNICIPALITY;
+        const barangay = nullIfBlank(normalizeBarangayValue(byId("permanentAddressBarangay") ? byId("permanentAddressBarangay").value : ""));
+        const line = stripPermanentAddressDecorators(
+            upperTextOrNull(byId("permanentAddressLine") ? byId("permanentAddressLine").value : ""),
+            barangay
+        );
+        const parts = [];
+
+        if (!line && !barangay) {
+            return null;
+        }
+
+        if (line) {
+            parts.push(line);
+        }
+        if (barangay) {
+            parts.push(barangay.toUpperCase());
+        }
+        parts.push(municipality.toUpperCase());
+
+        return cleanupAddressText(parts.join(", ")) || null;
+    }
+
+    function removeAddressToken(value, token) {
+        const normalizedToken = (token || "").toString().trim();
+        if (!normalizedToken) {
+            return cleanupAddressText(value);
+        }
+
+        const pattern = new RegExp("\\b" + escapeRegExp(normalizedToken).replace(/\s+/g, "\\s+") + "\\b", "gi");
+        return cleanupAddressText((value || "").toString().replace(pattern, " "));
+    }
+
+    function parsePermanentAddress(address) {
+        const result = {
+            municipality: DAET_MUNICIPALITY,
+            barangay: "",
+            line: ""
+        };
+
+        let remainder = cleanupAddressText(address);
+        if (!remainder) {
+            return result;
+        }
+
+        remainder = removeAddressToken(remainder, DAET_MUNICIPALITY);
+
+        DAET_BARANGAY_MATCHERS.some(function (matcher) {
+            const alias = matcher.aliases.find(function (candidate) {
+                const pattern = new RegExp("\\b" + escapeRegExp(candidate).replace(/\s+/g, "\\s+") + "\\b", "i");
+                return pattern.test(remainder);
+            });
+
+            if (!alias) {
+                return false;
+            }
+
+            result.barangay = matcher.name;
+            remainder = removeAddressToken(remainder, alias);
+            return true;
+        });
+
+        result.line = stripPermanentAddressDecorators(remainder, result.barangay);
+        return result;
     }
 
     function normalizeMiddleNameValue(value) {
@@ -151,19 +371,19 @@
             context2d.fillRect(0, 0, targetWidth, targetHeight);
             context2d.drawImage(image, 0, 0, targetWidth, targetHeight);
 
-            const webpBlob = await new Promise(function (resolve) {
-                canvas.toBlob(resolve, "image/webp", APPLICANT_PHOTO_WEBP_QUALITY);
+            const jpegBlob = await new Promise(function (resolve) {
+                canvas.toBlob(resolve, "image/jpeg", APPLICANT_PHOTO_JPEG_QUALITY);
             });
 
-            if (!webpBlob) {
+            if (!jpegBlob) {
                 return file;
             }
 
             return new File(
-                [webpBlob],
-                replaceFileExtension(file.name, ".webp"),
+                [jpegBlob],
+                replaceFileExtension(file.name, ".jpg"),
                 {
-                    type: "image/webp",
+                    type: "image/jpeg",
                     lastModified: Date.now()
                 }
             );
@@ -219,6 +439,12 @@
     function explainMutationSingleRowError(message) {
         const text = (message || "").toString();
         const normalized = text.toLowerCase();
+        if (
+            normalized.includes("profiles_mobile_number_key") ||
+            (normalized.includes("duplicate key value") && normalized.includes("mobile_number"))
+        ) {
+            return "Mobile number is already used by another account. Please enter a different contact number.";
+        }
         if (!normalized.includes("cannot coerce the result to a single json object")) {
             return text;
         }
@@ -332,7 +558,7 @@
     }
 
     function profileSelectFields() {
-        const base = "first_name, middle_name, last_name, sex, civil_status, date_of_birth, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path";
+        const base = "first_name, middle_name, last_name, sex, civil_status, date_of_birth, barangay, address, mobile_number, email, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, applicant_photo_path";
         if (profilesSupportsPlaceOfBirth) {
             return base + ", place_of_birth";
         }
@@ -420,6 +646,18 @@
         }
     }
 
+    function normalizeAuxMetaPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return {};
+        }
+        return payload;
+    }
+
+    function isMissingAuxDataTableError(error) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        return text.includes(APPLICATION_AUX_DATA_TABLE) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
+    }
+
     function setAgreementValidity(isInvalid) {
         const checkbox = byId("applicationAgreement");
         if (!checkbox) {
@@ -485,7 +723,13 @@
         modal.show();
     }
 
-    function queueInitialPrivacyNoticeModal() {
+    function queueInitialPrivacyNoticeModal(application) {
+        const normalizedStatus = application && application.status
+            ? application.status.toString().trim().toLowerCase()
+            : "";
+        if (normalizedStatus === "submitted") {
+            return;
+        }
         if (initialPrivacyModalQueued || hasPrivacyNoticeAgreement()) {
             return;
         }
@@ -516,7 +760,10 @@
         }
 
         setPrivacyNoticeValidity(true);
-        openPrivacyModalForReview();
+        const checkbox = byId("privacyNoticeAgreement");
+        if (checkbox && typeof checkbox.focus === "function") {
+            checkbox.focus();
+        }
         throw new Error("Please review and acknowledge the Data Privacy Notice before " + actionLabel + ".");
     }
 
@@ -549,6 +796,150 @@
             submittedModalInstance = new window.bootstrap.Modal(modalEl);
         }
         return submittedModalInstance;
+    }
+
+    function getSubmitErrorModal() {
+        const modalEl = byId("applicationSubmitErrorModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!submitErrorModalInstance) {
+            submitErrorModalInstance = new window.bootstrap.Modal(modalEl);
+        }
+        return submitErrorModalInstance;
+    }
+
+    function splitSubmitErrorMessages(message) {
+        return (message || "")
+            .toString()
+            .split(/\s+\|\s+/)
+            .map(function (item) {
+                return item.trim();
+            })
+            .filter(Boolean);
+    }
+
+    function summarizeSubmitValidationItems(messages) {
+        const items = [];
+
+        (Array.isArray(messages) ? messages : []).forEach(function (message) {
+            const text = (message || "").toString().trim();
+            let match = null;
+            if (!text) {
+                return;
+            }
+
+            if (/^Please agree that all information is correct before /i.test(text)) {
+                items.push("Agreement Confirmation");
+                return;
+            }
+            if (/^Please review and acknowledge the Data Privacy Notice before /i.test(text)) {
+                items.push("Data Privacy Notice");
+                return;
+            }
+
+            match = text.match(/^Missing required uploads:\s*(.+?)(?:\.)?$/i);
+            if (match) {
+                match[1]
+                    .split(/\s*,\s*/)
+                    .map(function (item) {
+                        return item.trim();
+                    })
+                    .filter(Boolean)
+                    .forEach(function (item) {
+                        items.push(item);
+                    });
+                return;
+            }
+
+            match = text.match(/^(.+?):\s*(?:Invalid file type|File exceeds 10MB limit)/i);
+            if (match) {
+                items.push(match[1].trim());
+                return;
+            }
+
+            match = text.match(/^(.+?) is required before submission\.$/i);
+            if (match) {
+                items.push(match[1].trim());
+                return;
+            }
+
+            match = text.match(/^(.+?) is invalid\.$/i);
+            if (match) {
+                items.push(match[1].trim());
+                return;
+            }
+
+            match = text.match(/^(.+?) format must be /i);
+            if (match) {
+                items.push(match[1].trim());
+                return;
+            }
+
+            match = text.match(/^(.+?) must be /i);
+            if (match) {
+                items.push(match[1].trim());
+                return;
+            }
+
+            if (/^Children\/Brother\/Sister counts /i.test(text)) {
+                items.push("Children / Brother / Sister Counts");
+            }
+        });
+
+        return Array.from(new Set(items.filter(Boolean)));
+    }
+
+    function showSubmitErrorModal(message, options) {
+        const settings = options && typeof options === "object" ? options : {};
+        const messages = splitSubmitErrorMessages(message);
+        const itemList = Array.isArray(settings.items) ? settings.items.filter(Boolean) : [];
+        const titleEl = byId("applicationSubmitErrorModalLabel");
+        const bodyEl = byId("applicationSubmitErrorModalMessage");
+        const actionBtn = byId("applicationSubmitErrorActionBtn");
+
+        if (titleEl) {
+            titleEl.textContent = settings.title || "Cannot Submit Application";
+        }
+
+        if (bodyEl) {
+            if (itemList.length > 0) {
+                bodyEl.innerHTML =
+                    '<ul class="mb-0 ps-3">' +
+                    itemList.map(function (item) {
+                        return "<li>" + escapeHtml(item) + "</li>";
+                    }).join("") +
+                    "</ul>";
+            } else if (messages.length > 1) {
+                bodyEl.innerHTML =
+                    '<p class="mb-2">Please review the following before submitting:</p>' +
+                    '<ul class="mb-0 ps-3">' +
+                    messages.map(function (item) {
+                        return "<li>" + escapeHtml(item) + "</li>";
+                    }).join("") +
+                    "</ul>";
+            } else {
+                bodyEl.innerHTML = '<p class="mb-0">' + escapeHtml(messages[0] || "Please review your application and try again.") + "</p>";
+            }
+        }
+
+        submitErrorActionHandler = typeof settings.onAction === "function" ? settings.onAction : null;
+        if (actionBtn) {
+            if (submitErrorActionHandler && settings.actionLabel) {
+                actionBtn.textContent = settings.actionLabel;
+                actionBtn.classList.remove("d-none");
+            } else {
+                actionBtn.textContent = "";
+                actionBtn.classList.add("d-none");
+            }
+        }
+
+        const modal = getSubmitErrorModal();
+        if (!modal) {
+            return false;
+        }
+        modal.show();
+        return true;
     }
 
     function showSubmittedModal(submittedApplication, profileWarning, mode) {
@@ -783,11 +1174,8 @@
         updateAwardControlsState();
     }
 
-    function writeAuxMeta(userId, applicationId) {
-        if (!userId || !applicationId) {
-            return;
-        }
-        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"];
+    function collectAuxMetaPayload() {
+        const spouseFieldIds = ["spouseName", "spouseChildrenCount", "spouseOccupation"];
         const hasSpouseDetails = spouseFieldIds.some(function (id) {
             const input = byId(id);
             return !!(input && nullIfBlank(input.value));
@@ -825,15 +1213,86 @@
             spouseName: upperTextOrNull(byId("spouseName") ? byId("spouseName").value : ""),
             spouseChildrenCount: nullIfBlank(byId("spouseChildrenCount") ? byId("spouseChildrenCount").value : ""),
             spouseOccupation: upperTextOrNull(byId("spouseOccupation") ? byId("spouseOccupation").value : ""),
-            spouseEducation: upperTextOrNull(byId("spouseEducation") ? byId("spouseEducation").value : ""),
-            intendedSchool: upperTextOrNull(byId("intendedSchool") ? byId("intendedSchool").value : ""),
             degreeProgramCourse: upperTextOrNull(byId("degreeProgramCourse") ? byId("degreeProgramCourse").value : "")
         };
+        return payload;
+    }
+
+    function writeAuxMeta(userId, applicationId, payloadInput) {
+        if (!userId || !applicationId) {
+            return;
+        }
+        const payload = normalizeAuxMetaPayload(payloadInput || collectAuxMetaPayload());
         try {
             localStorage.setItem(auxMetaKey(userId, applicationId), JSON.stringify(payload));
         } catch (error) {
             // Non-fatal: browser storage may be disabled.
         }
+    }
+
+    async function fetchSharedAuxMeta(context, applicationId) {
+        if (!context || !context.client || !applicationId || !applicationAuxDataAvailable) {
+            return null;
+        }
+
+        const result = await context.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .select("payload")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (result.error) {
+            if (isMissingAuxDataTableError(result.error)) {
+                applicationAuxDataAvailable = false;
+            }
+            return null;
+        }
+
+        return result.data && result.data.payload
+            ? normalizeAuxMetaPayload(result.data.payload)
+            : null;
+    }
+
+    async function persistAuxMeta(context, userId, applicationId) {
+        if (!userId || !applicationId) {
+            return;
+        }
+
+        const payload = collectAuxMetaPayload();
+        writeAuxMeta(userId, applicationId, payload);
+
+        if (!context || !context.client || !applicationAuxDataAvailable) {
+            return;
+        }
+
+        const result = await context.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .upsert({
+                application_id: applicationId,
+                applicant_id: userId,
+                payload: payload
+            }, { onConflict: "application_id" });
+
+        if (result.error) {
+            if (isMissingAuxDataTableError(result.error)) {
+                applicationAuxDataAvailable = false;
+                return;
+            }
+            throw new Error("Failed to save extended application details: " + result.error.message);
+        }
+    }
+
+    async function hydrateAuxMeta(context, userId, applicationId) {
+        if (!userId || !applicationId) {
+            return;
+        }
+
+        const sharedPayload = await fetchSharedAuxMeta(context, applicationId);
+        if (sharedPayload) {
+            writeAuxMeta(userId, applicationId, sharedPayload);
+        }
+
+        applyAuxMeta(userId, applicationId);
     }
 
     function applyAuxMeta(userId, applicationId) {
@@ -932,12 +1391,6 @@
         if (byId("spouseOccupation")) {
             byId("spouseOccupation").value = payload.spouseOccupation || "";
         }
-        if (byId("spouseEducation")) {
-            byId("spouseEducation").value = payload.spouseEducation || "";
-        }
-        if (byId("intendedSchool")) {
-            byId("intendedSchool").value = payload.intendedSchool || "";
-        }
         if (byId("degreeProgramCourse")) {
             byId("degreeProgramCourse").value = payload.degreeProgramCourse || "";
         }
@@ -986,7 +1439,8 @@
             civil_status: nullIfBlank(byId("civilStatus") ? byId("civilStatus").value : ""),
             date_of_birth: nullIfBlank(byId("dateOfBirth") ? byId("dateOfBirth").value : ""),
             place_of_birth: upperTextOrNull(byId("placeOfBirth") ? byId("placeOfBirth").value : ""),
-            address: upperTextOrNull(byId("permanentAddress") ? byId("permanentAddress").value : ""),
+            barangay: nullIfBlank(normalizeBarangayValue(byId("permanentAddressBarangay") ? byId("permanentAddressBarangay").value : "")),
+            address: composePermanentAddress(),
             mobile_number: normalizeMobileForStorage(byId("contactNumber") ? byId("contactNumber").value : ""),
             email: nullIfBlank(byId("emailAddress") ? byId("emailAddress").value.toLowerCase() : ""),
             school_name: upperTextOrNull(byId("schoolName") ? byId("schoolName").value : ""),
@@ -1011,6 +1465,40 @@
         radioGroup.forEach(function (radio) {
             radio.classList.toggle("is-invalid", !!isInvalid);
         });
+    }
+
+    function setPermanentAddressBarangayFeedback(message, tone) {
+        const feedback = byId("permanentAddressBarangayFeedback");
+        if (!feedback) {
+            return;
+        }
+        feedback.textContent = message || "Required before submission.";
+        feedback.className = "form-text";
+        if (tone === "warning") {
+            feedback.classList.add("text-warning");
+            return;
+        }
+        feedback.classList.add("text-muted");
+    }
+
+    function syncBarangayFeedbackState(hasBarangay, enforceSelection) {
+        if (hasBarangay) {
+            setInputValidity("permanentAddressBarangay", false);
+            setPermanentAddressBarangayFeedback("Required before submission.", "");
+            return;
+        }
+
+        if (legacyBarangayPendingAllowed) {
+            setInputValidity("permanentAddressBarangay", false);
+            setPermanentAddressBarangayFeedback("Older accounts may leave this pending for now. Please update your barangay later.", "warning");
+            return;
+        }
+
+        setInputValidity("permanentAddressBarangay", !!enforceSelection);
+        setPermanentAddressBarangayFeedback(
+            enforceSelection ? "Select your barangay before submission." : "Required before submission.",
+            enforceSelection ? "warning" : ""
+        );
     }
 
     function setFileFeedback(inputId, message, isError) {
@@ -1142,7 +1630,7 @@
             const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
             let message = "Selected: " + file.name + " (" + sizeMb + " MB)";
             if (doc.docType === "applicant_photo") {
-                message += " - will be optimized to WEBP on upload.";
+                message += " - will be optimized on upload.";
             }
             setFileFeedback(doc.inputId, message, false);
         });
@@ -1163,7 +1651,8 @@
         const dateOfBirth = byId("dateOfBirth") ? byId("dateOfBirth").value.trim() : "";
         const placeOfBirth = byId("placeOfBirth") ? byId("placeOfBirth").value.trim() : "";
         const additionalData = byId("additionalData") ? byId("additionalData").value.trim() : "";
-        const permanentAddress = byId("permanentAddress") ? byId("permanentAddress").value.trim() : "";
+        const permanentAddressBarangay = byId("permanentAddressBarangay") ? byId("permanentAddressBarangay").value.trim() : "";
+        const permanentAddressLine = byId("permanentAddressLine") ? byId("permanentAddressLine").value.trim() : "";
         const contactNumber = byId("contactNumber") ? byId("contactNumber").value.trim() : "";
         const emailAddress = byId("emailAddress") ? byId("emailAddress").value.trim() : "";
         const highestEducationAttainment = byId("highestEducationAttainment") ? byId("highestEducationAttainment").value.trim() : "";
@@ -1192,8 +1681,6 @@
         const spouseName = byId("spouseName") ? byId("spouseName").value.trim() : "";
         const spouseChildrenCount = byId("spouseChildrenCount") ? byId("spouseChildrenCount").value.trim() : "";
         const spouseOccupation = byId("spouseOccupation") ? byId("spouseOccupation").value.trim() : "";
-        const spouseEducation = byId("spouseEducation") ? byId("spouseEducation").value.trim() : "";
-        const intendedSchool = byId("intendedSchool") ? byId("intendedSchool").value.trim() : "";
         const degreeProgramCourse = byId("degreeProgramCourse") ? byId("degreeProgramCourse").value.trim() : "";
 
         setInputValidity("schoolYear", !schoolYear);
@@ -1211,13 +1698,12 @@
         const requiredChecks = [
             { id: "lastName", label: "Last Name", value: lastName },
             { id: "firstName", label: "First Name", value: firstName },
-            { id: "sex", label: "Sex", value: sex },
+            { id: "sex", label: "Gender", value: sex },
             { id: "civilStatus", label: "Status", value: civilStatus },
             { id: "religion", label: "Religion", value: religion },
             { id: "dateOfBirth", label: "Date of Birth", value: dateOfBirth },
             { id: "placeOfBirth", label: "Place of Birth", value: placeOfBirth },
             { id: "additionalData", label: "Sector Classification", value: additionalData },
-            { id: "permanentAddress", label: "Permanent Address", value: permanentAddress },
             { id: "contactNumber", label: "Contact Number", value: contactNumber },
             { id: "emailAddress", label: "Email Address", value: emailAddress },
             { id: "highestEducationAttainment", label: "Highest Educational Attainment", value: highestEducationAttainment },
@@ -1254,6 +1740,14 @@
                 errors.push(item.label + " is required before submission.");
             }
         });
+
+        if (submitting && !permanentAddressBarangay && !legacyBarangayPendingAllowed) {
+            setInputValidity("permanentAddressBarangay", true);
+            setPermanentAddressBarangayFeedback("Select your barangay before submission.", "warning");
+            errors.push("Permanent Address Barangay is required before submission.");
+        } else {
+            syncBarangayFeedbackState(!!permanentAddressBarangay, false);
+        }
 
         if (contactNumber) {
             const normalizedMobile = normalizeMobileForStorage(contactNumber) || "";
@@ -1312,7 +1806,7 @@
             errors.push("Children/Brother/Sister counts must be valid non-negative numbers.");
         }
 
-        ["spouseName", "spouseChildrenCount", "spouseOccupation", "spouseEducation", "intendedSchool"].forEach(function (id) {
+        ["spouseName", "spouseChildrenCount", "spouseOccupation"].forEach(function (id) {
             setInputValidity(id, false);
         });
 
@@ -1352,9 +1846,19 @@
         if (byId("placeOfBirth")) {
             byId("placeOfBirth").value = profile.place_of_birth || "";
         }
-        if (byId("permanentAddress")) {
-            byId("permanentAddress").value = profile.address || "";
+        const parsedAddress = parsePermanentAddress(profile.address || "");
+        const selectedBarangay = nullIfBlank(normalizeBarangayValue(profile.barangay || "")) || parsedAddress.barangay || "";
+        legacyBarangayPendingAllowed = !selectedBarangay && !!cleanupAddressText(profile.address || "");
+        if (byId("permanentAddressMunicipality")) {
+            setSelectValue("permanentAddressMunicipality", parsedAddress.municipality || DAET_MUNICIPALITY);
         }
+        if (byId("permanentAddressBarangay")) {
+            setSelectValue("permanentAddressBarangay", selectedBarangay);
+        }
+        if (byId("permanentAddressLine")) {
+            byId("permanentAddressLine").value = parsedAddress.line || "";
+        }
+        syncBarangayFeedbackState(!!selectedBarangay, false);
         if (byId("contactNumber")) {
             byId("contactNumber").value = mobileForInput(profile.mobile_number || "");
         }
@@ -1412,7 +1916,7 @@
     function actionLabels(application) {
         if (application && !application.is_locked && application.status === "submitted") {
             return {
-                save: "Save Changes",
+                save: "Update Information",
                 submit: "Update Submitted Application"
             };
         }
@@ -1454,7 +1958,9 @@
             "dateOfBirth",
             "placeOfBirth",
             "additionalData",
-            "permanentAddress",
+            "permanentAddressMunicipality",
+            "permanentAddressBarangay",
+            "permanentAddressLine",
             "contactNumber",
             "emailAddress",
             "highestEducationAttainment",
@@ -1482,8 +1988,6 @@
             "spouseName",
             "spouseChildrenCount",
             "spouseOccupation",
-            "spouseEducation",
-            "intendedSchool",
             "degreeProgramCourse",
             "reqApplicantPhoto",
             "applicationAgreement",
@@ -1529,7 +2033,9 @@
                 ? "Updating..."
                 : "Submitting...";
         } else {
-            saveBtn.textContent = "Saving...";
+            saveBtn.textContent = currentApplication && currentApplication.status === "submitted"
+                ? "Updating Information..."
+                : "Saving...";
         }
     }
 
@@ -1718,7 +2224,7 @@
         }
 
         if (result.error) {
-            return result.error.message;
+            return explainMutationSingleRowError(result.error.message);
         }
         if (result.data) {
             writeProfileCache(context.user.id, result.data);
@@ -2085,7 +2591,7 @@
 
             const wasSubmitted = !!(currentApplication && currentApplication.status === "submitted");
             const application = await saveOrCreateDraft(context);
-            writeAuxMeta(context.user.id, application.id);
+            await persistAuxMeta(context, context.user.id, application.id);
             const profileErrorMessage = await saveProfile(context);
             const uploadResult = await uploadSelectedDocuments(context, application.id);
             const successPrefix = wasSubmitted ? "Application changes saved" : "Draft saved";
@@ -2137,7 +2643,7 @@
         try {
             const wasPreviouslySubmitted = !!(currentApplication && currentApplication.status === "submitted");
             const application = await saveOrCreateDraft(context);
-            writeAuxMeta(context.user.id, application.id);
+            await persistAuxMeta(context, context.user.id, application.id);
             const profileErrorMessage = await saveProfile(context);
 
             const uploadResult = await uploadSelectedDocuments(context, application.id);
@@ -2181,7 +2687,11 @@
             showSubmittedModal(submitted, profileErrorMessage, wasPreviouslySubmitted ? "updated" : "submitted");
         } catch (error) {
             const message = explainMutationSingleRowError(error && error.message ? error.message : "Unknown error");
-            setStatus("Submission failed: " + message, "alert-danger");
+            if (!showSubmitErrorModal(message, { title: "Submission Failed" })) {
+                setStatus("Submission failed: " + message, "alert-danger");
+            } else {
+                setStatus("", "");
+            }
         } finally {
             isSubmitting = false;
             setActionLoading("submit", false);
@@ -2195,15 +2705,35 @@
         try {
             requireAgreementOrThrow("submitting");
             requirePrivacyNoticeOrThrow("submitting");
-
-            const fieldErrors = validateFormFields("submit");
-            const fileErrors = validateSelectedFiles();
-            const validationErrors = fieldErrors.concat(fileErrors);
-            if (validationErrors.length > 0) {
-                throw new Error(validationErrors.join(" | "));
-            }
         } catch (error) {
-            setStatus(error.message || "Please agree before submission.", "alert-warning");
+            const message = error && error.message ? error.message : "Please agree before submission.";
+            const summaryItems = summarizeSubmitValidationItems([message]);
+            const isPrivacyNoticeIssue = message.toLowerCase().includes("data privacy notice");
+            if (!showSubmitErrorModal(message, {
+                title: "Cannot Submit Application",
+                items: summaryItems,
+                actionLabel: isPrivacyNoticeIssue ? "Open Privacy Notice" : "",
+                onAction: isPrivacyNoticeIssue ? openPrivacyModalForReview : null
+            })) {
+                setStatus(message, "alert-warning");
+            } else {
+                setStatus("", "");
+            }
+            return;
+        }
+
+        const fieldErrors = validateFormFields("submit");
+        const fileErrors = validateSelectedFiles();
+        const validationErrors = fieldErrors.concat(fileErrors);
+        if (validationErrors.length > 0) {
+            if (!showSubmitErrorModal(validationErrors.join(" | "), {
+                title: "Please Complete These Fields",
+                items: summarizeSubmitValidationItems(validationErrors)
+            })) {
+                setStatus(validationErrors.join(" | "), "alert-warning");
+            } else {
+                setStatus("", "");
+            }
             return;
         }
 
@@ -2246,7 +2776,9 @@
             "dateOfBirth",
             "placeOfBirth",
             "additionalData",
-            "permanentAddress",
+            "permanentAddressMunicipality",
+            "permanentAddressBarangay",
+            "permanentAddressLine",
             "contactNumber",
             "emailAddress",
             "highestEducationAttainment",
@@ -2273,8 +2805,6 @@
             "spouseName",
             "spouseChildrenCount",
             "spouseOccupation",
-            "spouseEducation",
-            "intendedSchool",
             "degreeProgramCourse",
             "gwa"
         ];
@@ -2292,6 +2822,14 @@
                 input.classList.remove("is-invalid");
             });
         });
+
+        const permanentBarangaySelect = byId("permanentAddressBarangay");
+        if (permanentBarangaySelect) {
+            permanentBarangaySelect.addEventListener("change", function () {
+                const hasValue = !!nullIfBlank(permanentBarangaySelect.value);
+                syncBarangayFeedbackState(hasValue, false);
+            });
+        }
 
         ["fatherStatus", "motherStatus"].forEach(function (name) {
             document.querySelectorAll("input[name=\"" + name + "\"]").forEach(function (input) {
@@ -2399,6 +2937,33 @@
                 window.location.href = submittedTrackingUrl;
             });
         }
+
+        const submitErrorActionBtn = byId("applicationSubmitErrorActionBtn");
+        if (submitErrorActionBtn) {
+            submitErrorActionBtn.addEventListener("click", function () {
+                const modal = getSubmitErrorModal();
+                const action = submitErrorActionHandler;
+                submitErrorActionHandler = null;
+                if (modal) {
+                    modal.hide();
+                }
+                if (typeof action === "function") {
+                    action();
+                }
+            });
+        }
+
+        const submitErrorModalEl = byId("applicationSubmitErrorModal");
+        if (submitErrorModalEl) {
+            submitErrorModalEl.addEventListener("hidden.bs.modal", function () {
+                submitErrorActionHandler = null;
+                const actionBtn = byId("applicationSubmitErrorActionBtn");
+                if (actionBtn) {
+                    actionBtn.textContent = "";
+                    actionBtn.classList.add("d-none");
+                }
+            });
+        }
     }
 
     function bindFormActions(context) {
@@ -2425,8 +2990,6 @@
     }
 
     async function init() {
-        queueInitialPrivacyNoticeModal();
-
         const context = await window.ldssAuthReadyPromise;
         if (!context || !context.client || !context.user) {
             return;
@@ -2444,6 +3007,7 @@
         renderAwardRows([]);
         bindFormActions(context);
         applyActionLabels();
+        populatePermanentAddressFields();
 
         try {
             const profile = await loadProfile(context);
@@ -2460,7 +3024,7 @@
                 } else {
                     currentApplication = existing;
                     applyApplicationToForm(existing);
-                    applyAuxMeta(context.user.id, existing.id);
+                    await hydrateAuxMeta(context, context.user.id, existing.id);
                     applyActionLabels();
 
                     if (!isEditable(existing)) {
@@ -2499,6 +3063,8 @@
                 }
                 applyAuxMeta(context.user.id, "new");
             }
+
+            queueInitialPrivacyNoticeModal(currentApplication);
         } catch (error) {
             setStatus(
                 "Some application data could not be loaded. You can still complete the form manually. Details: " +

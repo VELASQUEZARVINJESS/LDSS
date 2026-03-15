@@ -22,6 +22,7 @@
                 require_admin_remarks: true,
                 lock_ranking_after_decision: true,
                 allow_special_endorsement: true,
+                allow_secretary_applicant_edits: false,
                 auto_set_for_interview: true
             }
         }
@@ -135,6 +136,8 @@
             "Waitlist Buffer: " + Number(settings.waitlist_slots || 0),
             "Passing Score: " + formatPercent(settings.passing_score || 0),
             "New Application Filing: " + ((ranking.controls && ranking.controls.application_intake_enabled !== false) ? "Open" : "Closed"),
+            "Secretary Applicant Detail Edit: " + ((ranking.controls && ranking.controls.allow_secretary_applicant_edits) ? "Enabled" : "Disabled"),
+            "Special Endorsement: " + ((ranking.controls && ranking.controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
             "Weights (Exam/Interview/Income/Requirements): "
                 + Number(ranking.exam_weight || 0) + "/"
                 + Number(ranking.interview_weight || 0) + "/"
@@ -168,6 +171,7 @@
         writeCheckbox("superSettingsRequireRemarks", controls.require_admin_remarks);
         writeCheckbox("superSettingsLockRankingAfterDecision", controls.lock_ranking_after_decision);
         writeCheckbox("superSettingsAllowSpecialEndorsement", controls.allow_special_endorsement);
+        writeCheckbox("superSettingsAllowSecretaryApplicantEdits", controls.allow_secretary_applicant_edits);
         writeCheckbox("superSettingsAutoSetForInterview", controls.auto_set_for_interview);
 
         renderWeightTotal();
@@ -225,6 +229,7 @@
                     require_admin_remarks: Boolean(byId("superSettingsRequireRemarks") && byId("superSettingsRequireRemarks").checked),
                     lock_ranking_after_decision: Boolean(byId("superSettingsLockRankingAfterDecision") && byId("superSettingsLockRankingAfterDecision").checked),
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),
+                    allow_secretary_applicant_edits: Boolean(byId("superSettingsAllowSecretaryApplicantEdits") && byId("superSettingsAllowSecretaryApplicantEdits").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
                 }
             }

@@ -50,6 +50,9 @@ This project is deployable as a static frontend. Application data stays in Supab
   - `js/supabase-superadmin-scholarship-settings.js`
   - `js/supabase-superadmin-user-management.js`
 - Applicant notifications page supports live list, filter, pagination, mark read/unread, and mark all read.
+- Extended application-only fields such as religion, family background, spouse details, awards, and similar non-core inputs now have a shared table path via `application_aux_data` so applicant and secretary corrections can persist across devices.
+- Applicant legacy barangay cleanup now uses the dedicated `profiles.barangay` field, a dashboard reminder modal, and a direct `My Profile` barangay update path for older accounts with existing applications.
+- Applicant application form now skips the auto-open Data Privacy Notice modal when reopening an already submitted application; the notice is still enforced on submit when needed.
 - Secretary verification supports document status updates, interview scheduling, hard-copy verification state, verified photo upload, recommend-to-admin, and applicant notifications.
 - Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
 - Admin approval queue supports ranking view, special endorsement action, approve/reject/waitlist decisions, and batch decision handling.
@@ -119,4 +122,13 @@ Required Supabase Auth settings:
 2. Add redirect URL:
    - `https://daet-scholarship.gt.tc/reset-password.html`
 3. Keep Email provider enabled for recovery links.
+
+## Security Headers
+- Apache/static hosting baseline headers are defined in `.htaccess`.
+- Node hosting applies the same baseline headers in `server.js`.
+- Current CSP allows the existing CDN scripts (`cdn.jsdelivr.net`, `cdnjs.cloudflare.com`), Supabase API/realtime connections, signed Supabase asset URLs, and the app's current inline script snippets.
+- Remaining hardening work, if you want a stricter CSP later:
+  - remove inline `<script>` blocks such as `window.LDSS_REQUIRED_ROLE = ...`
+  - move the inline logout script into a standalone JS file
+  - then remove `'unsafe-inline'` from `script-src`
 

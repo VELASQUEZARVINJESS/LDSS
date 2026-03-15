@@ -40,11 +40,13 @@ const STATIC_DIRECTORIES = [
 const MIME_BY_KIND = {
     jpg: "image/jpeg",
     png: "image/png",
+    webp: "image/webp",
     pdf: "application/pdf"
 };
 const EXTENSION_BY_KIND = {
     jpg: ".jpg",
     png: ".png",
+    webp: ".webp",
     pdf: ".pdf"
 };
 const DOCUMENT_RULES = {
@@ -64,9 +66,9 @@ const DOCUMENT_RULES = {
         allowedMimeTypes: new Set(["application/pdf"])
     },
     applicant_photo: {
-        allowedKinds: new Set(["jpg", "png"]),
-        allowedExtensions: new Set([".jpg", ".jpeg", ".png"]),
-        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png"])
+        allowedKinds: new Set(["jpg", "png", "webp"]),
+        allowedExtensions: new Set([".jpg", ".jpeg", ".png", ".webp"]),
+        allowedMimeTypes: new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
     },
     verified_interview_photo: {
         allowedKinds: new Set(["jpg", "png"]),
@@ -80,6 +82,21 @@ const DOCUMENT_RULES = {
     }
 };
 const ALLOWED_DOCUMENT_TYPES = new Set(Object.keys(DOCUMENT_RULES));
+const CONTENT_SECURITY_POLICY = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "form-action 'self'",
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https://*.supabase.co",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+    "frame-src 'none'",
+    "upgrade-insecure-requests"
+].join("; ");
+const PERMISSIONS_POLICY = "accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
 
 const app = express();
 app.disable("x-powered-by");
@@ -184,6 +201,13 @@ function detectUploadedFileKind(buffer) {
     }
     if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
         return "jpg";
+    }
+    if (
+        buffer.length >= 12 &&
+        buffer.slice(0, 4).toString("ascii") === "RIFF" &&
+        buffer.slice(8, 12).toString("ascii") === "WEBP"
+    ) {
+        return "webp";
     }
     if (buffer.length >= 5 && buffer.slice(0, 5).toString("ascii") === "%PDF-") {
         return "pdf";
@@ -310,6 +334,9 @@ function mimeTypeFromPath(storedPath) {
     }
     if (extension === ".png") {
         return "image/png";
+    }
+    if (extension === ".webp") {
+        return "image/webp";
     }
     if (extension === ".pdf") {
         return "application/pdf";
@@ -504,6 +531,17 @@ function writeJsonError(response, statusCode, message) {
     response.status(statusCode).json({ error: message });
 }
 
+function applySecurityHeaders(_request, response, next) {
+    response.setHeader("Strict-Transport-Security", "max-age=31536000");
+    response.setHeader("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+    response.setHeader("X-Frame-Options", "SAMEORIGIN");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    response.setHeader("Permissions-Policy", PERMISSIONS_POLICY);
+    next();
+}
+
+app.use(applySecurityHeaders);
 app.use(express.json({ limit: "1mb" }));
 app.use(["/uploads", "/node_modules"], function (_request, response) {
     response.status(404).send("Not found");

@@ -4,6 +4,40 @@
 
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+    const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
+    const DAET_MUNICIPALITY = "DAET";
+    const DAET_BARANGAYS = [
+        "Alawihao",
+        "Awitan",
+        "Bagasbas",
+        "Barangay I",
+        "Barangay II",
+        "Barangay III",
+        "Barangay IV",
+        "Barangay V",
+        "Barangay VI",
+        "Barangay VII",
+        "Barangay VIII",
+        "Bibirao",
+        "Borabod",
+        "Calasgasan",
+        "Camambugan",
+        "Cobangbang",
+        "Dogongan",
+        "Gahonon",
+        "Gubat",
+        "Lag-on",
+        "Magang",
+        "Mambalite",
+        "Mancruz",
+        "Pamorangon",
+        "San Isidro"
+    ];
+    const DEFAULT_WORKFLOW_CONTROLS = {
+        allow_special_endorsement: true,
+        allow_secretary_applicant_edits: false
+    };
 
     const APPLICATION_STATUS_META = {
         submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
@@ -36,35 +70,265 @@
         missing: { label: "Missing", chipClass: "ldss-chip-neutral" }
     };
 
-    const SECTOR_OPTIONS_STORAGE_KEY = "ldss:sector-options:v1";
-    const DEFAULT_SECTOR_OPTIONS = [
-        "PWD",
-        "Solo Parent",
-        "Farmer Household",
-        "Fisherfolk Household",
-        "4Ps Beneficiary",
-        "Indigenous Peoples"
-    ];
+    const COUNSELOR_OPTIONS_STORAGE_KEY = "ldss:counselor-options:v1";
+    const INTERVIEW_SCHEDULE_STORAGE_KEY = "ldss:default-interview-schedule:v1";
+    const INTERVIEW_VENUE_STORAGE_KEY = "ldss:default-interview-venue:v1";
+    const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
+    const DEFAULT_COUNSELOR_OPTIONS = [];
+    const PHOTO_CHANGE_REMARK = "Please replace your applicant 1x1 photo with a clear and appropriate picture.";
+    const REMARKS_COUNSELOR_META_START = "[[LDSS_COUNSELOR]]";
+    const REMARKS_COUNSELOR_META_END = "[[/LDSS_COUNSELOR]]";
     const REMARKS_SECTOR_META_START = "[[LDSS_SECTOR_TAGS]]";
     const REMARKS_SECTOR_META_END = "[[/LDSS_SECTOR_TAGS]]";
 
     let authContext = null;
     let currentApplication = null;
     let currentProfile = null;
+    let currentAuxMeta = {};
     let currentInterview = null;
+    let currentFormSnapshot = "";
+    let applicationNavigationIds = [];
+    let currentNavigationIndex = -1;
     let latestDocumentByType = {};
     let signedDocumentUrlByType = {};
     let documentNotesById = {};
     let notesModalInstance = null;
+    let applicantEditModalInstance = null;
     let activeNotesDocId = "";
-    let selectedSectorTags = [];
-    let sectorOptions = DEFAULT_SECTOR_OPTIONS.slice();
+    let counselorOptions = DEFAULT_COUNSELOR_OPTIONS.slice();
+    let selectedCounselor = "";
     let cameraStream = null;
     let localPreviewObjectUrl = "";
     let isProcessing = false;
+    let profilesSupportsPlaceOfBirth = true;
+    let applicationAuxDataAvailable = true;
+    let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function getApplicantEditModal() {
+        if (!applicantEditModalInstance) {
+            const modalEl = byId("verificationApplicantEditModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                applicantEditModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return applicantEditModalInstance;
+    }
+
+    function setApplicantEditStatus(message, type) {
+        const box = byId("verificationApplicantEditStatus");
+        if (!box) {
+            return;
+        }
+        if (!message) {
+            box.className = "alert d-none";
+            box.textContent = "";
+            return;
+        }
+        box.className = "alert " + (type || "alert-info");
+        box.textContent = message;
+    }
+
+    function valueOrDash(value) {
+        const text = (value || "").toString().trim();
+        return text || "-";
+    }
+
+    function nullIfBlank(value) {
+        const text = (value || "").toString().trim();
+        return text || null;
+    }
+
+    function upperTextOrNull(value) {
+        const text = nullIfBlank(value);
+        return text ? text.toUpperCase() : null;
+    }
+
+    function normalizeMiddleNameValue(value) {
+        const text = (value || "").toString().trim();
+        if (!text) {
+            return "N/A";
+        }
+        if (/^n\s*\/?\s*a$/i.test(text)) {
+            return "N/A";
+        }
+        return text.toUpperCase();
+    }
+
+    function normalizeMobileForStorage(value) {
+        const raw = (value || "").toString().trim();
+        if (!raw) {
+            return null;
+        }
+        const cleaned = raw.replace(/[\s()-]/g, "");
+        const digits = cleaned.replace(/\D/g, "");
+        if (/^09\d{9}$/.test(digits)) {
+            return "+63" + digits.slice(1);
+        }
+        if (/^9\d{9}$/.test(digits)) {
+            return "+63" + digits;
+        }
+        if (/^63\d{10}$/.test(digits)) {
+            return "+" + digits;
+        }
+        if (/^\+\d{10,15}$/.test(cleaned)) {
+            return cleaned;
+        }
+        return raw;
+    }
+
+    function readFallbackWorkflowControls() {
+        try {
+            const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+            if (!raw) {
+                return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+            }
+            const parsed = JSON.parse(raw);
+            const controls = parsed && parsed.ranking_basis && parsed.ranking_basis.controls
+                ? parsed.ranking_basis.controls
+                : {};
+            return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS, controls);
+        } catch (error) {
+            return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+        }
+    }
+
+    async function loadWorkflowControls() {
+        const fallback = readFallbackWorkflowControls();
+        const rpcResult = await authContext.client.rpc("active_workflow_controls");
+        if (!rpcResult.error && rpcResult.data && typeof rpcResult.data === "object") {
+            workflowControls = Object.assign({}, fallback, rpcResult.data);
+            return workflowControls;
+        }
+
+        if (rpcResult.error && !/does not exist|function|permission/i.test(rpcResult.error.message || "")) {
+            throw new Error("Failed to load workflow controls: " + rpcResult.error.message);
+        }
+
+        workflowControls = fallback;
+        return workflowControls;
+    }
+
+    function setControlValue(id, value) {
+        const input = byId(id);
+        if (input) {
+            input.value = value == null ? "" : String(value);
+        }
+    }
+
+    function setSelectValue(id, value) {
+        const select = byId(id);
+        if (!select) {
+            return;
+        }
+        const normalized = (value || "").toString().trim().toLowerCase();
+        if (!normalized) {
+            select.value = "";
+            return;
+        }
+        const match = Array.from(select.options).find(function (option) {
+            return (option.value || "").toString().trim().toLowerCase() === normalized;
+        });
+        if (match) {
+            select.value = match.value;
+            return;
+        }
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+        select.value = value;
+    }
+
+    function removeAddressToken(value, token) {
+        const normalizedToken = (token || "").toString().trim();
+        if (!normalizedToken) {
+            return (value || "")
+                .toString()
+                .replace(/\s*,\s*/g, ", ")
+                .replace(/,\s*,+/g, ", ")
+                .replace(/\s{2,}/g, " ")
+                .replace(/^[,\s]+|[,\s]+$/g, "")
+                .trim();
+        }
+        const pattern = new RegExp("\\b" + normalizedToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+") + "\\b", "gi");
+        return (value || "")
+            .toString()
+            .replace(pattern, " ")
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function stripPermanentAddressDecorators(value, selectedBarangay) {
+        let cleaned = removeAddressToken(value, DAET_MUNICIPALITY);
+        if (selectedBarangay) {
+            cleaned = removeAddressToken(cleaned, selectedBarangay);
+        }
+        return removeAddressToken(cleaned, "");
+    }
+
+    function normalizeBarangayValue(value) {
+        const cleaned = stripPermanentAddressDecorators(value, "");
+        if (!cleaned) {
+            return "";
+        }
+        const matched = DAET_BARANGAYS.find(function (barangay) {
+            return (barangay || "").toString().trim().toLowerCase() === cleaned.toLowerCase();
+        });
+        return matched || cleaned;
+    }
+
+    function parsePermanentAddress(address, barangay) {
+        const selectedBarangay = normalizeBarangayValue(barangay);
+        return {
+            barangay: selectedBarangay,
+            line: stripPermanentAddressDecorators(address, selectedBarangay)
+        };
+    }
+
+    function composePermanentAddress(line, barangay) {
+        const pieces = [];
+        const cleanLine = upperTextOrNull(stripPermanentAddressDecorators(line, barangay));
+        const cleanBarangay = nullIfBlank(normalizeBarangayValue(barangay));
+        if (cleanLine) {
+            pieces.push(cleanLine);
+        }
+        if (cleanBarangay) {
+            pieces.push(cleanBarangay.toUpperCase());
+        }
+        if (pieces.length === 0) {
+            return null;
+        }
+        pieces.push(DAET_MUNICIPALITY);
+        return pieces.join(", ");
+    }
+
+    function populateApplicantEditBarangays() {
+        const select = byId("verificationEditBarangay");
+        if (!select) {
+            return;
+        }
+        const current = select.value;
+        select.innerHTML = '<option value="">Select barangay</option>' + DAET_BARANGAYS.map(function (barangay) {
+            return '<option value="' + escapeHtml(barangay) + '">' + escapeHtml(barangay) + "</option>";
+        }).join("");
+        if (current) {
+            setSelectValue("verificationEditBarangay", current);
+        }
+    }
+
+    function setText(id, value) {
+        const el = byId(id);
+        if (!el) {
+            return;
+        }
+        el.textContent = valueOrDash(value);
     }
 
     function escapeHtml(value) {
@@ -79,6 +343,21 @@
 
     function statusMeta(status) {
         return APPLICATION_STATUS_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
+    }
+
+    function normalizedApplicationStatus() {
+        return ((currentApplication && currentApplication.status) || "")
+            .toString()
+            .trim()
+            .toLowerCase();
+    }
+
+    function buildVerificationUrl(applicationId) {
+        return "secretary-interview-verification.html?id=" + encodeURIComponent(applicationId || "");
+    }
+
+    function isSecretaryCheckingStage(status) {
+        return ["submitted", "pending_exam", "returned_for_correction"].includes((status || "").toString().toLowerCase());
     }
 
     function documentMeta(status) {
@@ -97,6 +376,38 @@
         }
         box.className = "alert " + (type || "alert-info");
         box.textContent = message;
+    }
+
+    function updateVerificationNavigationButtons() {
+        const prevBtn = byId("verificationPrevBtn");
+        const nextBtn = byId("verificationNextBtn");
+        const forExamBtn = byId("verificationForExamBtn");
+        const hasPrevious = currentNavigationIndex > 0;
+        const hasNext = currentNavigationIndex > -1 && currentNavigationIndex < applicationNavigationIds.length - 1;
+
+        if (prevBtn) {
+            prevBtn.disabled = isProcessing || !hasPrevious;
+        }
+        if (nextBtn) {
+            nextBtn.disabled = isProcessing || !hasNext;
+        }
+        if (forExamBtn) {
+            forExamBtn.disabled = isProcessing || !currentApplication;
+        }
+    }
+
+    function readStoredVerificationQueue() {
+        try {
+            const raw = sessionStorage.getItem(VERIFICATION_QUEUE_STORAGE_KEY);
+            if (!raw) {
+                return [];
+            }
+            const parsed = JSON.parse(raw);
+            const ids = parsed && Array.isArray(parsed.ids) ? parsed.ids : [];
+            return ids.filter(Boolean);
+        } catch (_error) {
+            return [];
+        }
     }
 
     function formatDate(value) {
@@ -128,6 +439,20 @@
             day: "numeric",
             hour: "numeric",
             minute: "2-digit"
+        });
+    }
+
+    function formatMoney(value) {
+        if (value === null || typeof value === "undefined" || value === "") {
+            return "-";
+        }
+        const numeric = Number(value);
+        if (Number.isNaN(numeric)) {
+            return valueOrDash(value);
+        }
+        return "PHP " + numeric.toLocaleString("en-US", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
         });
     }
 
@@ -165,9 +490,181 @@
         return profile && profile.email ? profile.email : "Unknown Applicant";
     }
 
+    function normalizeAddressSegment(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .replace(/\.+$/g, "")
+            .toLowerCase();
+    }
+
+    function cleanupAddressDisplay(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function dedupeAddressSegments(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
+    function normalizeBarangayDisplay(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || key === "daet" || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
+    function buildAddress(profile) {
+        const address = dedupeAddressSegments(profile && profile.address ? profile.address : "");
+        const barangay = normalizeBarangayDisplay(profile && profile.barangay ? profile.barangay : "");
+        if (!address && !barangay) {
+            return "-";
+        }
+        if (!address) {
+            return barangay || "-";
+        }
+        if (!barangay) {
+            return address;
+        }
+
+        const addressSegments = address
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const barangayKey = normalizeAddressSegment(barangay);
+        if (barangayKey && addressSegments.includes(barangayKey)) {
+            return address;
+        }
+
+        return cleanupAddressDisplay([address, barangay].filter(Boolean).join(", "));
+    }
+
+    function applicationTypeLabel(type) {
+        if (type === "renewal") {
+            return "Renewal";
+        }
+        if (type === "new") {
+            return "New Applicant";
+        }
+        return valueOrDash(type);
+    }
+
     function queryApplicationId() {
         const params = new URLSearchParams(window.location.search);
         return params.get("id");
+    }
+
+    function auxMetaKey(userId, applicationId) {
+        return "ldss:application-form-meta:" + userId + ":" + (applicationId || "new");
+    }
+
+    function readAuxMeta(userId, applicationId) {
+        try {
+            const raw = window.localStorage.getItem(auxMetaKey(userId, applicationId));
+            if (!raw) {
+                return {};
+            }
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
+    function normalizeAuxMetaPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return {};
+        }
+        return payload;
+    }
+
+    function writeAuxMeta(userId, applicationId, payloadInput) {
+        if (!userId || !applicationId) {
+            return;
+        }
+        const payload = normalizeAuxMetaPayload(payloadInput);
+        try {
+            localStorage.setItem(auxMetaKey(userId, applicationId), JSON.stringify(payload));
+        } catch (error) {
+            // Non-fatal browser fallback only.
+        }
+    }
+
+    function isMissingAuxDataTableError(error) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        return text.includes(APPLICATION_AUX_DATA_TABLE) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
+    }
+
+    async function fetchSharedAuxMeta(applicationId) {
+        if (!authContext || !authContext.client || !applicationId || !applicationAuxDataAvailable) {
+            return null;
+        }
+
+        const result = await authContext.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .select("payload")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (result.error) {
+            if (isMissingAuxDataTableError(result.error)) {
+                applicationAuxDataAvailable = false;
+            }
+            return null;
+        }
+
+        return result.data && result.data.payload
+            ? normalizeAuxMetaPayload(result.data.payload)
+            : null;
+    }
+
+    async function persistSharedAuxMeta(applicationId, applicantId, payload) {
+        if (!authContext || !authContext.client || !applicationAuxDataAvailable || !applicationId || !applicantId) {
+            return;
+        }
+
+        const result = await authContext.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .upsert({
+                application_id: applicationId,
+                applicant_id: applicantId,
+                payload: normalizeAuxMetaPayload(payload)
+            }, { onConflict: "application_id" });
+
+        if (result.error && isMissingAuxDataTableError(result.error)) {
+            applicationAuxDataAvailable = false;
+        }
     }
 
     function normalizeTag(value) {
@@ -197,33 +694,154 @@
         return output;
     }
 
-    function loadSectorOptions() {
+    function normalizeAwardList(awards) {
+        if (!Array.isArray(awards)) {
+            return [];
+        }
+        return awards
+            .map(function (award) {
+                const row = award && typeof award === "object" ? award : {};
+                return {
+                    awardNatureDescription: upperTextOrNull(row.awardNatureDescription || row.nature || ""),
+                    awardSchoolName: upperTextOrNull(row.awardSchoolName || row.school || ""),
+                    awardSchoolYear: nullIfBlank(row.awardSchoolYear || row.schoolYear || "")
+                };
+            })
+            .filter(function (award) {
+                return award.awardNatureDescription || award.awardSchoolName || award.awardSchoolYear;
+            })
+            .slice(0, 5);
+    }
+
+    function awardsToTextarea(awards) {
+        return normalizeAwardList(awards).map(function (award) {
+            return [
+                award.awardNatureDescription || "",
+                award.awardSchoolName || "",
+                award.awardSchoolYear || ""
+            ].join(" | ").replace(/\s+\|\s+\|\s+$/, "").trim();
+        }).join("\n");
+    }
+
+    function awardsFromTextarea(value) {
+        return normalizeAwardList((value || "")
+            .toString()
+            .split(/\r?\n/)
+            .map(function (line) {
+                const parts = line.split("|").map(function (part) {
+                    return part.trim();
+                });
+                if (!parts.some(Boolean)) {
+                    return null;
+                }
+                return {
+                    awardNatureDescription: parts[0] || "",
+                    awardSchoolName: parts[1] || "",
+                    awardSchoolYear: parts[2] || ""
+                };
+            })
+            .filter(Boolean));
+    }
+
+    function cleanNamePart(value) {
+        const text = (value || "").toString().trim();
+        if (!text || /^n\s*\/?\s*a$/i.test(text)) {
+            return "";
+        }
+        return text;
+    }
+
+    function buildPersonName(parts, fallback) {
+        const fullName = (parts || [])
+            .map(cleanNamePart)
+            .filter(function (value) {
+                return value.length > 0;
+            })
+            .join(" ");
+
+        return fullName || valueOrDash(fallback);
+    }
+
+    function normalizedParentStatus(value) {
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (!raw) {
+            return "-";
+        }
+        if (raw === "living" || raw === "alive") {
+            return "Living";
+        }
+        if (raw === "deceased") {
+            return "Deceased";
+        }
+        return valueOrDash(value);
+    }
+
+    function profileSelectFields() {
+        const base = "id, first_name, middle_name, last_name, sex, civil_status, date_of_birth, barangay, address, email, mobile_number, school_name, course_or_strand, year_level, student_number, guardian_name, guardian_occupation, monthly_income, applicant_photo_path, verified_interview_photo_path";
+        if (profilesSupportsPlaceOfBirth) {
+            return base + ", place_of_birth";
+        }
+        return base;
+    }
+
+    function isMissingProfilesColumnError(error, columnName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedColumn = (columnName || "").toString().toLowerCase();
+        if (!text || !normalizedColumn) {
+            return false;
+        }
+        return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
+    }
+
+    function loadCounselorOptions() {
         try {
-            const raw = localStorage.getItem(SECTOR_OPTIONS_STORAGE_KEY);
+            const raw = localStorage.getItem(COUNSELOR_OPTIONS_STORAGE_KEY);
             if (!raw) {
-                return DEFAULT_SECTOR_OPTIONS.slice();
+                return DEFAULT_COUNSELOR_OPTIONS.slice();
             }
 
             const parsed = JSON.parse(raw);
             if (!Array.isArray(parsed)) {
-                return DEFAULT_SECTOR_OPTIONS.slice();
+                return DEFAULT_COUNSELOR_OPTIONS.slice();
             }
 
-            const options = uniqueTags(parsed).slice(0, 20);
-            return options.length > 0 ? options : DEFAULT_SECTOR_OPTIONS.slice();
+            return uniqueTags(parsed).slice(0, 20);
         } catch (error) {
-            return DEFAULT_SECTOR_OPTIONS.slice();
+            return DEFAULT_COUNSELOR_OPTIONS.slice();
+        }
+    }
+
+    function loadConfiguredInterviewVenue() {
+        try {
+            return (localStorage.getItem(INTERVIEW_VENUE_STORAGE_KEY) || "").trim();
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function loadConfiguredInterviewSchedule() {
+        try {
+            return (localStorage.getItem(INTERVIEW_SCHEDULE_STORAGE_KEY) || "").trim();
+        } catch (error) {
+            return "";
         }
     }
 
     function parseRemarksWithSectorMeta(value) {
         const source = (value || "").toString();
         if (!source) {
-            return { plainRemarks: "", sectorTags: [] };
+            return { plainRemarks: "", sectorTags: [], counselorEndorsement: "" };
         }
 
         let working = source;
         let tags = [];
+        let counselorEndorsement = "";
+        const counselorPattern = /\[\[LDSS_COUNSELOR\]\]([\s\S]*?)\[\[\/LDSS_COUNSELOR\]\]/i;
+        const counselorMatch = working.match(counselorPattern);
+        if (counselorMatch && counselorMatch[1]) {
+            counselorEndorsement = normalizeTag(counselorMatch[1]);
+            working = working.replace(counselorMatch[0], "");
+        }
         const blockPattern = /\[\[LDSS_SECTOR_TAGS\]\]([\s\S]*?)\[\[\/LDSS_SECTOR_TAGS\]\]/i;
         const blockMatch = working.match(blockPattern);
         if (blockMatch && blockMatch[1]) {
@@ -240,46 +858,50 @@
 
         return {
             plainRemarks: working.replace(/\n{3,}/g, "\n\n").trim(),
-            sectorTags: tags
+            sectorTags: tags,
+            counselorEndorsement: counselorEndorsement
         };
     }
 
-    function composeRemarksWithSectorMeta(plainRemarks, tags) {
+    function composeRemarksWithSectorMeta(plainRemarks, tags, counselorEndorsement) {
         const cleanRemarks = (plainRemarks || "").toString().trim();
         const cleanTags = uniqueTags(tags);
-        if (cleanTags.length === 0) {
+        const cleanCounselor = normalizeTag(counselorEndorsement);
+        const metaBlocks = [];
+        if (cleanCounselor) {
+            metaBlocks.push(REMARKS_COUNSELOR_META_START + cleanCounselor + REMARKS_COUNSELOR_META_END);
+        }
+        if (cleanTags.length > 0) {
+            metaBlocks.push(REMARKS_SECTOR_META_START + cleanTags.join("|") + REMARKS_SECTOR_META_END);
+        }
+        if (metaBlocks.length === 0) {
             return cleanRemarks;
         }
-        const metaBlock = REMARKS_SECTOR_META_START + cleanTags.join("|") + REMARKS_SECTOR_META_END;
+        const metaBlock = metaBlocks.join("\n");
         return cleanRemarks ? (cleanRemarks + "\n\n" + metaBlock) : metaBlock;
     }
 
-    function setSectorSelection(values) {
-        selectedSectorTags = uniqueTags(values);
-    }
-
-    function renderSectorTags() {
-        const wrapper = byId("verificationSectorTags");
-        if (!wrapper) {
+    function renderCounselorOptions() {
+        const select = byId("verificationCounselorEndorsement");
+        if (!select) {
             return;
         }
 
-        const renderOptions = uniqueTags((sectorOptions || []).concat(selectedSectorTags || []));
-        if (renderOptions.length === 0) {
-            wrapper.innerHTML = '<span class="small text-muted">No sector tags configured.</span>';
+        const options = uniqueTags((counselorOptions || []).concat(selectedCounselor ? [selectedCounselor] : []));
+        if (options.length === 0) {
+            select.innerHTML = '<option value="">No counselors configured</option>';
+            select.value = "";
+            select.disabled = true;
             return;
         }
 
-        wrapper.innerHTML = renderOptions.map(function (tag) {
-            const selected = selectedSectorTags.some(function (item) {
-                return item.toLowerCase() === tag.toLowerCase();
-            });
-            return (
-                '<button class="btn btn-sm ldss-sector-tag' + (selected ? " active" : "") + '" type="button" data-sector-tag="' + escapeHtml(tag) + '">' +
-                escapeHtml(tag) +
-                "</button>"
-            );
-        }).join("");
+        select.disabled = false;
+        select.innerHTML = ['<option value="">Not Yet Endorsed</option>'].concat(options.map(function (name) {
+            return '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + "</option>";
+        })).join("");
+        select.value = options.some(function (name) {
+            return name.toLowerCase() === selectedCounselor.toLowerCase();
+        }) ? selectedCounselor : "";
     }
 
     function updateDocNotePreview(docId) {
@@ -515,7 +1137,7 @@
     }
 
     async function fetchApplication(applicationId) {
-        const selectFields = "id, application_no, applicant_id, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, is_locked";
+        const selectFields = "id, application_no, applicant_id, application_type, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at, secretary_remarks, is_locked";
 
         if (applicationId) {
             const targetResult = await authContext.client
@@ -544,11 +1166,20 @@
     }
 
     async function fetchProfile(userId) {
-        const result = await authContext.client
+        let result = await authContext.client
             .from("profiles")
-            .select("id, first_name, middle_name, last_name, email, mobile_number, school_name, course_or_strand, applicant_photo_path, verified_interview_photo_path")
+            .select(profileSelectFields())
             .eq("id", userId)
             .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await authContext.client
+                .from("profiles")
+                .select(profileSelectFields())
+                .eq("id", userId)
+                .maybeSingle();
+        }
 
         if (result.error) {
             return null;
@@ -628,81 +1259,300 @@
     function renderHeaderAndSummary() {
         const appNo = currentApplication ? currentApplication.application_no : "-";
         const applicantName = buildApplicantName(currentProfile);
-
         const meta = byId("secretaryVerificationHeaderMeta");
+
         if (meta) {
             meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName;
         }
 
-        const status = statusMeta(currentApplication ? currentApplication.status : "");
-        const statusChip = byId("verificationCurrentStatusChip");
-        if (statusChip) {
-            statusChip.className = "ldss-chip " + status.chipClass;
-            statusChip.textContent = status.label;
-        }
+        renderApplicantDetailSheet();
+    }
 
-        const setText = function (id, value) {
-            const el = byId(id);
-            if (el) {
-                el.textContent = value || "-";
-            }
+    function renderApplicantDetailSheet() {
+        const application = currentApplication || null;
+        const profile = currentProfile || null;
+        const aux = currentAuxMeta || {};
+        const currentStatus = statusMeta(application ? application.status : "");
+        const fatherName = buildPersonName([
+            aux.fatherFirstName,
+            aux.fatherMiddleName,
+            aux.fatherLastName
+        ], profile ? profile.guardian_name : "");
+        const motherName = buildPersonName([
+            aux.motherFirstName,
+            aux.motherMiddleName,
+            aux.motherMaidenName
+        ], "");
+
+        setText("verificationSheetApplicationNo", application ? application.application_no : "-");
+        setText("verificationSheetDateFiled", application ? formatDate(application.submitted_at || application.created_at) : "-");
+        setText("verificationSheetScholarshipType", application ? application.scholarship_type : "-");
+        setText("verificationSheetSchoolYear", application ? application.school_year : "-");
+        setText("verificationSheetApplicationType", application ? applicationTypeLabel(application.application_type) : "-");
+        setText("verificationSheetCurrentStatus", currentStatus.label);
+
+        setText("verificationSheetFullName", profile ? buildApplicantName(profile) : "-");
+        setText("verificationSheetDateOfBirth", profile ? formatDate(profile.date_of_birth) : "-");
+        setText("verificationSheetGender", profile ? profile.sex : "-");
+        setText("verificationSheetCivilStatus", profile ? profile.civil_status : "-");
+        setText("verificationSheetPlaceOfBirth", (profile && profile.place_of_birth) || aux.placeOfBirth || "");
+        setText("verificationSheetReligion", aux.religion || "");
+        setText("verificationSheetSectorClassification", (application && application.sector_classification) || "");
+        setText("verificationSheetAddress", profile ? buildAddress(profile) : "-");
+        setText("verificationSheetContact", profile ? profile.mobile_number : "-");
+        setText("verificationSheetEmail", profile ? profile.email : "-");
+
+        setText("verificationSheetSchoolName", profile ? profile.school_name : "-");
+        setText("verificationSheetYearLevel", profile ? profile.year_level : "-");
+        setText("verificationSheetCourse", profile ? profile.course_or_strand : "-");
+
+        setText("verificationSheetFatherName", fatherName);
+        setText("verificationSheetFatherStatus", normalizedParentStatus(aux.fatherStatus));
+        setText("verificationSheetFatherOccupation", aux.fatherOccupation || (profile ? profile.guardian_occupation : ""));
+        setText("verificationSheetFatherAddress", aux.fatherAddress || "");
+
+        setText("verificationSheetMotherName", motherName);
+        setText("verificationSheetMotherStatus", normalizedParentStatus(aux.motherStatus));
+        setText("verificationSheetMotherOccupation", aux.motherOccupation || "");
+        setText("verificationSheetMotherAddress", aux.motherAddress || "");
+
+        setText(
+            "verificationSheetGrossIncome",
+            aux.totalParentsGrossIncome
+                ? formatMoney(aux.totalParentsGrossIncome)
+                : (profile ? formatMoney(profile.monthly_income) : "-")
+        );
+        setText("verificationSheetChildrenInFamily", aux.childrenInFamily || "");
+        setText("verificationSheetBrotherCount", aux.brotherCount || "");
+        setText("verificationSheetSisterCount", aux.sisterCount || "");
+
+        setText("verificationSheetSpouseName", aux.spouseName || "");
+        setText("verificationSheetSpouseChildrenCount", aux.spouseChildrenCount || "");
+        setText("verificationSheetSpouseOccupation", aux.spouseOccupation || "");
+    }
+
+    function syncApplicantEditAccess() {
+        const editBtn = byId("verificationEditApplicantBtn");
+        const meta = byId("verificationEditApplicantMeta");
+        const enabled = workflowControls.allow_secretary_applicant_edits === true;
+
+        if (editBtn) {
+            editBtn.classList.toggle("d-none", !enabled);
+            editBtn.disabled = !enabled;
+        }
+        if (meta) {
+            meta.classList.toggle("d-none", !enabled);
+            meta.textContent = enabled
+                ? "Applicant detail editing is enabled by System Administrator."
+                : "Applicant detail editing is off in System Administrator settings.";
+        }
+    }
+
+    function populateApplicantEditForm() {
+        const profile = currentProfile || {};
+        const application = currentApplication || {};
+        const aux = currentAuxMeta || {};
+        const addressParts = parsePermanentAddress(profile.address || "", profile.barangay || "");
+
+        populateApplicantEditBarangays();
+        setApplicantEditStatus("");
+        setControlValue("verificationEditLastName", profile.last_name || "");
+        setControlValue("verificationEditFirstName", profile.first_name || "");
+        setControlValue("verificationEditMiddleName", profile.middle_name || "");
+        setSelectValue("verificationEditGender", profile.sex || "");
+        setSelectValue("verificationEditCivilStatus", profile.civil_status || "");
+        setControlValue("verificationEditDateOfBirth", profile.date_of_birth || "");
+        setControlValue("verificationEditPlaceOfBirth", profile.place_of_birth || "");
+        setSelectValue("verificationEditSectorClassification", application.sector_classification || "");
+        setSelectValue("verificationEditBarangay", profile.barangay || addressParts.barangay || "");
+        setControlValue("verificationEditAddressLine", addressParts.line || "");
+        setControlValue("verificationEditContact", profile.mobile_number || "");
+        setControlValue("verificationEditEmail", profile.email || "");
+        setControlValue("verificationEditSchoolName", profile.school_name || "");
+        setControlValue("verificationEditCourse", profile.course_or_strand || "");
+        setSelectValue("verificationEditYearLevel", profile.year_level || "");
+        setControlValue("verificationEditStudentNumber", profile.student_number || "");
+        setSelectValue("verificationEditReligion", aux.religion || "");
+        setSelectValue("verificationEditHighestEducationAttainment", aux.highestEducationAttainment || "");
+        setSelectValue("verificationEditSchoolType", aux.schoolType || "");
+        setSelectValue("verificationEditGrantAppliedFor", aux.grantAppliedFor || "Degree Course");
+        setControlValue("verificationEditGwa", aux.gwa || "");
+        setControlValue("verificationEditAwards", awardsToTextarea(aux.awards));
+        setSelectValue("verificationEditFatherStatus", aux.fatherStatus || "");
+        setSelectValue("verificationEditMotherStatus", aux.motherStatus || "");
+        setControlValue("verificationEditFatherFirstName", aux.fatherFirstName || "");
+        setControlValue("verificationEditFatherMiddleName", aux.fatherMiddleName || "");
+        setControlValue("verificationEditFatherLastName", aux.fatherLastName || "");
+        setControlValue("verificationEditMotherFirstName", aux.motherFirstName || "");
+        setControlValue("verificationEditMotherMiddleName", aux.motherMiddleName || "");
+        setControlValue("verificationEditMotherMaidenName", aux.motherMaidenName || "");
+        setControlValue("verificationEditFatherAddress", aux.fatherAddress || "");
+        setControlValue("verificationEditMotherAddress", aux.motherAddress || "");
+        setControlValue("verificationEditFatherOccupation", aux.fatherOccupation || "");
+        setControlValue("verificationEditMotherOccupation", aux.motherOccupation || "");
+        setControlValue("verificationEditFatherEducationAttainment", aux.fatherEducationAttainment || "");
+        setControlValue("verificationEditMotherEducationAttainment", aux.motherEducationAttainment || "");
+        setControlValue("verificationEditChildrenInFamily", aux.childrenInFamily || "");
+        setControlValue("verificationEditBrotherCount", aux.brotherCount || "");
+        setControlValue("verificationEditSisterCount", aux.sisterCount || "");
+        setControlValue("verificationEditTotalParentsGrossIncome", aux.totalParentsGrossIncome || "");
+        setControlValue("verificationEditSpouseName", aux.spouseName || "");
+        setControlValue("verificationEditSpouseChildrenCount", aux.spouseChildrenCount || "");
+        setControlValue("verificationEditSpouseOccupation", aux.spouseOccupation || "");
+    }
+
+    function collectApplicantEditPayload() {
+        const middleNameValue = normalizeMiddleNameValue(byId("verificationEditMiddleName") ? byId("verificationEditMiddleName").value : "");
+        const courseValue = upperTextOrNull(byId("verificationEditCourse") ? byId("verificationEditCourse").value : "");
+        const profilePatch = {
+            first_name: upperTextOrNull(byId("verificationEditFirstName") ? byId("verificationEditFirstName").value : ""),
+            middle_name: middleNameValue,
+            last_name: upperTextOrNull(byId("verificationEditLastName") ? byId("verificationEditLastName").value : ""),
+            sex: nullIfBlank(byId("verificationEditGender") ? byId("verificationEditGender").value : ""),
+            civil_status: nullIfBlank(byId("verificationEditCivilStatus") ? byId("verificationEditCivilStatus").value : ""),
+            date_of_birth: nullIfBlank(byId("verificationEditDateOfBirth") ? byId("verificationEditDateOfBirth").value : ""),
+            place_of_birth: upperTextOrNull(byId("verificationEditPlaceOfBirth") ? byId("verificationEditPlaceOfBirth").value : ""),
+            barangay: nullIfBlank(byId("verificationEditBarangay") ? byId("verificationEditBarangay").value : ""),
+            address: composePermanentAddress(
+                byId("verificationEditAddressLine") ? byId("verificationEditAddressLine").value : "",
+                byId("verificationEditBarangay") ? byId("verificationEditBarangay").value : ""
+            ),
+            mobile_number: normalizeMobileForStorage(byId("verificationEditContact") ? byId("verificationEditContact").value : ""),
+            email: nullIfBlank(byId("verificationEditEmail") ? byId("verificationEditEmail").value.toLowerCase() : ""),
+            school_name: upperTextOrNull(byId("verificationEditSchoolName") ? byId("verificationEditSchoolName").value : ""),
+            course_or_strand: courseValue,
+            year_level: nullIfBlank(byId("verificationEditYearLevel") ? byId("verificationEditYearLevel").value : ""),
+            student_number: upperTextOrNull(byId("verificationEditStudentNumber") ? byId("verificationEditStudentNumber").value : "")
         };
 
-        setText("verificationApplicationNo", appNo);
-        setText("verificationApplicantName", applicantName);
-        setText("verificationScholarshipType", currentApplication ? currentApplication.scholarship_type : "-");
-        setText("verificationSchoolYear", currentApplication ? currentApplication.school_year : "-");
+        const applicationPatch = {
+            sector_classification: nullIfBlank(byId("verificationEditSectorClassification") ? byId("verificationEditSectorClassification").value : ""),
+            scholarship_type: courseValue || currentApplication.scholarship_type
+        };
 
-        const schoolName = currentProfile && currentProfile.school_name ? currentProfile.school_name : "";
-        const course = currentProfile && currentProfile.course_or_strand ? currentProfile.course_or_strand : "";
-        setText("verificationSchoolCourse", [schoolName, course].filter(Boolean).join(" / ") || "-");
+        const auxPatch = {
+            religion: nullIfBlank(byId("verificationEditReligion") ? byId("verificationEditReligion").value : ""),
+            placeOfBirth: upperTextOrNull(byId("verificationEditPlaceOfBirth") ? byId("verificationEditPlaceOfBirth").value : ""),
+            additionalData: nullIfBlank(byId("verificationEditSectorClassification") ? byId("verificationEditSectorClassification").value : ""),
+            highestEducationAttainment: nullIfBlank(byId("verificationEditHighestEducationAttainment") ? byId("verificationEditHighestEducationAttainment").value : ""),
+            highestGradeYearLevel: nullIfBlank(byId("verificationEditYearLevel") ? byId("verificationEditYearLevel").value : ""),
+            schoolType: nullIfBlank(byId("verificationEditSchoolType") ? byId("verificationEditSchoolType").value : ""),
+            grantAppliedFor: nullIfBlank(byId("verificationEditGrantAppliedFor") ? byId("verificationEditGrantAppliedFor").value : ""),
+            awards: awardsFromTextarea(byId("verificationEditAwards") ? byId("verificationEditAwards").value : ""),
+            fatherStatus: nullIfBlank(byId("verificationEditFatherStatus") ? byId("verificationEditFatherStatus").value : ""),
+            fatherFirstName: upperTextOrNull(byId("verificationEditFatherFirstName") ? byId("verificationEditFatherFirstName").value : ""),
+            fatherMiddleName: upperTextOrNull(byId("verificationEditFatherMiddleName") ? byId("verificationEditFatherMiddleName").value : ""),
+            fatherLastName: upperTextOrNull(byId("verificationEditFatherLastName") ? byId("verificationEditFatherLastName").value : ""),
+            motherStatus: nullIfBlank(byId("verificationEditMotherStatus") ? byId("verificationEditMotherStatus").value : ""),
+            motherFirstName: upperTextOrNull(byId("verificationEditMotherFirstName") ? byId("verificationEditMotherFirstName").value : ""),
+            motherMiddleName: upperTextOrNull(byId("verificationEditMotherMiddleName") ? byId("verificationEditMotherMiddleName").value : ""),
+            motherMaidenName: upperTextOrNull(byId("verificationEditMotherMaidenName") ? byId("verificationEditMotherMaidenName").value : ""),
+            fatherAddress: upperTextOrNull(byId("verificationEditFatherAddress") ? byId("verificationEditFatherAddress").value : ""),
+            motherAddress: upperTextOrNull(byId("verificationEditMotherAddress") ? byId("verificationEditMotherAddress").value : ""),
+            fatherOccupation: upperTextOrNull(byId("verificationEditFatherOccupation") ? byId("verificationEditFatherOccupation").value : ""),
+            fatherEducationAttainment: nullIfBlank(byId("verificationEditFatherEducationAttainment") ? byId("verificationEditFatherEducationAttainment").value : ""),
+            gwa: nullIfBlank(byId("verificationEditGwa") ? byId("verificationEditGwa").value : ""),
+            motherOccupation: upperTextOrNull(byId("verificationEditMotherOccupation") ? byId("verificationEditMotherOccupation").value : ""),
+            motherEducationAttainment: nullIfBlank(byId("verificationEditMotherEducationAttainment") ? byId("verificationEditMotherEducationAttainment").value : ""),
+            totalParentsGrossIncome: nullIfBlank(byId("verificationEditTotalParentsGrossIncome") ? byId("verificationEditTotalParentsGrossIncome").value : ""),
+            childrenInFamily: nullIfBlank(byId("verificationEditChildrenInFamily") ? byId("verificationEditChildrenInFamily").value : ""),
+            brotherCount: nullIfBlank(byId("verificationEditBrotherCount") ? byId("verificationEditBrotherCount").value : ""),
+            sisterCount: nullIfBlank(byId("verificationEditSisterCount") ? byId("verificationEditSisterCount").value : ""),
+            spouseName: upperTextOrNull(byId("verificationEditSpouseName") ? byId("verificationEditSpouseName").value : ""),
+            spouseChildrenCount: nullIfBlank(byId("verificationEditSpouseChildrenCount") ? byId("verificationEditSpouseChildrenCount").value : ""),
+            spouseOccupation: upperTextOrNull(byId("verificationEditSpouseOccupation") ? byId("verificationEditSpouseOccupation").value : ""),
+            degreeProgramCourse: courseValue
+        };
+        auxPatch.isMarriedApplicant = Boolean(auxPatch.spouseName || auxPatch.spouseChildrenCount || auxPatch.spouseOccupation);
 
-        const contact = currentProfile ? (currentProfile.mobile_number || currentProfile.email || "-") : "-";
-        setText("verificationContact", contact);
+        return {
+            profilePatch: profilePatch,
+            applicationPatch: applicationPatch,
+            auxPatch: auxPatch
+        };
+    }
+
+    async function saveApplicantCorrections() {
+        if (!currentApplication || !currentApplication.id || !currentApplication.applicant_id) {
+            throw new Error("No application is loaded for correction.");
+        }
+        if (workflowControls.allow_secretary_applicant_edits !== true) {
+            throw new Error("Applicant detail editing is currently disabled in System Administrator settings.");
+        }
+
+        const payloads = collectApplicantEditPayload();
+        const emailValue = payloads.profilePatch.email || "";
+        if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+            throw new Error("Enter a valid email address before saving corrections.");
+        }
+
+        let profileResult = await authContext.client
+            .from("profiles")
+            .update(payloads.profilePatch)
+            .eq("id", currentApplication.applicant_id)
+            .select(profileSelectFields())
+            .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(profileResult.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            delete payloads.profilePatch.place_of_birth;
+            profileResult = await authContext.client
+                .from("profiles")
+                .update(payloads.profilePatch)
+                .eq("id", currentApplication.applicant_id)
+                .select(profileSelectFields())
+                .maybeSingle();
+        }
+
+        if (profileResult.error) {
+            throw new Error("Failed to save applicant profile corrections: " + profileResult.error.message);
+        }
+
+        const applicationResult = await authContext.client
+            .from("applications")
+            .update(payloads.applicationPatch)
+            .eq("id", currentApplication.id)
+            .select("id, application_no, applicant_id, application_type, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at, secretary_remarks, is_locked")
+            .maybeSingle();
+
+        if (applicationResult.error) {
+            throw new Error("Profile corrections were saved, but application detail update failed: " + applicationResult.error.message);
+        }
+
+        currentProfile = profileResult.data || currentProfile;
+        currentApplication = applicationResult.data || currentApplication;
+        currentAuxMeta = Object.assign({}, currentAuxMeta || {}, payloads.auxPatch);
+        writeAuxMeta(currentApplication.applicant_id, currentApplication.id, currentAuxMeta);
+        await persistSharedAuxMeta(currentApplication.id, currentApplication.applicant_id, currentAuxMeta);
     }
 
     function renderInterviewForm() {
         const interview = currentInterview || {};
         const remarksSource = interview.remarks || (currentApplication && currentApplication.secretary_remarks) || "";
         const remarksParsed = parseRemarksWithSectorMeta(remarksSource);
+        const configuredSchedule = loadConfiguredInterviewSchedule();
+        const configuredVenue = loadConfiguredInterviewVenue();
 
         const dateTime = byId("verificationInterviewDateTime");
         const venue = byId("verificationInterviewVenue");
-        const status = byId("verificationInterviewStatus");
-        const result = byId("verificationInterviewResult");
-        const score = byId("verificationExamScore");
         const remarks = byId("verificationRemarks");
+        selectedCounselor = remarksParsed.counselorEndorsement || "";
 
         if (dateTime) {
-            dateTime.value = toDatetimeLocalValue(interview.scheduled_at || "");
+            dateTime.value = configuredSchedule || toDatetimeLocalValue(interview.scheduled_at || "");
         }
         if (venue) {
-            venue.value = interview.venue || "";
-        }
-        if (status) {
-            status.value = interview.status || "not_scheduled";
-        }
-        if (result) {
-            result.value = interview.result || "pending";
-        }
-        if (score) {
-            score.value = interview.exam_score === null || typeof interview.exam_score === "undefined" ? "" : String(interview.exam_score);
+            venue.value = configuredVenue || interview.venue || "";
         }
         if (remarks) {
             remarks.value = remarksParsed.plainRemarks;
         }
 
-        setSectorSelection(remarksParsed.sectorTags);
-        renderSectorTags();
+        renderCounselorOptions();
 
         const recommendation = byId("verificationRecommendationDecision");
         if (recommendation && !recommendation.value) {
             recommendation.value = "approved";
-        }
-
-        const priority = byId("verificationQueuePriority");
-        if (priority && !priority.value) {
-            priority.value = "medium";
         }
     }
 
@@ -809,35 +1659,67 @@
     }
 
     function readFormValues() {
-        const interviewDateTimeRaw = byId("verificationInterviewDateTime") ? byId("verificationInterviewDateTime").value : "";
-        const examScoreRaw = byId("verificationExamScore") ? byId("verificationExamScore").value : "";
-        const parsedScore = examScoreRaw === "" ? null : Number(examScoreRaw);
-
-        if (examScoreRaw !== "" && (Number.isNaN(parsedScore) || parsedScore < 0 || parsedScore > 100)) {
-            return { error: "Interview score must be between 0 and 100." };
-        }
-
+        const configuredSchedule = loadConfiguredInterviewSchedule();
+        const interviewDateTimeRaw = configuredSchedule || (byId("verificationInterviewDateTime") ? byId("verificationInterviewDateTime").value : "");
         const remarksValue = byId("verificationRemarks") ? byId("verificationRemarks").value.trim() : "";
-        const cleanSectorTags = uniqueTags(selectedSectorTags);
+        const cleanCounselorEndorsement = byId("verificationCounselorEndorsement")
+            ? normalizeTag(byId("verificationCounselorEndorsement").value)
+            : normalizeTag(selectedCounselor);
+        const configuredVenue = loadConfiguredInterviewVenue();
+        const preservedInterviewStatus = currentInterview && currentInterview.status
+            ? currentInterview.status
+            : (interviewDateTimeRaw ? "scheduled" : "not_scheduled");
+        const preservedInterviewResult = currentInterview && currentInterview.result
+            ? currentInterview.result
+            : "pending";
 
         return {
             interviewDateTimeIso: toIsoFromDatetimeLocal(interviewDateTimeRaw),
-            interviewVenue: byId("verificationInterviewVenue") ? byId("verificationInterviewVenue").value.trim() : "",
-            interviewStatus: byId("verificationInterviewStatus") ? byId("verificationInterviewStatus").value : "not_scheduled",
-            interviewResult: byId("verificationInterviewResult") ? byId("verificationInterviewResult").value : "pending",
-            examScore: parsedScore,
-            queuePriority: byId("verificationQueuePriority") ? byId("verificationQueuePriority").value : "medium",
+            interviewVenue: configuredVenue || (byId("verificationInterviewVenue") ? byId("verificationInterviewVenue").value.trim() : ""),
+            interviewStatus: preservedInterviewStatus,
+            interviewResult: preservedInterviewResult,
+            examScore: currentInterview && typeof currentInterview.exam_score !== "undefined"
+                ? currentInterview.exam_score
+                : null,
+            counselorEndorsement: cleanCounselorEndorsement,
+            queuePriority: "medium",
             recommendationDecision: byId("verificationRecommendationDecision") ? byId("verificationRecommendationDecision").value : "approved",
             remarks: remarksValue,
-            sectorTags: cleanSectorTags,
-            remarksWithSectorMeta: composeRemarksWithSectorMeta(remarksValue, cleanSectorTags)
+            sectorTags: [],
+            remarksWithSectorMeta: composeRemarksWithSectorMeta(remarksValue, [], cleanCounselorEndorsement)
         };
+    }
+
+    function buildFormSnapshot() {
+        const formValues = readFormValues();
+        return JSON.stringify({
+            counselorEndorsement: formValues.counselorEndorsement || "",
+            interviewDateTimeIso: formValues.interviewDateTimeIso || "",
+            interviewVenue: formValues.interviewVenue || "",
+            recommendationDecision: formValues.recommendationDecision || "",
+            remarks: formValues.remarks || ""
+        });
+    }
+
+    function markCurrentFormSnapshot() {
+        currentFormSnapshot = buildFormSnapshot();
+    }
+
+    function hasUnsavedVerificationChanges() {
+        if (!currentApplication) {
+            return false;
+        }
+        return currentFormSnapshot !== buildFormSnapshot();
     }
 
     function actionButtonState(isLoading, activeButtonId, loadingText) {
         const saveBtn = byId("verificationSaveBtn");
         const returnBtn = byId("verificationReturnBtn");
         const recommendBtn = byId("verificationRecommendBtn");
+        const forExamBtn = byId("verificationForExamBtn");
+        const photoActionBtn = byId("verificationPhotoActionBtn");
+        const approvePhotoBtn = byId("verificationApprovePhotoBtn");
+        const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
 
         const setState = function (button, defaultLabel) {
             if (!button) {
@@ -853,9 +1735,25 @@
             }
         };
 
-        setState(saveBtn, "Save Verification");
+        setState(saveBtn, "Save Checking");
         setState(returnBtn, "Return for Correction");
         setState(recommendBtn, "Recommend to Admin");
+        setState(forExamBtn, "Set for Examination");
+        if (photoActionBtn) {
+            photoActionBtn.disabled = isLoading;
+            if (!isLoading) {
+                photoActionBtn.textContent = "Photo Action";
+            } else if (activeButtonId === "verificationApprovePhotoBtn") {
+                photoActionBtn.textContent = "Approving...";
+            } else if (activeButtonId === "verificationRequestPhotoChangeBtn") {
+                photoActionBtn.textContent = "Sending...";
+            }
+        }
+        if (approvePhotoBtn) {
+            approvePhotoBtn.disabled = isLoading;
+        }
+        setState(photoChangeBtn, "Change Photo");
+        updateVerificationNavigationButtons();
     }
 
     async function maybeUploadVerifiedPhoto() {
@@ -935,7 +1833,9 @@
             remarks: formValues.remarksWithSectorMeta || null,
             encoded_by: authContext.user.id,
             hard_copy_verified: Boolean(hardCopyVerified),
-            hard_copy_verified_at: hardCopyVerified ? new Date().toISOString() : null
+            hard_copy_verified_at: hardCopyVerified
+                ? ((currentInterview && currentInterview.hard_copy_verified_at) || new Date().toISOString())
+                : null
         };
 
         const finalVerifiedPath = verifiedPhotoPath
@@ -1079,7 +1979,8 @@
         });
     }
 
-    function deriveSaveStatus(interviewStatus, docStates) {
+    function deriveSaveStatus(formValues, docStates) {
+        const currentStatus = normalizedApplicationStatus();
         const lockedStatuses = [
             "for_approval",
             "approved",
@@ -1089,22 +1990,17 @@
             "released"
         ];
 
-        if (lockedStatuses.includes(currentApplication.status)) {
-            return currentApplication.status;
+        if (lockedStatuses.includes(currentStatus)) {
+            return currentStatus;
         }
 
-        if (["scheduled", "rescheduled"].includes(interviewStatus)) {
-            return "interview_scheduled";
+        if (isSecretaryCheckingStage(currentStatus)) {
+            return formValues.counselorEndorsement
+                ? "pending_exam"
+                : (currentStatus || "submitted");
         }
 
-        if (interviewStatus === "completed") {
-            if (allRequiredDocsVerified(docStates)) {
-                return "hard_copy_verified";
-            }
-            return "interview_completed";
-        }
-
-        return "for_interview";
+        return currentStatus || "submitted";
     }
 
     async function persistVerification(targetStatus, lockState, includeQueue) {
@@ -1115,7 +2011,7 @@
 
         const docStates = documentVerificationState();
         const uploadedPhotoPath = await maybeUploadVerifiedPhoto();
-        const hardCopyVerified = formValues.interviewStatus === "completed" && allRequiredDocsVerified(docStates);
+        const hardCopyVerified = Boolean(currentInterview && currentInterview.hard_copy_verified);
 
         await persistDocumentUpdates(docStates);
         currentInterview = await upsertInterview(formValues, uploadedPhotoPath, hardCopyVerified);
@@ -1152,25 +2048,65 @@
             return;
         }
 
+        const previousStatus = normalizedApplicationStatus();
         const docStates = documentVerificationState();
-        const targetStatus = deriveSaveStatus(formValues.interviewStatus, docStates);
+        const targetStatus = deriveSaveStatus(formValues, docStates);
         const result = await persistVerification(targetStatus, null, false);
 
-        if (result.formValues.interviewDateTimeIso && ["scheduled", "rescheduled", "completed"].includes(result.formValues.interviewStatus)) {
+        if (targetStatus === "pending_exam" && previousStatus !== "pending_exam") {
             await notifyApplicant(
-                "interview",
-                "Interview Schedule Updated",
-                "Your scholarship interview schedule was updated to " + formatDateTime(result.formValues.interviewDateTimeIso) + ". Please check Application Tracking for details."
+                "application",
+                "Application Ready for Examination",
+                "Your application passed secretary checking and is now waiting for examination scheduling."
             );
         } else {
             await notifyApplicant(
                 "application",
-                "Application Verification Updated",
-                "The scholarship office updated your application verification details."
+                "Secretary Checking Updated",
+                "The scholarship office updated your application checking details."
             );
         }
 
-        return "Verification details saved successfully.";
+        return targetStatus === "pending_exam"
+            ? "Secretary checking saved. Application moved to Pending Exam."
+            : "Secretary checking details saved successfully.";
+    }
+
+    async function handleSetForExamination() {
+        const formValues = readFormValues();
+        if (formValues.error) {
+            showStatus(formValues.error, "alert-danger");
+            return;
+        }
+
+        if (!formValues.counselorEndorsement) {
+            showStatus("Select a counselor endorsement before moving this application to Pending Exam.", "alert-warning");
+            return;
+        }
+
+        const previousStatus = normalizedApplicationStatus();
+        if (!isSecretaryCheckingStage(previousStatus) && previousStatus !== "pending_exam") {
+            showStatus("This application is no longer in secretary checking stage.", "alert-warning");
+            return;
+        }
+
+        await persistVerification("pending_exam", false, false);
+
+        if (previousStatus !== "pending_exam") {
+            await notifyApplicant(
+                "application",
+                "Application Ready for Examination",
+                "Your application passed secretary checking and is now waiting for examination scheduling."
+            );
+            return "Application moved to Pending Exam.";
+        }
+
+        await notifyApplicant(
+            "application",
+            "Pending Exam Details Updated",
+            "The scholarship office updated your examination preparation details."
+        );
+        return "Pending Exam details updated successfully.";
     }
 
     async function handleReturnForCorrection() {
@@ -1180,7 +2116,7 @@
             return;
         }
 
-        await persistVerification("submitted", false, false);
+        await persistVerification("returned_for_correction", false, false);
         await notifyApplicant(
             "application",
             "Application Returned for Correction",
@@ -1190,15 +2126,52 @@
         return "Application returned for correction.";
     }
 
+    async function handleRequestPhotoChange() {
+        const remarksEl = byId("verificationRemarks");
+        const existingRemarks = remarksEl ? remarksEl.value.trim() : "";
+        const combinedRemarks = existingRemarks
+            ? (existingRemarks + (existingRemarks.endsWith(".") ? "" : ".") + " " + PHOTO_CHANGE_REMARK)
+            : PHOTO_CHANGE_REMARK;
+
+        if (remarksEl) {
+            remarksEl.value = combinedRemarks;
+        }
+
+        await persistVerification("returned_for_correction", false, false);
+        await notifyApplicant(
+            "application",
+            "Applicant Photo Needs Change",
+            "Please replace your applicant 1x1 photo with a clear and appropriate picture, then update your application. Remarks: " + combinedRemarks
+        );
+
+        return "Photo change request sent to the applicant.";
+    }
+
+    async function handleApprovePhoto() {
+        const hasApplicantPhoto = Boolean(
+            (currentProfile && currentProfile.applicant_photo_path) ||
+            (latestDocumentByType.applicant_photo && latestDocumentByType.applicant_photo.storage_path)
+        );
+
+        if (!hasApplicantPhoto) {
+            showStatus("No applicant photo is loaded for this record.", "alert-warning");
+            return;
+        }
+
+        await persistVerification(normalizedApplicationStatus() || "submitted", null, false);
+        await notifyApplicant(
+            "application",
+            "Applicant Photo Approved",
+            "Your applicant 1x1 photo has been reviewed and approved by the scholarship office."
+        );
+
+        return "Photo approval notice sent to the applicant.";
+    }
+
     async function handleRecommendToAdmin() {
         const formValues = readFormValues();
         if (formValues.error) {
             showStatus(formValues.error, "alert-danger");
-            return;
-        }
-
-        if (formValues.interviewResult === "pending") {
-            showStatus("Set an interview result before recommending to admin.", "alert-warning");
             return;
         }
 
@@ -1257,12 +2230,78 @@
         }
     }
 
+    async function loadApplicationNavigationQueue(currentApplicationId) {
+        if (!authContext || !authContext.client) {
+            applicationNavigationIds = [];
+            currentNavigationIndex = -1;
+            updateVerificationNavigationButtons();
+            return;
+        }
+
+        const storedIds = readStoredVerificationQueue();
+        if (currentApplicationId && storedIds.length && storedIds.indexOf(currentApplicationId) !== -1) {
+            applicationNavigationIds = storedIds.slice();
+            currentNavigationIndex = applicationNavigationIds.indexOf(currentApplicationId);
+            updateVerificationNavigationButtons();
+            return;
+        }
+
+        const result = await authContext.client
+            .from("applications")
+            .select("id")
+            .neq("status", "draft")
+            .order("updated_at", { ascending: false });
+
+        if (result.error) {
+            applicationNavigationIds = currentApplicationId ? [currentApplicationId] : [];
+        } else {
+            applicationNavigationIds = (result.data || []).map(function (row) {
+                return row.id;
+            }).filter(Boolean);
+            if (currentApplicationId && applicationNavigationIds.indexOf(currentApplicationId) === -1) {
+                applicationNavigationIds.unshift(currentApplicationId);
+            }
+        }
+
+        currentNavigationIndex = currentApplicationId
+            ? applicationNavigationIds.indexOf(currentApplicationId)
+            : -1;
+        updateVerificationNavigationButtons();
+    }
+
+    function navigateToRelativeApplication(step) {
+        if (!currentApplication || !applicationNavigationIds.length || currentNavigationIndex < 0) {
+            return;
+        }
+
+        const targetIndex = currentNavigationIndex + step;
+        if (targetIndex < 0 || targetIndex >= applicationNavigationIds.length) {
+            return;
+        }
+
+        if (hasUnsavedVerificationChanges()) {
+            const confirmed = window.confirm("Unsaved secretary checking changes will be lost. Continue?");
+            if (!confirmed) {
+                return;
+            }
+        }
+
+        window.location.href = buildVerificationUrl(applicationNavigationIds[targetIndex]);
+    }
+
     function bindActions() {
         const printBtn = byId("verificationPrintBtn");
         const saveBtn = byId("verificationSaveBtn");
         const returnBtn = byId("verificationReturnBtn");
         const recommendBtn = byId("verificationRecommendBtn");
-        const sectorTagsWrap = byId("verificationSectorTags");
+        const forExamBtn = byId("verificationForExamBtn");
+        const prevBtn = byId("verificationPrevBtn");
+        const nextBtn = byId("verificationNextBtn");
+        const approvePhotoBtn = byId("verificationApprovePhotoBtn");
+        const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
+        const editApplicantBtn = byId("verificationEditApplicantBtn");
+        const editApplicantSaveBtn = byId("verificationApplicantEditSaveBtn");
+        const counselorSelect = byId("verificationCounselorEndorsement");
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
         const cameraStopBtn = byId("verificationStopCameraBtn");
@@ -1283,6 +2322,12 @@
             });
         }
 
+        if (forExamBtn) {
+            forExamBtn.addEventListener("click", function () {
+                runAction("verificationForExamBtn", "Sending...", handleSetForExamination);
+            });
+        }
+
         if (returnBtn) {
             returnBtn.addEventListener("click", function () {
                 runAction("verificationReturnBtn", "Returning...", handleReturnForCorrection);
@@ -1295,30 +2340,76 @@
             });
         }
 
-        if (sectorTagsWrap) {
-            sectorTagsWrap.addEventListener("click", function (event) {
-                const trigger = event.target.closest("[data-sector-tag]");
-                if (!trigger) {
+        if (prevBtn) {
+            prevBtn.addEventListener("click", function () {
+                navigateToRelativeApplication(-1);
+            });
+        }
+
+        if (nextBtn) {
+            nextBtn.addEventListener("click", function () {
+                navigateToRelativeApplication(1);
+            });
+        }
+
+        if (approvePhotoBtn) {
+            approvePhotoBtn.addEventListener("click", function () {
+                runAction("verificationApprovePhotoBtn", "Approving...", handleApprovePhoto);
+            });
+        }
+
+        if (photoChangeBtn) {
+            photoChangeBtn.addEventListener("click", function () {
+                runAction("verificationRequestPhotoChangeBtn", "Sending...", handleRequestPhotoChange);
+            });
+        }
+
+        if (editApplicantBtn) {
+            editApplicantBtn.addEventListener("click", function () {
+                if (!currentApplication) {
+                    showStatus("Applicant details are not loaded yet.", "alert-warning");
                     return;
                 }
-                const tag = normalizeTag(trigger.getAttribute("data-sector-tag") || "");
-                if (!tag) {
+                if (workflowControls.allow_secretary_applicant_edits !== true) {
+                    showStatus("Applicant detail editing is currently disabled in System Administrator settings.", "alert-warning");
                     return;
                 }
-
-                const alreadySelected = selectedSectorTags.some(function (value) {
-                    return value.toLowerCase() === tag.toLowerCase();
-                });
-
-                if (alreadySelected) {
-                    selectedSectorTags = selectedSectorTags.filter(function (value) {
-                        return value.toLowerCase() !== tag.toLowerCase();
-                    });
-                } else {
-                    selectedSectorTags = uniqueTags(selectedSectorTags.concat(tag));
+                populateApplicantEditForm();
+                const modal = getApplicantEditModal();
+                if (modal) {
+                    modal.show();
                 }
+            });
+        }
 
-                renderSectorTags();
+        if (editApplicantSaveBtn) {
+            editApplicantSaveBtn.addEventListener("click", async function () {
+                if (isProcessing) {
+                    return;
+                }
+                editApplicantSaveBtn.disabled = true;
+                editApplicantSaveBtn.textContent = "Saving...";
+                setApplicantEditStatus("");
+                try {
+                    await saveApplicantCorrections();
+                    await loadPageData(currentApplication.id);
+                    const modal = getApplicantEditModal();
+                    if (modal) {
+                        modal.hide();
+                    }
+                    showStatus("Applicant details updated successfully.", "alert-success");
+                } catch (error) {
+                    setApplicantEditStatus(error && error.message ? error.message : "Failed to save applicant corrections.", "alert-danger");
+                } finally {
+                    editApplicantSaveBtn.disabled = false;
+                    editApplicantSaveBtn.textContent = "Save Corrections";
+                }
+            });
+        }
+
+        if (counselorSelect) {
+            counselorSelect.addEventListener("change", function () {
+                selectedCounselor = normalizeTag(counselorSelect.value);
             });
         }
 
@@ -1374,20 +2465,34 @@
             stopCameraStream();
             clearLocalPreviewObjectUrl();
         });
+
+        const editModalEl = byId("verificationApplicantEditModal");
+        if (editModalEl) {
+            editModalEl.addEventListener("hidden.bs.modal", function () {
+                setApplicantEditStatus("");
+            });
+        }
     }
 
     async function loadPageData(targetApplicationId) {
         showStatus("");
         stopCameraStream();
-        sectorOptions = loadSectorOptions();
+        counselorOptions = loadCounselorOptions();
+        currentAuxMeta = {};
+        currentFormSnapshot = "";
 
         currentApplication = await fetchApplication(targetApplicationId || queryApplicationId());
         if (!currentApplication) {
             showStatus("No application records are currently available for secretary verification.", "alert-warning");
-            setSectorSelection([]);
-            renderSectorTags();
+            applicationNavigationIds = [];
+            currentNavigationIndex = -1;
+            updateVerificationNavigationButtons();
             return;
         }
+
+        currentAuxMeta = (await fetchSharedAuxMeta(currentApplication.id))
+            || readAuxMeta(currentApplication.applicant_id, currentApplication.id);
+        writeAuxMeta(currentApplication.applicant_id, currentApplication.id, currentAuxMeta);
 
         const dataResults = await Promise.all([
             fetchProfile(currentApplication.applicant_id),
@@ -1422,6 +2527,8 @@
 
         renderHeaderAndSummary();
         renderInterviewForm();
+        syncApplicantEditAccess();
+        await loadApplicationNavigationQueue(currentApplication.id);
 
         clearLocalPreviewObjectUrl();
 
@@ -1430,7 +2537,7 @@
             "verificationApplicantPhotoPlaceholder",
             "verificationApplicantPhotoLink",
             photoUrls[0],
-            "No applicant photo on file."
+            "No Photo"
         );
 
         setPhotoArea(
@@ -1440,6 +2547,9 @@
             photoUrls[1],
             "No verified interview photo uploaded."
         );
+
+        markCurrentFormSnapshot();
+        updateVerificationNavigationButtons();
     }
 
     async function init() {
@@ -1449,6 +2559,12 @@
         }
 
         bindActions();
+        try {
+            await loadWorkflowControls();
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to load workflow controls.", "alert-warning");
+        }
+        syncApplicantEditAccess();
         await loadPageData(queryApplicationId());
     }
 

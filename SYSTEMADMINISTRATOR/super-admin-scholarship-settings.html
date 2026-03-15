@@ -224,6 +224,10 @@
                                             <label class="form-check-label small" for="superSettingsAllowSpecialEndorsement">Allow Special Endorsement workflow for failed exam records</label>
                                         </div>
                                         <div class="form-check mb-2">
+                                            <input class="form-check-input" id="superSettingsAllowSecretaryApplicantEdits" type="checkbox" />
+                                            <label class="form-check-label small" for="superSettingsAllowSecretaryApplicantEdits">Allow secretary to edit applicant details during Secretary Checking</label>
+                                        </div>
+                                        <div class="form-check mb-2">
                                             <input class="form-check-input" id="superSettingsAutoSetForInterview" type="checkbox" />
                                             <label class="form-check-label small" for="superSettingsAutoSetForInterview">Auto-allow interview scheduling for Passed Exam status</label>
                                         </div>
@@ -258,7 +262,7 @@
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260314-3"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

@@ -4,6 +4,7 @@
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const TAX_DOC_TYPE = "income_certificate";
     const PHOTO_DOC_TYPE = "applicant_photo";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const PRINT_READY_STATUSES = [
         "passed_exam",
         "failed_exam",
@@ -27,6 +28,9 @@
         needs_reupload: { label: "Needs Reupload", chipClass: "ldss-chip-danger" },
         missing: { label: "Missing", chipClass: "ldss-chip-neutral" }
     };
+
+    let profilesSupportsPlaceOfBirth = true;
+    let applicationAuxDataAvailable = true;
 
     function byId(id) {
         return document.getElementById(id);
@@ -125,10 +129,84 @@
         return fullName || (profile && profile.email ? profile.email : "-");
     }
 
+    function normalizeAddressSegment(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .replace(/\.+$/g, "")
+            .toLowerCase();
+    }
+
+    function cleanupAddressDisplay(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function dedupeAddressSegments(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
+    function normalizeBarangayDisplay(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || key === "daet" || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
     function buildAddress(profile) {
-        const address = profile && profile.address ? profile.address : "";
-        const barangay = profile && profile.barangay ? profile.barangay : "";
-        return [address, barangay].filter(Boolean).join(", ") || "-";
+        const address = dedupeAddressSegments(profile && profile.address ? profile.address : "");
+        const barangay = normalizeBarangayDisplay(profile && profile.barangay ? profile.barangay : "");
+        if (!address && !barangay) {
+            return "-";
+        }
+        if (!address) {
+            return barangay || "-";
+        }
+        if (!barangay) {
+            return address;
+        }
+
+        const addressSegments = address
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const barangayKey = normalizeAddressSegment(barangay);
+        if (barangayKey && addressSegments.includes(barangayKey)) {
+            return address;
+        }
+
+        return cleanupAddressDisplay([address, barangay].filter(Boolean).join(", ")) || "-";
     }
 
     function statusLabel(status) {
@@ -145,12 +223,74 @@
         return valueOrDash(type);
     }
 
+    function cleanNamePart(value) {
+        const text = (value || "").toString().trim();
+        if (!text || /^n\s*\/?\s*a$/i.test(text)) {
+            return "";
+        }
+        return text;
+    }
+
+    function buildPersonName(parts, fallback) {
+        const fullName = (parts || [])
+            .map(cleanNamePart)
+            .filter(function (value) {
+                return value.length > 0;
+            })
+            .join(" ");
+
+        return fullName || valueOrDash(fallback);
+    }
+
+    function normalizedParentStatus(value) {
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (!raw) {
+            return "-";
+        }
+        if (raw === "living" || raw === "alive") {
+            return "Living";
+        }
+        if (raw === "deceased") {
+            return "Deceased";
+        }
+        return valueOrDash(value);
+    }
+
     function parseQuery() {
         const params = new URLSearchParams(window.location.search);
         return {
             id: params.get("id"),
             applicationNo: params.get("application_no")
         };
+    }
+
+    function normalizeAuxMetaPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return {};
+        }
+        return payload;
+    }
+
+    function isMissingAuxDataTableError(error) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        return text.includes(APPLICATION_AUX_DATA_TABLE) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
+    }
+
+    function isMissingProfilesColumnError(error, columnName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedColumn = (columnName || "").toString().toLowerCase();
+        if (!text || !normalizedColumn) {
+            return false;
+        }
+        return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
+    }
+
+    function profileSelectFields() {
+        const base = "id, first_name, middle_name, last_name, sex, civil_status, date_of_birth, barangay, address, email, mobile_number, school_name, course_or_strand, year_level, student_number, guardian_name, guardian_occupation, monthly_income, applicant_photo_path";
+        if (profilesSupportsPlaceOfBirth) {
+            return base + ", place_of_birth";
+        }
+        return base;
     }
 
     function normalizedLookup(raw) {
@@ -295,17 +435,49 @@
             return null;
         }
 
-        const result = await context.client
+        let result = await context.client
             .from("profiles")
-            .select("id, first_name, middle_name, last_name, sex, civil_status, date_of_birth, barangay, address, email, mobile_number, school_name, course_or_strand, year_level, student_number, guardian_name, guardian_occupation, monthly_income, applicant_photo_path")
+            .select(profileSelectFields())
             .eq("id", userId)
             .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await context.client
+                .from("profiles")
+                .select(profileSelectFields())
+                .eq("id", userId)
+                .maybeSingle();
+        }
 
         if (result.error) {
             return null;
         }
 
         return result.data || null;
+    }
+
+    async function fetchSharedAuxMeta(context, applicationId) {
+        if (!context || !context.client || !applicationId || !applicationAuxDataAvailable) {
+            return null;
+        }
+
+        const result = await context.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .select("payload")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (result.error) {
+            if (isMissingAuxDataTableError(result.error)) {
+                applicationAuxDataAvailable = false;
+            }
+            return null;
+        }
+
+        return result.data && result.data.payload
+            ? normalizeAuxMetaPayload(result.data.payload)
+            : null;
     }
 
     async function fetchDocuments(context, applicationId) {
@@ -334,18 +506,32 @@
         setPrintAvailability(application ? application.status : "");
     }
 
-    function renderSheet(application, profile, taxDoc) {
+    function renderSheet(application, profile, auxMeta, taxDoc) {
+        const safeMeta = auxMeta || {};
+        const fatherName = buildPersonName([
+            safeMeta.fatherFirstName,
+            safeMeta.fatherMiddleName,
+            safeMeta.fatherLastName
+        ], profile ? profile.guardian_name : "");
+        const motherName = buildPersonName([
+            safeMeta.motherFirstName,
+            safeMeta.motherMiddleName,
+            safeMeta.motherMaidenName
+        ], "");
+
         setText("sheetApplicationNo", application ? application.application_no : "-");
         setText("sheetDateFiled", application ? formatDate(application.submitted_at || application.created_at) : "-");
         setText("sheetScholarshipType", application ? application.scholarship_type : "-");
         setText("sheetSchoolYear", application ? application.school_year : "-");
         setText("sheetApplicationType", application ? applicationTypeLabel(application.application_type) : "-");
-        setText("sheetCurrentStatus", application ? statusLabel(application.status) : "-");
 
         setText("sheetFullName", profile ? buildApplicantName(profile) : "-");
         setText("sheetDateOfBirth", profile ? formatDate(profile.date_of_birth) : "-");
         setText("sheetSex", profile ? profile.sex : "-");
         setText("sheetCivilStatus", profile ? profile.civil_status : "-");
+        setText("sheetPlaceOfBirth", (profile && profile.place_of_birth) || safeMeta.placeOfBirth || "");
+        setText("sheetReligion", safeMeta.religion || "");
+        setText("sheetSectorClassification", (application && application.sector_classification) || safeMeta.additionalData || "");
         setText("sheetAddress", profile ? buildAddress(profile) : "-");
         setText("sheetContact", profile ? profile.mobile_number : "-");
         setText("sheetEmail", profile ? profile.email : "-");
@@ -353,11 +539,26 @@
         setText("sheetSchoolName", profile ? profile.school_name : "-");
         setText("sheetYearLevel", profile ? profile.year_level : "-");
         setText("sheetCourse", profile ? profile.course_or_strand : "-");
-        setText("sheetStudentNumber", profile ? profile.student_number : "-");
-
-        setText("sheetFatherGuardian", profile ? profile.guardian_name : "-");
-        setText("sheetFatherOccupation", profile ? profile.guardian_occupation : "-");
-        setText("sheetGrossIncome", profile ? formatMoney(profile.monthly_income) : "-");
+        setText("sheetFatherName", fatherName);
+        setText("sheetFatherStatus", normalizedParentStatus(safeMeta.fatherStatus));
+        setText("sheetFatherOccupation", safeMeta.fatherOccupation || (profile ? profile.guardian_occupation : ""));
+        setText("sheetFatherAddress", safeMeta.fatherAddress || "");
+        setText("sheetMotherName", motherName);
+        setText("sheetMotherStatus", normalizedParentStatus(safeMeta.motherStatus));
+        setText("sheetMotherOccupation", safeMeta.motherOccupation || "");
+        setText("sheetMotherAddress", safeMeta.motherAddress || "");
+        setText(
+            "sheetGrossIncome",
+            safeMeta.totalParentsGrossIncome
+                ? formatMoney(safeMeta.totalParentsGrossIncome)
+                : (profile ? formatMoney(profile.monthly_income) : "-")
+        );
+        setText("sheetChildrenInFamily", safeMeta.childrenInFamily || "");
+        setText("sheetBrotherCount", safeMeta.brotherCount || "");
+        setText("sheetSisterCount", safeMeta.sisterCount || "");
+        setText("sheetSpouseName", safeMeta.spouseName || "");
+        setText("sheetSpouseChildrenCount", safeMeta.spouseChildrenCount || "");
+        setText("sheetSpouseOccupation", safeMeta.spouseOccupation || "");
 
         if (!taxDoc) {
             setText("sheetTaxRequirement", "Not uploaded");
@@ -378,16 +579,17 @@
         const application = await fetchApplication(context, lookup || {});
         if (!application) {
             renderMeta(null, null, null);
-            renderSheet(null, null, null);
+            renderSheet(null, null, {}, null);
             setPhoto("");
             setTaxFileLink("");
             showStatus("No application records found.", "alert-warning");
             return;
         }
 
-        const [profile, docs] = await Promise.all([
+        const [profile, docs, auxMeta] = await Promise.all([
             fetchProfile(context, application.applicant_id),
-            fetchDocuments(context, application.id)
+            fetchDocuments(context, application.id),
+            fetchSharedAuxMeta(context, application.id)
         ]);
 
         const latestDocs = latestDocumentsByType(docs);
@@ -403,7 +605,7 @@
         ]);
 
         renderMeta(application, profile, taxDoc);
-        renderSheet(application, profile, taxDoc);
+        renderSheet(application, profile, auxMeta || {}, taxDoc);
         setPhoto(photoUrl);
         setTaxFileLink(taxUrl);
 

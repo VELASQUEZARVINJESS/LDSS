@@ -2,12 +2,15 @@
     "use strict";
 
     const PAGE_SIZE = 10;
+    const DISMISSED_NOTIFICATIONS_STORAGE_PREFIX = "ldss:dismissed-notifications:";
 
     let notificationRows = [];
     let filteredRows = [];
     let currentPage = 1;
     let currentUserId = "";
     let clientRef = null;
+    let notificationsSupportDismissedAt = true;
+    let relatedApplicationStatusById = {};
 
     function byId(id) {
         return document.getElementById(id);
@@ -59,6 +62,132 @@
             return 1;
         }
         return Math.ceil(total / PAGE_SIZE);
+    }
+
+    function normalizeStatus(status) {
+        return (status || "").toString().trim().toLowerCase();
+    }
+
+    function dismissedNotificationsStorageKey(userId) {
+        return DISMISSED_NOTIFICATIONS_STORAGE_PREFIX + userId;
+    }
+
+    function readDismissedNotificationIds() {
+        if (!currentUserId) {
+            return new Set();
+        }
+        try {
+            const raw = localStorage.getItem(dismissedNotificationsStorageKey(currentUserId));
+            const parsed = raw ? JSON.parse(raw) : [];
+            return new Set(Array.isArray(parsed) ? parsed : []);
+        } catch (_error) {
+            return new Set();
+        }
+    }
+
+    function writeDismissedNotificationIds(idSet) {
+        if (!currentUserId) {
+            return;
+        }
+        try {
+            localStorage.setItem(
+                dismissedNotificationsStorageKey(currentUserId),
+                JSON.stringify(Array.from(idSet))
+            );
+        } catch (_error) {
+            // Ignore browser storage failures.
+        }
+    }
+
+    function addDismissedNotificationId(id) {
+        if (!id) {
+            return;
+        }
+        const idSet = readDismissedNotificationIds();
+        idSet.add(id);
+        writeDismissedNotificationIds(idSet);
+    }
+
+    function filterDismissedNotifications(rows) {
+        if (notificationsSupportDismissedAt) {
+            return rows;
+        }
+        const dismissedIds = readDismissedNotificationIds();
+        if (dismissedIds.size === 0) {
+            return rows;
+        }
+        return rows.filter(function (row) {
+            return !dismissedIds.has(row.id);
+        });
+    }
+
+    function isMissingDismissedAtColumnError(error) {
+        const message = error && error.message ? error.message : "";
+        return /dismissed_at/i.test(message) && /column/i.test(message);
+    }
+
+    function acknowledgementRequirement(row) {
+        const title = (row && row.title ? row.title : "").toString().toLowerCase();
+        const message = (row && row.message ? row.message : "").toString().toLowerCase();
+
+        if (title.includes("returned for correction")) {
+            return "application_update";
+        }
+        if (title.includes("photo needs change") || message.includes("replace your applicant 1x1 photo")) {
+            return "application_update";
+        }
+        return "";
+    }
+
+    function canAcknowledge(row) {
+        const requirement = acknowledgementRequirement(row);
+        if (!requirement) {
+            return true;
+        }
+
+        if (!row || !row.related_application_id) {
+            return false;
+        }
+
+        const status = relatedApplicationStatusById[row.related_application_id] || "";
+        if (!status) {
+            return false;
+        }
+
+        if (requirement === "application_update") {
+            return !["draft", "returned_for_correction"].includes(status);
+        }
+
+        return true;
+    }
+
+    async function loadRelatedApplicationStatuses(rows) {
+        relatedApplicationStatusById = {};
+
+        const applicationIds = Array.from(
+            new Set(
+                (rows || [])
+                    .map(function (row) { return row.related_application_id; })
+                    .filter(Boolean)
+            )
+        );
+
+        if (applicationIds.length === 0) {
+            return;
+        }
+
+        const result = await clientRef
+            .from("applications")
+            .select("id, status")
+            .in("id", applicationIds);
+
+        if (result.error) {
+            return;
+        }
+
+        (result.data || []).forEach(function (row) {
+            relatedApplicationStatusById[row.id] = normalizeStatus(row.status);
+        });
     }
 
     function resolveNotificationLink(row) {
@@ -170,6 +299,9 @@
         const link = resolveNotificationLink(row);
         const buttonText = isRead ? "Mark Unread" : "Mark Read";
         const titleClass = isRead ? "fw-600 mb-1" : "fw-700 mb-1";
+        const acknowledgeReady = canAcknowledge(row);
+        const acknowledgeText = acknowledgeReady ? "Acknowledge" : "Complete Task First";
+        const acknowledgeClass = acknowledgeReady ? "btn btn-dark btn-sm" : "btn btn-outline-secondary btn-sm";
         return (
             '<div class="' + cardClass + '">' +
             '<div class="d-flex flex-column flex-lg-row justify-content-between gap-2">' +
@@ -185,6 +317,9 @@
             '<div class="d-flex gap-2 align-items-start">' +
             '<a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(link) + '">Open</a>' +
             '<button class="btn btn-outline-dark btn-sm" type="button" data-action="toggle-read" data-id="' + escapeHtml(row.id) + '">' + buttonText + "</button>" +
+            '<button class="' + acknowledgeClass + '" type="button" data-action="acknowledge" data-id="' + escapeHtml(row.id) + '"' +
+            (acknowledgeReady ? "" : ' disabled="disabled" title="Complete the requested task first."') +
+            ">" + acknowledgeText + "</button>" +
             "</div>" +
             "</div>" +
             "</div>"
@@ -243,20 +378,37 @@
         renderPagination(filteredRows.length);
     }
 
-    async function loadNotifications() {
-        showStatus("");
-        const result = await clientRef
+    async function fetchNotifications() {
+        let result = await clientRef
             .from("notifications")
             .select("id, notification_type, title, message, related_application_id, related_url, is_read, created_at")
             .eq("recipient_user_id", currentUserId)
+            .is("dismissed_at", null)
             .order("created_at", { ascending: false });
+
+        if (result.error && isMissingDismissedAtColumnError(result.error)) {
+            notificationsSupportDismissedAt = false;
+            result = await clientRef
+                .from("notifications")
+                .select("id, notification_type, title, message, related_application_id, related_url, is_read, created_at")
+                .eq("recipient_user_id", currentUserId)
+                .order("created_at", { ascending: false });
+        }
+
+        return result;
+    }
+
+    async function loadNotifications() {
+        showStatus("");
+        const result = await fetchNotifications();
 
         if (result.error) {
             showStatus("Failed to load notifications: " + result.error.message, "alert-danger");
             return;
         }
 
-        notificationRows = result.data || [];
+        notificationRows = filterDismissedNotifications(result.data || []);
+        await loadRelatedApplicationStatuses(notificationRows);
         const unreadCount = notificationRows.filter(function (row) { return !row.is_read; }).length;
         renderUnreadPill(unreadCount);
         applyFilters(false);
@@ -292,6 +444,53 @@
         applyFilters(false);
         renderUnreadPill(notificationRows.filter(function (item) { return !item.is_read; }).length);
         showStatus(nextRead ? "Notification marked as read." : "Notification marked as unread.", "alert-success");
+    }
+
+    async function acknowledgeNotification(notificationId) {
+        const row = notificationRows.find(function (item) {
+            return item.id === notificationId;
+        });
+        if (!row) {
+            return;
+        }
+
+        if (!canAcknowledge(row)) {
+            showStatus("Complete the requested task first before acknowledging this notification.", "alert-warning");
+            return;
+        }
+
+        if (notificationsSupportDismissedAt) {
+            const timestamp = new Date().toISOString();
+            const result = await clientRef
+                .from("notifications")
+                .update({
+                    is_read: true,
+                    read_at: timestamp,
+                    dismissed_at: timestamp
+                })
+                .eq("id", notificationId)
+                .eq("recipient_user_id", currentUserId);
+
+            if (result.error) {
+                if (isMissingDismissedAtColumnError(result.error)) {
+                    notificationsSupportDismissedAt = false;
+                } else {
+                    showStatus("Failed to acknowledge notification: " + result.error.message, "alert-danger");
+                    return;
+                }
+            }
+        }
+
+        if (!notificationsSupportDismissedAt) {
+            addDismissedNotificationId(notificationId);
+        }
+
+        notificationRows = notificationRows.filter(function (item) {
+            return item.id !== notificationId;
+        });
+        applyFilters(false);
+        renderUnreadPill(notificationRows.filter(function (item) { return !item.is_read; }).length);
+        showStatus("Notification acknowledged and removed from the feed.", "alert-success");
     }
 
     async function markAllAsRead() {
@@ -373,6 +572,18 @@
                     return;
                 }
                 toggleReadState(notificationId);
+            });
+
+            list.addEventListener("click", function (event) {
+                const trigger = event.target.closest('button[data-action="acknowledge"]');
+                if (!trigger) {
+                    return;
+                }
+                const notificationId = trigger.getAttribute("data-id");
+                if (!notificationId) {
+                    return;
+                }
+                acknowledgeNotification(notificationId);
             });
         }
         if (pagination) {

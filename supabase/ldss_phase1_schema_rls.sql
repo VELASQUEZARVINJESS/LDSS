@@ -259,6 +259,14 @@ create table if not exists public.applications (
     )
 );
 
+create table if not exists public.application_aux_data (
+    application_id uuid primary key references public.applications (id) on delete cascade,
+    applicant_id uuid not null references public.profiles (id) on delete cascade,
+    payload jsonb not null default '{}'::jsonb,
+    created_at timestamptz not null default timezone('utc', now()),
+    updated_at timestamptz not null default timezone('utc', now())
+);
+
 create table if not exists public.application_documents (
     id uuid primary key default gen_random_uuid(),
     application_id uuid not null references public.applications (id) on delete cascade,
@@ -319,6 +327,7 @@ create table if not exists public.notifications (
     related_url text,
     is_read boolean not null default false,
     read_at timestamptz,
+    dismissed_at timestamptz,
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now())
 );
@@ -329,11 +338,13 @@ create index if not exists idx_release_batches_status_date on public.release_bat
 create index if not exists idx_applications_applicant_id on public.applications (applicant_id);
 create index if not exists idx_applications_status_created_at on public.applications (status, created_at desc);
 create index if not exists idx_applications_release_batch_id on public.applications (release_batch_id);
+create index if not exists idx_application_aux_data_applicant_id on public.application_aux_data (applicant_id);
 create index if not exists idx_application_documents_application_id on public.application_documents (application_id);
 create index if not exists idx_application_documents_type on public.application_documents (document_type);
 create index if not exists idx_interviews_status_scheduled on public.interviews (status, scheduled_at);
 create index if not exists idx_approval_queue_decision_status on public.approval_queue (decision_status, queued_at);
 create index if not exists idx_notifications_recipient_read_created on public.notifications (recipient_user_id, is_read, created_at desc);
+create index if not exists idx_notifications_recipient_dismissed_created on public.notifications (recipient_user_id, dismissed_at, created_at desc);
 create index if not exists idx_notifications_related_application on public.notifications (related_application_id);
 
 create or replace function public.set_updated_at()
@@ -359,6 +370,11 @@ for each row execute function public.set_updated_at();
 drop trigger if exists trg_applications_updated_at on public.applications;
 create trigger trg_applications_updated_at
 before update on public.applications
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_application_aux_data_updated_at on public.application_aux_data;
+create trigger trg_application_aux_data_updated_at
+before update on public.application_aux_data
 for each row execute function public.set_updated_at();
 
 drop trigger if exists trg_application_documents_updated_at on public.application_documents;
@@ -596,6 +612,40 @@ begin
 end;
 $$;
 
+create or replace function public.active_workflow_controls()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+    fallback_controls jsonb := jsonb_build_object(
+        'application_intake_enabled', true,
+        'require_admin_remarks', true,
+        'lock_ranking_after_decision', true,
+        'allow_special_endorsement', true,
+        'allow_secretary_applicant_edits', false,
+        'auto_set_for_interview', true
+    );
+    db_controls jsonb := '{}'::jsonb;
+begin
+    begin
+        select coalesce(rs.ranking_basis -> 'controls', '{}'::jsonb)
+        into db_controls
+        from public.ranking_settings rs
+        where rs.is_active = true
+        order by coalesce(rs.updated_at, rs.created_at) desc
+        limit 1;
+    exception
+        when undefined_table then
+            return fallback_controls;
+    end;
+
+    return fallback_controls || coalesce(db_controls, '{}'::jsonb);
+end;
+$$;
+
 create or replace function public.enforce_application_intake_policy()
 returns trigger
 language plpgsql
@@ -697,6 +747,7 @@ for each row execute function public.handle_new_auth_user();
 alter table public.profiles enable row level security;
 alter table public.release_batches enable row level security;
 alter table public.applications enable row level security;
+alter table public.application_aux_data enable row level security;
 alter table public.application_documents enable row level security;
 alter table public.interviews enable row level security;
 alter table public.approval_queue enable row level security;
@@ -809,6 +860,44 @@ using (
     (applicant_id = auth.uid() and status = 'draft')
     or public.is_super_admin()
 );
+
+drop policy if exists application_aux_data_select_owner_or_staff on public.application_aux_data;
+create policy application_aux_data_select_owner_or_staff
+on public.application_aux_data
+for select
+to authenticated
+using (public.application_owned_by_current_user(application_id) or public.is_staff());
+
+drop policy if exists application_aux_data_insert_owner_or_staff on public.application_aux_data;
+create policy application_aux_data_insert_owner_or_staff
+on public.application_aux_data
+for insert
+to authenticated
+with check (
+    ((applicant_id = auth.uid()) and public.application_owned_by_current_user(application_id))
+    or public.is_staff()
+);
+
+drop policy if exists application_aux_data_update_owner_or_staff on public.application_aux_data;
+create policy application_aux_data_update_owner_or_staff
+on public.application_aux_data
+for update
+to authenticated
+using (
+    (applicant_id = auth.uid() and public.application_editable_by_current_user(application_id))
+    or public.is_staff()
+)
+with check (
+    (applicant_id = auth.uid() and public.application_editable_by_current_user(application_id))
+    or public.is_staff()
+);
+
+drop policy if exists application_aux_data_delete_super_admin on public.application_aux_data;
+create policy application_aux_data_delete_super_admin
+on public.application_aux_data
+for delete
+to authenticated
+using (public.is_super_admin());
 
 drop policy if exists application_documents_select_owner_or_staff on public.application_documents;
 create policy application_documents_select_owner_or_staff
@@ -943,6 +1032,7 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on public.profiles to authenticated;
 grant select, insert, update, delete on public.release_batches to authenticated;
 grant select, insert, update, delete on public.applications to authenticated;
+grant select, insert, update, delete on public.application_aux_data to authenticated;
 grant select, insert, update, delete on public.application_documents to authenticated;
 grant select, insert, update, delete on public.interviews to authenticated;
 grant select, insert, update, delete on public.approval_queue to authenticated;
@@ -957,6 +1047,7 @@ grant execute on function public.super_admin_delete_user(uuid) to authenticated;
 grant execute on function public.application_owned_by_current_user(uuid) to authenticated;
 grant execute on function public.application_editable_by_current_user(uuid) to authenticated;
 grant execute on function public.application_intake_is_open() to authenticated;
+grant execute on function public.active_workflow_controls() to authenticated;
 
 -- Storage bootstrap for applicant requirement uploads
 insert into storage.buckets (id, name, public)

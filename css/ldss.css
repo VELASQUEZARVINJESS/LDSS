@@ -89,6 +89,40 @@ body {
     background: var(--ldss-surface);
 }
 
+.ldss-dashboard-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+}
+
+.ldss-dashboard-overview-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.85rem 1rem;
+}
+
+.ldss-dashboard-overview-note {
+    max-width: 44rem;
+    font-size: 0.84rem;
+    color: var(--ldss-muted);
+}
+
+.ldss-dashboard-inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.ldss-dashboard-inline-actions .btn {
+    border-radius: 999px;
+    font-weight: 600;
+    padding: 0.38rem 0.78rem;
+    font-size: 0.78rem;
+    min-height: 2.3rem;
+}
+
 .ldss-status-label {
     font-size: 0.75rem;
     letter-spacing: 0.04em;
@@ -100,6 +134,50 @@ body {
     font-size: 1.2rem;
     font-weight: 700;
     color: var(--ldss-text);
+}
+
+.ldss-status-card-compact {
+    padding: 0.78rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    box-shadow: 0 0.12rem 0.55rem rgba(15, 23, 42, 0.04);
+}
+
+.ldss-status-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.ldss-status-card-icon {
+    width: 1.9rem;
+    height: 1.9rem;
+    flex: 0 0 1.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.62rem;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    color: #4b5563;
+}
+
+.ldss-status-card-icon svg {
+    width: 0.92rem;
+    height: 0.92rem;
+}
+
+.ldss-status-card-compact .ldss-status-value {
+    font-size: 0.98rem;
+    line-height: 1.3;
+    min-height: 2.35rem;
+}
+
+.ldss-status-card-compact .ldss-chip {
+    align-self: flex-start;
+    font-size: 0.72rem;
+    padding: 0.22rem 0.58rem;
 }
 
 .ldss-quick-actions .btn {
@@ -193,6 +271,107 @@ body {
     color: var(--ldss-muted);
 }
 
+.ldss-donut-shell {
+    position: relative;
+    width: min(100%, 13rem);
+    height: 13rem;
+    margin: 0 auto;
+}
+
+.ldss-donut-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+}
+
+.ldss-chart-legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 0.75rem;
+}
+
+.ldss-chart-legend-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    font-size: 0.78rem;
+}
+
+.ldss-chart-legend-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+    color: var(--ldss-text);
+}
+
+.ldss-chart-legend-swatch {
+    width: 0.65rem;
+    height: 0.65rem;
+    flex: 0 0 0.65rem;
+    border-radius: 999px;
+}
+
+.ldss-chart-legend-count {
+    color: var(--ldss-muted);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ldss-chart-shell {
+    position: relative;
+    width: 100%;
+    min-height: 13.5rem;
+}
+
+.ldss-chart-scroll {
+    max-height: 18rem;
+    overflow-y: auto;
+    padding-right: 0.2rem;
+    scrollbar-gutter: stable;
+}
+
+.ldss-chart-shell canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.ldss-chart-empty {
+    border: 1px dashed var(--ldss-border);
+    border-radius: calc(var(--ldss-radius) - 0.1rem);
+    background: #fafbfc;
+    color: var(--ldss-muted);
+    text-align: center;
+    padding: 1rem;
+}
+
+@media (max-width: 991.98px) {
+    .ldss-donut-shell {
+        width: min(100%, 11.75rem);
+        height: 11.75rem;
+    }
+
+    .ldss-chart-shell {
+        min-height: 12.5rem;
+    }
+
+    .ldss-chart-scroll {
+        max-height: 16rem;
+    }
+}
+
+@media (max-width: 575.98px) {
+    .ldss-chart-legend {
+        grid-template-columns: 1fr;
+    }
+}
+
 .ldss-photo-slot {
     border: 1px dashed #c9cfd7;
     border-radius: 0.8rem;
@@ -255,6 +434,26 @@ body {
     position: relative;
 }
 
+.ldss-bell-count {
+    position: absolute;
+    top: -0.18rem;
+    right: -0.12rem;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.24rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: #dc2626;
+    color: #ffffff;
+    border: 2px solid #ffffff;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1;
+    box-shadow: 0 0.2rem 0.5rem rgba(220, 38, 38, 0.2);
+}
+
 .ldss-bell-alert::after {
     content: "";
     position: absolute;
@@ -268,6 +467,14 @@ body {
 }
 
 .ldss-bell-alert.ldss-bell-muted::after {
+    display: none;
+}
+
+.ldss-bell-alert .ldss-bell-count:not(.d-none) {
+    display: inline-flex !important;
+}
+
+.ldss-bell-alert.ldss-bell-count-active::after {
     display: none;
 }
 
@@ -989,6 +1196,146 @@ body {
     flex: 0 0 auto;
 }
 
+.ldss-secretary-photo-panel {
+    width: 100%;
+    max-width: none;
+}
+
+.ldss-secretary-photo-stack {
+    width: min(100%, 12rem);
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+}
+
+.ldss-secretary-photo-stack .ldss-photo-1x1-wrap {
+    width: 100%;
+}
+
+.ldss-secretary-photo-stack .ldss-photo-1x1 {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+}
+
+.ldss-secretary-photo-link {
+    display: inline-block;
+}
+
+.ldss-applicant-form-photo-stack {
+    width: min(100%, 12rem);
+    margin-left: 0;
+    margin-right: auto;
+    text-align: center;
+}
+
+.ldss-applicant-form-photo-stack .ldss-photo-1x1-wrap {
+    width: 100%;
+}
+
+.ldss-applicant-form-photo-stack .ldss-photo-1x1 {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+}
+
+.ldss-secretary-photo-stack .btn {
+    white-space: nowrap;
+}
+
+.ldss-secretary-photo-stack .dropdown-menu {
+    min-width: 100%;
+}
+
+.ldss-secretary-photo-stack .dropdown-item {
+    white-space: nowrap;
+}
+
+.ldss-summary-box {
+    border: 1px solid var(--ldss-border);
+    border-radius: 0.7rem;
+    background: #f8fafc;
+    padding: 0.7rem 0.8rem;
+    min-height: 4.2rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+}
+
+.ldss-secretary-detail-sheet .ldss-print-section {
+    margin-top: 1rem;
+}
+
+.ldss-secretary-detail-sheet .ldss-print-section:first-child {
+    margin-top: 0;
+}
+
+.ldss-secretary-detail-sheet .ldss-print-table {
+    font-size: 0.82rem;
+}
+
+.ldss-secretary-detail-sheet .ldss-print-table td {
+    padding: 0.38rem 0.45rem;
+}
+
+@media (max-width: 1399.98px) {
+    .ldss-secretary-photo-stack {
+        width: min(100%, 11rem);
+    }
+
+    .ldss-summary-box {
+        min-height: 3.9rem;
+        padding: 0.65rem 0.75rem;
+    }
+}
+
+@media (max-width: 1199.98px) {
+    .ldss-secretary-summary-layout {
+        row-gap: 1.5rem;
+    }
+
+    .ldss-applicant-form-photo-stack {
+        width: min(100%, 10rem);
+    }
+
+    .ldss-secretary-photo-stack {
+        width: min(100%, 10rem);
+    }
+
+    .ldss-secretary-photo-stack .ldss-photo-1x1-wrap {
+        width: 100%;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .ldss-applicant-form-photo-stack {
+        width: min(100%, 8.5rem);
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .ldss-secretary-photo-stack {
+        width: min(100%, 8.5rem);
+    }
+
+    .ldss-secretary-photo-stack .ldss-photo-1x1-wrap {
+        width: 100%;
+    }
+
+    .ldss-summary-box {
+        min-height: auto;
+    }
+
+    .ldss-secretary-detail-sheet .ldss-print-table {
+        font-size: 0.76rem;
+    }
+
+    .ldss-secretary-detail-sheet .ldss-print-table td {
+        padding: 0.3rem 0.35rem;
+    }
+}
+
 .ldss-photo-1x1 {
     width: 1in;
     height: 1in;
@@ -1408,6 +1755,15 @@ body.ldss-ready .ldss-auth-card {
         flex: 1 1 100%;
     }
 
+    .ldss-dashboard-overview-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .ldss-dashboard-inline-actions {
+        justify-content: flex-start;
+    }
+
     .ldss-paper-form {
         padding: 0.95rem;
     }
@@ -1461,6 +1817,10 @@ body.ldss-ready .ldss-auth-card {
 @media (max-width: 767.98px) {
     .card-body {
         padding: 0.95rem;
+    }
+
+    .ldss-dashboard-inline-actions .btn {
+        width: 100%;
     }
 
     .ldss-applications-table-wrap {

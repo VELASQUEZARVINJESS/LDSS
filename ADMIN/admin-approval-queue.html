@@ -86,6 +86,7 @@
                                             Approval Queue
                                         </h1>
                                         <div class="small ldss-muted">Admin-only ranking and final decision workspace with Special Endorsement controls.</div>
+                                        <div class="small text-muted mt-1" id="adminApprovalWorkflowMeta">Loading workflow controls...</div>
                                         <ol class="ldss-breadcrumb mt-1">
                                             <li><a href="admin-dashboard.html">Dashboard</a></li>
                                             <li>Approval Queue</li>
@@ -173,7 +174,6 @@
                                             <option value="waitlisted">Waitlist</option>
                                             <option value="rejected">Reject</option>
                                             <option value="special_endorsement_review">Special Endorsement Review</option>
-                                            <option value="for_interview">Forward to Interview</option>
                                         </select>
                                     </div>
                                     <div class="col-md-6">
@@ -233,7 +233,7 @@
         <script>window.LDSS_REQUIRED_ROLE = "admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-workflow.js"></script>
-        <script src="../js/supabase-admin-approval-queue.js"></script>
+        <script src="../js/supabase-admin-approval-queue.js?v=20260314-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
