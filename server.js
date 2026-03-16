@@ -13,7 +13,9 @@ const ROOT_DIR = __dirname;
 const UPLOAD_ROOT = path.resolve(ROOT_DIR, process.env.LDSS_UPLOAD_DIR || "uploads");
 const SUPABASE_URL = process.env.LDSS_SUPABASE_URL || "https://rfzqifloaixrtseqzrzk.supabase.co";
 const SUPABASE_ANON_KEY = process.env.LDSS_SUPABASE_ANON_KEY || "sb_publishable_ysa32dk9v2Vcps9KQSR2Rg_F0w9TftL";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.LDSS_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+const MIN_STAFF_PASSWORD_LENGTH = 12;
 const STAFF_ROLES = new Set(["secretary", "admin", "super_admin"]);
 const EDITABLE_APPLICATION_STATUSES = new Set(["draft", "returned_for_correction"]);
 const ROOT_STATIC_FILES = [
@@ -158,6 +160,19 @@ function createSupabaseClient(accessToken) {
     return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, options);
 }
 
+function createSupabaseAdminClient() {
+    if (!SUPABASE_SERVICE_ROLE_KEY) {
+        return null;
+    }
+
+    return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    });
+}
+
 function readBearerToken(request) {
     const header = request.headers.authorization || "";
     const match = header.match(/^Bearer\s+(.+)$/i);
@@ -180,6 +195,79 @@ function normalizeMimeType(mimeType) {
         return "image/jpeg";
     }
     return normalized;
+}
+
+function nullIfBlank(value) {
+    const text = (value || "").toString().trim();
+    return text || null;
+}
+
+function normalizePhoneNumber(value) {
+    const raw = (value || "").toString().trim();
+    if (!raw) {
+        return null;
+    }
+
+    const cleaned = raw.replace(/[\s()-]/g, "");
+    const digits = cleaned.replace(/\D/g, "");
+    if (/^09\d{9}$/.test(digits)) {
+        return "+63" + digits.slice(1);
+    }
+    if (/^9\d{9}$/.test(digits)) {
+        return "+63" + digits;
+    }
+    if (/^63\d{10}$/.test(digits)) {
+        return "+" + digits;
+    }
+    if (/^\+639\d{9}$/.test(cleaned)) {
+        return cleaned;
+    }
+    return null;
+}
+
+function validateStaffPassword(password) {
+    const value = (password || "").toString();
+    if (/\s/.test(value)) {
+        return "Password cannot contain spaces.";
+    }
+    if (value.length < MIN_STAFF_PASSWORD_LENGTH) {
+        return "Password must be at least 12 characters.";
+    }
+    if (!/[A-Z]/.test(value)) {
+        return "Password must include at least one uppercase letter.";
+    }
+    if (!/[a-z]/.test(value)) {
+        return "Password must include at least one lowercase letter.";
+    }
+    if (!/[0-9]/.test(value)) {
+        return "Password must include at least one number.";
+    }
+    if (!/[^A-Za-z0-9]/.test(value)) {
+        return "Password must include at least one symbol.";
+    }
+    return "";
+}
+
+function explainUserCreationError(message) {
+    const text = (message || "").toString();
+    const normalized = text.toLowerCase();
+
+    if (normalized.includes("user already registered")) {
+        return "Email address is already registered.";
+    }
+    if (
+        normalized.includes("profiles_mobile_number_key") ||
+        (normalized.includes("duplicate key value") && normalized.includes("mobile_number"))
+    ) {
+        return "Mobile number is already used by another account.";
+    }
+    if (
+        normalized.includes("profiles_email_key") ||
+        (normalized.includes("duplicate key value") && normalized.includes("email"))
+    ) {
+        return "Email address is already used by another profile.";
+    }
+    return text || "Secretary account creation failed.";
 }
 
 function detectUploadedFileKind(buffer) {
@@ -648,6 +736,107 @@ app.post("/api/uploads/delete", authenticate, async function (request, response)
         });
     } catch (error) {
         writeJsonError(response, 400, error.message || "File delete failed.");
+    }
+});
+
+app.post("/api/super-admin/secretaries", authenticate, async function (request, response) {
+    let createdUserId = "";
+
+    try {
+        if (request.auth.role !== "super_admin") {
+            writeJsonError(response, 403, "Only System Administrator can create secretary accounts.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const firstName = nullIfBlank(request.body && request.body.firstName);
+        const middleName = nullIfBlank(request.body && request.body.middleName);
+        const lastName = nullIfBlank(request.body && request.body.lastName);
+        const email = ((request.body && request.body.email) || "").toString().trim().toLowerCase();
+        const mobileNumber = normalizePhoneNumber(request.body && request.body.mobileNumber);
+        const password = ((request.body && request.body.password) || "").toString();
+
+        if (!firstName || !lastName || !email || !mobileNumber || !password) {
+            writeJsonError(response, 400, "First name, last name, email, mobile number, and password are required.");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            writeJsonError(response, 400, "Enter a valid email address.");
+            return;
+        }
+        if (!mobileNumber) {
+            writeJsonError(response, 400, "Enter a valid mobile number.");
+            return;
+        }
+
+        const passwordError = validateStaffPassword(password);
+        if (passwordError) {
+            writeJsonError(response, 400, passwordError);
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const createResult = await adminClient.auth.admin.createUser({
+            email: email,
+            password: password,
+            email_confirm: true,
+            user_metadata: {
+                first_name: firstName,
+                middle_name: middleName || "",
+                last_name: lastName,
+                mobile_number: mobileNumber
+            }
+        });
+
+        if (createResult.error || !createResult.data || !createResult.data.user) {
+            writeJsonError(response, 400, explainUserCreationError(createResult.error && createResult.error.message));
+            return;
+        }
+
+        createdUserId = createResult.data.user.id || "";
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .upsert({
+                id: createdUserId,
+                role: "secretary",
+                email: email,
+                mobile_number: mobileNumber,
+                first_name: firstName,
+                middle_name: middleName,
+                last_name: lastName,
+                is_active: true
+            }, { onConflict: "id" })
+            .select("id, role, email, mobile_number, first_name, middle_name, last_name, is_active, created_at")
+            .single();
+
+        if (profileResult.error || !profileResult.data) {
+            if (createdUserId) {
+                try {
+                    await adminClient.auth.admin.deleteUser(createdUserId);
+                } catch (_cleanupError) {
+                    // Best effort only; return the profile setup error below.
+                }
+            }
+
+            writeJsonError(response, 400, explainUserCreationError(profileResult.error && profileResult.error.message));
+            return;
+        }
+
+        response.status(201).json({
+            ok: true,
+            user: profileResult.data
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Secretary account creation failed.");
     }
 });
 

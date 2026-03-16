@@ -138,7 +138,7 @@
                                             <div class="page-header-icon"><i data-feather="layers"></i></div>
                                             System Administrator User Management
                                         </h1>
-                                        <div class="small ldss-muted">Staff account and role administration shell.</div>
+                                        <div class="small ldss-muted">Secretary account creation and overall user access administration.</div>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3">
                                         <a class="btn btn-dark btn-sm me-2" href="super-admin-system-settings.html">Open System Settings</a>
@@ -150,6 +150,50 @@
                     </header>
                     <div class="container-xl px-4 mt-4">
                         <div class="alert d-none" id="userManagementStatus" role="alert"></div>
+                        <div class="card mb-4">
+                            <div class="card-header">Create Secretary Account</div>
+                            <div class="card-body">
+                                <div class="small text-muted mb-3">Only the System Administrator can create secretary login access. New accounts created here are always assigned the <strong>Secretary</strong> role.</div>
+                                <form id="secretaryCreateForm" novalidate>
+                                    <div class="row g-3">
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreateFirstName">First Name</label>
+                                            <input class="form-control" id="secretaryCreateFirstName" type="text" maxlength="80" required />
+                                        </div>
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreateMiddleName">Middle Name</label>
+                                            <input class="form-control" id="secretaryCreateMiddleName" type="text" maxlength="80" />
+                                        </div>
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreateLastName">Last Name</label>
+                                            <input class="form-control" id="secretaryCreateLastName" type="text" maxlength="80" required />
+                                        </div>
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreateEmail">Email Address</label>
+                                            <input class="form-control" id="secretaryCreateEmail" type="email" maxlength="160" autocomplete="off" required />
+                                        </div>
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreateMobile">Mobile Number</label>
+                                            <input class="form-control" id="secretaryCreateMobile" type="tel" maxlength="20" placeholder="09XXXXXXXXX" autocomplete="off" required />
+                                        </div>
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreatePassword">Temporary Password</label>
+                                            <input class="form-control" id="secretaryCreatePassword" type="password" maxlength="160" autocomplete="new-password" required />
+                                        </div>
+                                        <div class="col-12 col-lg-4">
+                                            <label class="small mb-1" for="secretaryCreateConfirmPassword">Confirm Password</label>
+                                            <input class="form-control" id="secretaryCreateConfirmPassword" type="password" maxlength="160" autocomplete="new-password" required />
+                                        </div>
+                                        <div class="col-12 col-lg-8 d-flex align-items-end">
+                                            <div class="small text-muted">Password must be at least 12 characters and include uppercase, lowercase, number, and symbol.</div>
+                                        </div>
+                                        <div class="col-12 d-flex justify-content-end">
+                                            <button class="btn btn-dark" id="secretaryCreateSubmitBtn" type="submit">Create Secretary Account</button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
                         <div class="card mb-4">
                             <div class="card-header">User Access Controls</div>
                             <div class="card-body">

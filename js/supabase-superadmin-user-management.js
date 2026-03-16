@@ -1,6 +1,8 @@
 (function () {
     "use strict";
 
+    const SECRETARY_CREATE_API_PATH = "/api/super-admin/secretaries";
+    const MIN_PASSWORD_LENGTH = 12;
     const APPLICATION_STATUS_META = {
         draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
         submitted: { label: "Submitted", chipClass: "ldss-chip-success" },
@@ -52,6 +54,100 @@
         }
         alert.className = "alert " + (type || "alert-info");
         alert.textContent = message;
+    }
+
+    function setCreateSecretaryLoading(isLoading) {
+        const btn = byId("secretaryCreateSubmitBtn");
+        if (!btn) {
+            return;
+        }
+        btn.disabled = isLoading;
+        btn.textContent = isLoading ? "Creating Secretary..." : "Create Secretary Account";
+    }
+
+    function normalizePhone(value) {
+        const raw = (value || "").trim();
+        const cleaned = raw.replace(/[\s()-]/g, "");
+        const digits = cleaned.replace(/\D/g, "");
+
+        if (/^09\d{9}$/.test(digits)) {
+            return "+63" + digits.slice(1);
+        }
+        if (/^9\d{9}$/.test(digits)) {
+            return "+63" + digits;
+        }
+        if (/^63\d{10}$/.test(digits)) {
+            return "+" + digits;
+        }
+        if (/^\+639\d{9}$/.test(cleaned)) {
+            return cleaned;
+        }
+        return null;
+    }
+
+    function validatePasswordSecurity(password) {
+        if (/\s/.test(password)) {
+            return "Password cannot contain spaces.";
+        }
+        if (password.length < MIN_PASSWORD_LENGTH) {
+            return "Password must be at least 12 characters.";
+        }
+        if (!/[A-Z]/.test(password)) {
+            return "Password must include at least one uppercase letter.";
+        }
+        if (!/[a-z]/.test(password)) {
+            return "Password must include at least one lowercase letter.";
+        }
+        if (!/[0-9]/.test(password)) {
+            return "Password must include at least one number.";
+        }
+        if (!/[^A-Za-z0-9]/.test(password)) {
+            return "Password must include at least one symbol.";
+        }
+        return "";
+    }
+
+    async function getAccessToken() {
+        if (!authContext || !authContext.client || !authContext.client.auth || typeof authContext.client.auth.getSession !== "function") {
+            throw new Error("Supabase session is not available.");
+        }
+
+        const result = await authContext.client.auth.getSession();
+        const session = result && result.data ? result.data.session : null;
+        const token = session && session.access_token ? session.access_token : "";
+        if (!token) {
+            throw new Error("No active access token found. Please sign in again.");
+        }
+        return token;
+    }
+
+    async function requestJson(path, options) {
+        const token = await getAccessToken();
+        const fetchOptions = Object.assign({ method: "GET" }, options || {});
+        const headers = new Headers(fetchOptions.headers || {});
+        headers.set("Authorization", "Bearer " + token);
+        fetchOptions.headers = headers;
+
+        const response = await fetch(path, fetchOptions);
+        const responseText = await response.text();
+        let payload = null;
+
+        if (responseText) {
+            try {
+                payload = JSON.parse(responseText);
+            } catch (_error) {
+                payload = null;
+            }
+        }
+
+        if (!response.ok) {
+            const fallbackMessage = response.status === 404
+                ? "Secretary account API route was not found. Open the site through the Node server."
+                : "Request failed.";
+            throw new Error(payload && payload.error ? payload.error : fallbackMessage);
+        }
+
+        return payload || {};
     }
 
     function formatDate(value) {
@@ -345,6 +441,78 @@
         btn.textContent = isLoading ? "Refreshing..." : "Refresh";
     }
 
+    function resetCreateSecretaryForm() {
+        const form = byId("secretaryCreateForm");
+        if (form) {
+            form.reset();
+        }
+    }
+
+    async function createSecretaryAccount(event) {
+        event.preventDefault();
+        showStatus("");
+
+        const firstName = (byId("secretaryCreateFirstName") ? byId("secretaryCreateFirstName").value : "").trim();
+        const middleName = (byId("secretaryCreateMiddleName") ? byId("secretaryCreateMiddleName").value : "").trim();
+        const lastName = (byId("secretaryCreateLastName") ? byId("secretaryCreateLastName").value : "").trim();
+        const email = (byId("secretaryCreateEmail") ? byId("secretaryCreateEmail").value : "").trim().toLowerCase();
+        const mobileRaw = (byId("secretaryCreateMobile") ? byId("secretaryCreateMobile").value : "").trim();
+        const password = byId("secretaryCreatePassword") ? byId("secretaryCreatePassword").value : "";
+        const confirmPassword = byId("secretaryCreateConfirmPassword") ? byId("secretaryCreateConfirmPassword").value : "";
+
+        if (!firstName || !lastName || !email || !mobileRaw || !password || !confirmPassword) {
+            showStatus("Complete all secretary account fields before creating access.", "alert-danger");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            showStatus("Enter a valid email address.", "alert-danger");
+            return;
+        }
+        const mobileNumber = normalizePhone(mobileRaw);
+        if (!mobileNumber) {
+            showStatus("Enter a valid mobile number (example: 09XXXXXXXXX).", "alert-danger");
+            return;
+        }
+        const passwordPolicyError = validatePasswordSecurity(password);
+        if (passwordPolicyError) {
+            showStatus(passwordPolicyError, "alert-danger");
+            return;
+        }
+        if (password !== confirmPassword) {
+            showStatus("Password and Confirm Password do not match.", "alert-danger");
+            return;
+        }
+
+        setCreateSecretaryLoading(true);
+        try {
+            const payload = await requestJson(SECRETARY_CREATE_API_PATH, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    firstName: firstName,
+                    middleName: middleName,
+                    lastName: lastName,
+                    email: email,
+                    mobileNumber: mobileNumber,
+                    password: password
+                })
+            });
+
+            resetCreateSecretaryForm();
+            showStatus(
+                "Secretary account created successfully for " + (((payload.user && payload.user.email) || email).toString()) + ".",
+                "alert-success"
+            );
+            await loadUsers();
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to create secretary account.", "alert-danger");
+        } finally {
+            setCreateSecretaryLoading(false);
+        }
+    }
+
     async function updateUserActiveState(userId, shouldBeActive) {
         const actionLabel = shouldBeActive ? "activate" : "suspend";
         const confirmed = window.confirm(
@@ -428,6 +596,7 @@
     function bindEvents() {
         const table = byId("userMgmtTableBody");
         const refreshBtn = byId("userMgmtRefreshBtn");
+        const createForm = byId("secretaryCreateForm");
 
         ["userMgmtSearch", "userMgmtRoleFilter", "userMgmtStatusFilter", "userMgmtSubmissionFilter"].forEach(function (id) {
             const input = byId(id);
@@ -453,6 +622,14 @@
             table.addEventListener("click", function (event) {
                 onTableActionClick(event).catch(function (error) {
                     showStatus(error && error.message ? error.message : "User action failed.", "alert-danger");
+                });
+            });
+        }
+
+        if (createForm) {
+            createForm.addEventListener("submit", function (event) {
+                createSecretaryAccount(event).catch(function (error) {
+                    showStatus(error && error.message ? error.message : "Failed to create secretary account.", "alert-danger");
                 });
             });
         }
