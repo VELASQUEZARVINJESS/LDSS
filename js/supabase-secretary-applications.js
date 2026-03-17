@@ -8,12 +8,9 @@
     let allRows = [];
     let filteredRows = [];
     let currentPage = 1;
-    let currentPageRows = [];
     let pageSize = DEFAULT_PAGE_SIZE;
     let authContext = null;
     let photoRenderToken = 0;
-    let selectedApplicationIds = new Set();
-    let bulkActionLoading = false;
 
     function byId(id) {
         return document.getElementById(id);
@@ -168,66 +165,6 @@
             return 1;
         }
         return Math.ceil(total / pageSize);
-    }
-
-    function canMarkForExamination(row) {
-        return normalizeStatus(row && row.status) === "submitted";
-    }
-
-    function pruneSelectedApplicationIds() {
-        const selectableIds = new Set(
-            allRows
-                .filter(function (row) { return canMarkForExamination(row); })
-                .map(function (row) { return row.id; })
-        );
-
-        selectedApplicationIds = new Set(
-            Array.from(selectedApplicationIds).filter(function (id) {
-                return selectableIds.has(id);
-            })
-        );
-    }
-
-    function visibleSelectableRows() {
-        return currentPageRows.filter(function (row) {
-            return canMarkForExamination(row);
-        });
-    }
-
-    function updateSelectionControls() {
-        const selectAll = byId("secretaryApplicationsSelectAll");
-        const markExamBtn = byId("secretaryApplicationsMarkExamBtn");
-        const summary = byId("secretaryApplicationsSelectionSummary");
-        const rowCheckboxes = document.querySelectorAll("input[data-select-application='true']");
-        const visibleRows = visibleSelectableRows();
-        const visibleSelectedCount = visibleRows.filter(function (row) {
-            return selectedApplicationIds.has(row.id);
-        }).length;
-        const totalSelectedCount = selectedApplicationIds.size;
-
-        if (summary) {
-            summary.textContent = totalSelectedCount + " selected";
-        }
-
-        if (selectAll) {
-            const hasVisibleSelectable = visibleRows.length > 0;
-            selectAll.checked = hasVisibleSelectable && visibleSelectedCount === visibleRows.length;
-            selectAll.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < visibleRows.length;
-            selectAll.disabled = bulkActionLoading || !hasVisibleSelectable;
-        }
-
-        if (markExamBtn) {
-            markExamBtn.disabled = bulkActionLoading || totalSelectedCount === 0;
-            markExamBtn.textContent = bulkActionLoading ? "Updating..." : "Set For Examination";
-        }
-
-        rowCheckboxes.forEach(function (checkbox) {
-            const appId = checkbox.getAttribute("data-app-id");
-            if (!appId) {
-                return;
-            }
-            checkbox.checked = selectedApplicationIds.has(appId);
-        });
     }
 
     function fillFilters(rows) {
@@ -428,8 +365,7 @@
             return;
         }
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No application records found.</td></tr>';
-            updateSelectionControls();
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No application records found.</td></tr>';
             return;
         }
         tbody.innerHTML = rows.map(function (row) {
@@ -442,32 +378,22 @@
             const applicantName = row.applicant_name || "Unknown";
             const degreeCourse = row.degree_course || row.scholarship_type || "-";
             const sectorClassification = row.sector_classification || "-";
-            const selectable = canMarkForExamination(row);
-            const checked = selectable && selectedApplicationIds.has(row.id);
             return (
                 "<tr>" +
-                '<td data-label="Select" class="text-center align-middle">' +
-                '<input class="form-check-input" type="checkbox" data-select-application="true" data-app-id="' + escapeHtml(row.id || "") + '"' +
-                (checked ? ' checked="checked"' : "") +
-                (selectable && !bulkActionLoading ? "" : ' disabled="disabled"') +
-                ' aria-label="Select application ' + escapeHtml(row.application_no || row.id || "") + '"' +
-                (selectable ? "" : ' title="Only submitted applications can be moved to examination."') +
-                " />" +
-                "</td>" +
                 '<td data-label="Applicant">' +
-                '<div class="ldss-queue-applicant" style="display:flex;align-items:center;gap:0.75rem;min-width:0;">' +
-                '<div class="ldss-queue-applicant-photo" style="width:2.75rem;height:2.75rem;min-width:2.75rem;max-width:2.75rem;flex:0 0 2.75rem;border-radius:50%;overflow:hidden;border:1px solid #d1d5db;background:#f8f9fb;display:flex;align-items:center;justify-content:center;">' +
-                '<img class="d-none" id="' + escapeHtml(photoDomId) + '" alt="Applicant 1x1 photo" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;object-position:center;display:block;" />' +
-                '<div class="ldss-queue-applicant-photo-placeholder" id="' + escapeHtml(placeholderDomId) + '" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;letter-spacing:0.02em;color:#4b5563;text-transform:uppercase;">' + escapeHtml(applicantInitials(applicantName)) + "</div>" +
+                '<div class="ldss-queue-applicant">' +
+                '<div class="ldss-queue-applicant-photo">' +
+                '<img class="d-none" id="' + escapeHtml(photoDomId) + '" alt="Applicant 1x1 photo" loading="lazy" decoding="async" />' +
+                '<div class="ldss-queue-applicant-photo-placeholder" id="' + escapeHtml(placeholderDomId) + '">' + escapeHtml(applicantInitials(applicantName)) + "</div>" +
                 "</div>" +
                 '<div class="ldss-queue-applicant-body">' +
-                '<span class="ldss-queue-applicant-name">' + escapeHtml(applicantName) + "</span>" +
+                '<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + "</span>" +
                 "</div>" +
                 "</div>" +
                 "</td>" +
                 '<td data-label="Application ID">' + escapeHtml(row.application_no || "-") + "</td>" +
-                '<td data-label="Degree Course"><div class="ldss-queue-degree">' + escapeHtml(degreeCourse) + "</div></td>" +
-                '<td data-label="Sector Classification">' + escapeHtml(sectorClassification) + "</td>" +
+                '<td data-label="Degree Course"><div class="ldss-queue-degree ldss-table-ellipsis" title="' + escapeHtml(degreeCourse) + '">' + escapeHtml(degreeCourse) + "</div></td>" +
+                '<td data-label="Sector Classification"><span class="ldss-table-ellipsis" title="' + escapeHtml(sectorClassification) + '">' + escapeHtml(sectorClassification) + "</span></td>" +
                 '<td data-label="Submitted">' + escapeHtml(formatDate(submitted)) + "</td>" +
                 '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
                 '<td data-label="View Data"><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
@@ -476,7 +402,6 @@
         }).join("");
         photoRenderToken += 1;
         void renderApplicantPhotos(rows, photoRenderToken);
-        updateSelectionControls();
     }
     async function renderApplicantPhotos(rows, token) {
         const photoTasks = rows.map(async function (row) {
@@ -535,7 +460,6 @@
 
         const start = (currentPage - 1) * pageSize;
         const pageRows = filteredRows.slice(start, start + pageSize);
-        currentPageRows = pageRows;
 
         renderTable(pageRows);
         renderPaginationInfo(filteredRows.length);
@@ -584,75 +508,9 @@
             );
         }
 
-        pruneSelectedApplicationIds();
         updateKpis(allRows);
         fillFilters(allRows);
         applyFiltersAndRender(false);
-    }
-
-    async function handleMarkSelectedForExam() {
-        if (bulkActionLoading || !authContext || !authContext.client || !authContext.user) {
-            return;
-        }
-
-        const selectedRows = allRows.filter(function (row) {
-            return selectedApplicationIds.has(row.id);
-        });
-        const targetRows = selectedRows.filter(function (row) {
-            return canMarkForExamination(row);
-        });
-        const skippedCount = selectedRows.length - targetRows.length;
-
-        if (!targetRows.length) {
-            showStatus("Select at least one submitted application to move into examination.", "alert-warning");
-            updateSelectionControls();
-            return;
-        }
-
-        const confirmed = window.confirm(
-            "Move " + targetRows.length + " selected submitted application(s) to Pending Exam?"
-        );
-        if (!confirmed) {
-            return;
-        }
-
-        bulkActionLoading = true;
-        updateSelectionControls();
-        showStatus("");
-
-        try {
-            const targetIds = targetRows.map(function (row) {
-                return row.id;
-            });
-
-            const result = await authContext.client
-                .from("applications")
-                .update({
-                    status: "pending_exam",
-                    secretary_reviewer_id: authContext.user.id,
-                    is_locked: false
-                })
-                .in("id", targetIds)
-                .eq("status", "submitted");
-
-            if (result.error) {
-                throw new Error(result.error.message);
-            }
-
-            selectedApplicationIds.clear();
-            await loadApplications(authContext);
-
-            let message = targetIds.length + " application(s) moved to Pending Exam.";
-            if (skippedCount > 0) {
-                message += " Skipped " + skippedCount + " row(s) that were no longer submitted.";
-            }
-            showStatus(message, "alert-success");
-        } catch (error) {
-            showStatus("Failed to update selected applications: " + (error && error.message ? error.message : "Unknown error"), "alert-danger");
-        } finally {
-            bulkActionLoading = false;
-            updateSelectionControls();
-        }
     }
 
     function bindEvents() {
@@ -662,9 +520,6 @@
         const statusFilter = byId("secretaryApplicationsStatusFilter");
         const yearFilter = byId("secretaryApplicationsYearFilter");
         const pagination = byId("secretaryApplicationsPagination");
-        const selectAll = byId("secretaryApplicationsSelectAll");
-        const tbody = byId("secretaryApplicationsTableBody");
-        const markExamBtn = byId("secretaryApplicationsMarkExamBtn");
         const pageSizeSelect = byId("secretaryApplicationsPageSize");
 
         if (applyBtn) {
@@ -731,46 +586,6 @@
                 }
                 currentPage = nextPage;
                 applyFiltersAndRender(false);
-            });
-        }
-
-        if (selectAll) {
-            selectAll.addEventListener("change", function () {
-                visibleSelectableRows().forEach(function (row) {
-                    if (selectAll.checked) {
-                        selectedApplicationIds.add(row.id);
-                    } else {
-                        selectedApplicationIds.delete(row.id);
-                    }
-                });
-                updateSelectionControls();
-            });
-        }
-
-        if (tbody) {
-            tbody.addEventListener("change", function (event) {
-                const checkbox = event.target.closest("input[data-select-application='true']");
-                if (!checkbox) {
-                    return;
-                }
-
-                const appId = checkbox.getAttribute("data-app-id");
-                if (!appId) {
-                    return;
-                }
-
-                if (checkbox.checked) {
-                    selectedApplicationIds.add(appId);
-                } else {
-                    selectedApplicationIds.delete(appId);
-                }
-                updateSelectionControls();
-            });
-        }
-
-        if (markExamBtn) {
-            markExamBtn.addEventListener("click", function () {
-                void handleMarkSelectedForExam();
             });
         }
     }

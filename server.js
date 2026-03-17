@@ -14,6 +14,19 @@ const UPLOAD_ROOT = path.resolve(ROOT_DIR, process.env.LDSS_UPLOAD_DIR || "uploa
 const SUPABASE_URL = process.env.LDSS_SUPABASE_URL || "https://rfzqifloaixrtseqzrzk.supabase.co";
 const SUPABASE_ANON_KEY = process.env.LDSS_SUPABASE_ANON_KEY || "sb_publishable_ysa32dk9v2Vcps9KQSR2Rg_F0w9TftL";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.LDSS_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const SMTP_HOST = (process.env.LDSS_SMTP_HOST || process.env.SMTP_HOST || "").toString().trim();
+const SMTP_PORT = Number(process.env.LDSS_SMTP_PORT || process.env.SMTP_PORT || "0");
+const SMTP_SECURE = /^(1|true|yes|on)$/i.test((process.env.LDSS_SMTP_SECURE || process.env.SMTP_SECURE || "").toString().trim());
+const SMTP_USER = (process.env.LDSS_SMTP_USER || process.env.SMTP_USER || "").toString().trim();
+const SMTP_PASS = (process.env.LDSS_SMTP_PASS || process.env.SMTP_PASS || "").toString();
+const MAIL_FROM = (process.env.LDSS_MAIL_FROM || process.env.MAIL_FROM || "").toString().trim() || SMTP_USER;
+const MAIL_REPLY_TO = (process.env.LDSS_MAIL_REPLY_TO || process.env.MAIL_REPLY_TO || "").toString().trim();
+const REMINDER_LOGS_TABLE = "reminder_email_logs";
+const REMINDER_COOLDOWN_DAYS = {
+    draft_only: 5,
+    no_application: 7,
+    returned_resubmission: 3
+};
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MIN_STAFF_PASSWORD_LENGTH = 12;
 const STAFF_ROLES = new Set(["secretary", "admin", "super_admin"]);
@@ -99,6 +112,7 @@ const CONTENT_SECURITY_POLICY = [
     "upgrade-insecure-requests"
 ].join("; ");
 const PERMISSIONS_POLICY = "accelerometer=(), autoplay=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
+let cachedMailTransporter = null;
 
 const app = express();
 app.disable("x-powered-by");
@@ -268,6 +282,275 @@ function explainUserCreationError(message) {
         return "Email address is already used by another profile.";
     }
     return text || "Secretary account creation failed.";
+}
+
+function escapeHtml(value) {
+    return (value || "")
+        .toString()
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function mailServerConfigured() {
+    return Boolean(SMTP_HOST && SMTP_PORT > 0 && SMTP_USER && SMTP_PASS && MAIL_FROM);
+}
+
+function loadMailer() {
+    try {
+        return require("nodemailer");
+    } catch (_error) {
+        throw new Error("Server is missing nodemailer. Run npm install on the hosting server first.");
+    }
+}
+
+function getMailTransporter() {
+    if (!mailServerConfigured()) {
+        throw new Error("Server email is not configured. Add SMTP settings in the Node app environment first.");
+    }
+    if (cachedMailTransporter) {
+        return cachedMailTransporter;
+    }
+
+    const nodemailer = loadMailer();
+    cachedMailTransporter = nodemailer.createTransport({
+        host: SMTP_HOST,
+        port: SMTP_PORT,
+        secure: SMTP_SECURE,
+        auth: {
+            user: SMTP_USER,
+            pass: SMTP_PASS
+        }
+    });
+    return cachedMailTransporter;
+}
+
+function resolveBaseUrl(request) {
+    const origin = (request.headers.origin || "").toString().trim();
+    if (origin) {
+        return origin.replace(/\/+$/g, "");
+    }
+
+    const forwardedProto = (request.headers["x-forwarded-proto"] || "").toString().split(",")[0].trim();
+    const forwardedHost = (request.headers["x-forwarded-host"] || "").toString().split(",")[0].trim();
+    const host = forwardedHost || (request.headers.host || "").toString().trim();
+    const protocol = forwardedProto || request.protocol || "https";
+
+    if (!host) {
+        return "";
+    }
+    return protocol + "://" + host;
+}
+
+function buildComplianceEmailHtml(details) {
+    const updateLink = details.updateUrl
+        ? '<p style="margin:20px 0 0;"><a href="' + escapeHtml(details.updateUrl) + '" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600;">Update Application</a></p>'
+        : "";
+
+    return (
+        '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111827;">' +
+        '<p>Good day ' + escapeHtml(details.applicantName) + ',</p>' +
+        '<p>Your scholarship application remains <strong>submitted</strong>, but the scholarship office needs you to comply with the following requirement(s):</p>' +
+        '<div style="padding:12px 14px;border:1px solid #d1d5db;border-radius:8px;background:#f9fafb;white-space:pre-wrap;">' + escapeHtml(details.remarks) + '</div>' +
+        '<p style="margin-top:16px;">Application No.: <strong>' + escapeHtml(details.applicationNo) + "</strong></p>" +
+        '<p>Please open your application and update the required information as soon as possible.</p>' +
+        updateLink +
+        '<p style="margin-top:24px;">LDSP LGU Daet Scholarship System</p>' +
+        "</div>"
+    );
+}
+
+function buildComplianceEmailText(details) {
+    return [
+        "Good day " + details.applicantName + ",",
+        "",
+        "Your scholarship application remains submitted, but the scholarship office needs you to comply with the following requirement(s):",
+        details.remarks,
+        "",
+        "Application No.: " + details.applicationNo,
+        "Please open your application and update the required information as soon as possible.",
+        details.updateUrl ? "Update link: " + details.updateUrl : "",
+        "",
+        "LDSP LGU Daet Scholarship System"
+    ].filter(Boolean).join("\n");
+}
+
+async function sendComplianceEmailMail(details) {
+    const transporter = getMailTransporter();
+    const mailOptions = {
+        from: MAIL_FROM,
+        to: details.email,
+        subject: "LDSP Application Needs Compliance - " + details.applicationNo,
+        text: buildComplianceEmailText(details),
+        html: buildComplianceEmailHtml(details)
+    };
+
+    if (MAIL_REPLY_TO) {
+        mailOptions.replyTo = MAIL_REPLY_TO;
+    }
+
+    await transporter.sendMail(mailOptions);
+}
+
+function reminderSubjectForState(state) {
+    if (state === "draft_only") {
+        return "Complete Your LDSP Application";
+    }
+    return "LDSP Application Reminder";
+}
+
+function reminderActionUrl(baseUrl, state, draftApplicationId) {
+    if (!baseUrl) {
+        return "";
+    }
+    if (state === "draft_only" && draftApplicationId) {
+        return baseUrl + "/APPLICANT/applicant-application-form.html?application_id=" + encodeURIComponent(draftApplicationId);
+    }
+    return baseUrl + "/APPLICANT/applicant-application-form.html";
+}
+
+function buildReminderEmailHtml(details) {
+    const actionText = details.state === "draft_only"
+        ? "Your application is still saved as draft and has not been submitted yet."
+        : "You already have an LDSP account, but you still do not have a submitted application form.";
+    const actionLabel = details.state === "draft_only" ? "Continue Application" : "Start Application";
+    const actionLink = details.actionUrl
+        ? '<p style="margin:20px 0 0;"><a href="' + escapeHtml(details.actionUrl) + '" style="display:inline-block;padding:10px 16px;border-radius:8px;background:#111827;color:#ffffff;text-decoration:none;font-weight:600;">' + escapeHtml(actionLabel) + "</a></p>"
+        : "";
+
+    return (
+        '<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111827;">' +
+        '<p>Good day ' + escapeHtml(details.applicantName) + ',</p>' +
+        "<p>" + escapeHtml(actionText) + "</p>" +
+        '<p>Please complete your form as soon as possible so the scholarship office can review your application on time.</p>' +
+        actionLink +
+        '<p style="margin-top:24px;">LDSP LGU Daet Scholarship System</p>' +
+        "</div>"
+    );
+}
+
+function buildReminderEmailText(details) {
+    const actionText = details.state === "draft_only"
+        ? "Your application is still saved as draft and has not been submitted yet."
+        : "You already have an LDSP account, but you still do not have a submitted application form.";
+
+    return [
+        "Good day " + details.applicantName + ",",
+        "",
+        actionText,
+        "Please complete your form as soon as possible so the scholarship office can review your application on time.",
+        details.actionUrl ? "Open here: " + details.actionUrl : "",
+        "",
+        "LDSP LGU Daet Scholarship System"
+    ].filter(Boolean).join("\n");
+}
+
+async function sendApplicantReminderMail(details) {
+    const transporter = getMailTransporter();
+    const mailOptions = {
+        from: MAIL_FROM,
+        to: details.email,
+        subject: reminderSubjectForState(details.state),
+        text: buildReminderEmailText(details),
+        html: buildReminderEmailHtml(details)
+    };
+
+    if (MAIL_REPLY_TO) {
+        mailOptions.replyTo = MAIL_REPLY_TO;
+    }
+
+    await transporter.sendMail(mailOptions);
+}
+
+function newestApplication(left, right) {
+    const leftDate = new Date((left && (left.updated_at || left.created_at)) || 0).getTime();
+    const rightDate = new Date((right && (right.updated_at || right.created_at)) || 0).getTime();
+    return rightDate - leftDate;
+}
+
+function classifyReminderState(applications) {
+    const items = Array.isArray(applications) ? applications.slice() : [];
+    const nonDraft = items.find(function (application) {
+        return ((application && application.status) || "").toString().trim().toLowerCase() !== "draft";
+    });
+
+    if (nonDraft) {
+        return {
+            state: "submitted",
+            draftApplicationId: ""
+        };
+    }
+
+    const draftApplications = items.filter(function (application) {
+        return ((application && application.status) || "").toString().trim().toLowerCase() === "draft";
+    }).sort(newestApplication);
+
+    if (draftApplications.length) {
+        return {
+            state: "draft_only",
+            draftApplicationId: draftApplications[0].id || ""
+        };
+    }
+
+    return {
+        state: "no_application",
+        draftApplicationId: ""
+    };
+}
+
+function reminderCooldownDays(reminderType) {
+    return REMINDER_COOLDOWN_DAYS[reminderType] || 7;
+}
+
+function reminderLogKey(applicantId, reminderType) {
+    return (applicantId || "") + "::" + (reminderType || "");
+}
+
+function reminderCooldownUntil(sentAt, reminderType) {
+    const parsed = new Date(sentAt || "");
+    if (Number.isNaN(parsed.getTime())) {
+        return "";
+    }
+    parsed.setDate(parsed.getDate() + reminderCooldownDays(reminderType));
+    return parsed.toISOString();
+}
+
+function buildReminderLogLookup(rows) {
+    const lookup = {};
+    (rows || []).forEach(function (row) {
+        if (!row || row.status !== "sent" || !row.applicant_id || !row.reminder_type || !row.sent_at) {
+            return;
+        }
+        const key = reminderLogKey(row.applicant_id, row.reminder_type);
+        if (!lookup[key]) {
+            lookup[key] = {
+                lastSentAt: row.sent_at,
+                timesSent: 1
+            };
+            return;
+        }
+        lookup[key].timesSent += 1;
+        if (new Date(row.sent_at).getTime() > new Date(lookup[key].lastSentAt).getTime()) {
+            lookup[key].lastSentAt = row.sent_at;
+        }
+    });
+    return lookup;
+}
+
+function reminderInCooldown(logMeta, reminderType) {
+    if (!logMeta || !logMeta.lastSentAt) {
+        return false;
+    }
+    const nextAllowed = new Date(reminderCooldownUntil(logMeta.lastSentAt, reminderType));
+    return !Number.isNaN(nextAllowed.getTime()) && nextAllowed.getTime() > Date.now();
+}
+
+function isMissingTableError(error, tableName) {
+    const message = ((error && (error.message || error.details || error.hint)) || "").toString().toLowerCase();
+    const code = ((error && error.code) || "").toString();
+    return code === "42P01" || message.indexOf((tableName || "").toString().toLowerCase()) !== -1 || message.indexOf("relation") !== -1;
 }
 
 function detectUploadedFileKind(buffer) {
@@ -837,6 +1120,282 @@ app.post("/api/super-admin/secretaries", authenticate, async function (request, 
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Secretary account creation failed.");
+    }
+});
+
+app.post("/api/notifications/compliance-email", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send compliance emails.");
+            return;
+        }
+
+        const applicationId = nullIfBlank(request.body && request.body.applicationId);
+        const remarks = nullIfBlank(request.body && request.body.remarks);
+        if (!applicationId || !remarks || remarks.length < 10) {
+            writeJsonError(response, 400, "Application ID and compliance remarks are required.");
+            return;
+        }
+
+        const applicationResult = await request.auth.client
+            .from("applications")
+            .select("id, application_no, applicant_id")
+            .eq("id", applicationId)
+            .maybeSingle();
+
+        if (applicationResult.error || !applicationResult.data) {
+            writeJsonError(response, 404, "Target application was not found.");
+            return;
+        }
+
+        const profileResult = await request.auth.client
+            .from("profiles")
+            .select("first_name, middle_name, last_name, email")
+            .eq("id", applicationResult.data.applicant_id)
+            .maybeSingle();
+
+        if (profileResult.error || !profileResult.data) {
+            writeJsonError(response, 404, "Applicant profile was not found.");
+            return;
+        }
+
+        const email = ((profileResult.data.email || "")).toString().trim().toLowerCase();
+        if (!email) {
+            writeJsonError(response, 400, "Applicant does not have an email address on file.");
+            return;
+        }
+
+        const applicantName = [
+            profileResult.data.first_name,
+            profileResult.data.middle_name,
+            profileResult.data.last_name
+        ].map(function (value) {
+            return (value || "").toString().trim();
+        }).filter(Boolean).join(" ").trim() || email;
+
+        const baseUrl = resolveBaseUrl(request);
+        const updateUrl = baseUrl
+            ? baseUrl + "/APPLICANT/applicant-application-form.html?application_id=" + encodeURIComponent(applicationId)
+            : "";
+
+        await sendComplianceEmailMail({
+            email: email,
+            applicantName: applicantName,
+            applicationNo: applicationResult.data.application_no || "LDSP Application",
+            remarks: remarks,
+            updateUrl: updateUrl
+        });
+
+        response.json({
+            ok: true,
+            email: email
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Compliance email failed.");
+    }
+});
+
+app.post("/api/notifications/reminder-campaign", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send reminder campaigns.");
+            return;
+        }
+
+        const campaignType = ((request.body && request.body.campaignType) || "all_visible").toString().trim().toLowerCase();
+        const allowedCampaignTypes = new Set(["all_visible", "draft_only", "no_application"]);
+        if (!allowedCampaignTypes.has(campaignType)) {
+            writeJsonError(response, 400, "Reminder campaign type is invalid.");
+            return;
+        }
+
+        const rawRecipientIds = Array.isArray(request.body && request.body.recipientIds) ? request.body.recipientIds : [];
+        const recipientIds = Array.from(new Set(rawRecipientIds.map(function (value) {
+            return (value || "").toString().trim();
+        }).filter(Boolean)));
+
+        if (!recipientIds.length) {
+            writeJsonError(response, 400, "Select at least one recipient for the reminder campaign.");
+            return;
+        }
+        if (recipientIds.length > 200) {
+            writeJsonError(response, 400, "Too many recipients at once. Please filter the list and send in smaller batches.");
+            return;
+        }
+
+        const [profilesResult, applicationsResult] = await Promise.all([
+            request.auth.client
+                .from("profiles")
+                .select("id, first_name, middle_name, last_name, email, role")
+                .eq("role", "applicant")
+                .in("id", recipientIds),
+            request.auth.client
+                .from("applications")
+                .select("id, applicant_id, status, updated_at, created_at")
+                .in("applicant_id", recipientIds)
+        ]);
+
+        if (profilesResult.error) {
+            writeJsonError(response, 500, profilesResult.error.message || "Unable to load reminder recipients.");
+            return;
+        }
+        if (applicationsResult.error) {
+            writeJsonError(response, 500, applicationsResult.error.message || "Unable to inspect application states.");
+            return;
+        }
+
+        const profileMap = {};
+        (profilesResult.data || []).forEach(function (profile) {
+            if (profile && profile.id) {
+                profileMap[profile.id] = profile;
+            }
+        });
+
+        const applicationMap = {};
+        (applicationsResult.data || []).forEach(function (application) {
+            if (!application || !application.applicant_id) {
+                return;
+            }
+            if (!applicationMap[application.applicant_id]) {
+                applicationMap[application.applicant_id] = [];
+            }
+            applicationMap[application.applicant_id].push(application);
+        });
+
+        const reminderLogsResult = await request.auth.client
+            .from(REMINDER_LOGS_TABLE)
+            .select("applicant_id, reminder_type, status, sent_at")
+            .in("applicant_id", recipientIds)
+            .eq("channel", "email")
+            .order("sent_at", { ascending: false });
+
+        if (reminderLogsResult.error) {
+            const missingTableMessage = "Reminder log table is not available yet. Run reminder_email_logs_hotfix_2026_03_17.sql first.";
+            writeJsonError(
+                response,
+                500,
+                isMissingTableError(reminderLogsResult.error, REMINDER_LOGS_TABLE)
+                    ? missingTableMessage
+                    : (reminderLogsResult.error.message || "Unable to read reminder log history.")
+            );
+            return;
+        }
+
+        const reminderLogLookup = buildReminderLogLookup(reminderLogsResult.data || []);
+
+        const baseUrl = resolveBaseUrl(request);
+        const sent = [];
+        const skipped = [];
+        const failed = [];
+
+        for (let index = 0; index < recipientIds.length; index += 1) {
+            const applicantId = recipientIds[index];
+            const profile = profileMap[applicantId];
+            if (!profile) {
+                skipped.push({ id: applicantId, reason: "Profile not found." });
+                continue;
+            }
+
+            const email = ((profile.email || "")).toString().trim().toLowerCase();
+            if (!email) {
+                skipped.push({ id: applicantId, reason: "No email address on file." });
+                continue;
+            }
+
+            const stateInfo = classifyReminderState(applicationMap[applicantId] || []);
+            if (stateInfo.state === "submitted") {
+                skipped.push({ id: applicantId, email: email, reason: "Already has a submitted application." });
+                continue;
+            }
+            if (campaignType === "draft_only" && stateInfo.state !== "draft_only") {
+                skipped.push({ id: applicantId, email: email, reason: "Not in Draft Only state." });
+                continue;
+            }
+            if (campaignType === "no_application" && stateInfo.state !== "no_application") {
+                skipped.push({ id: applicantId, email: email, reason: "Already has a started draft." });
+                continue;
+            }
+
+            const logMeta = reminderLogLookup[reminderLogKey(applicantId, stateInfo.state)] || null;
+            if (reminderInCooldown(logMeta, stateInfo.state)) {
+                skipped.push({
+                    id: applicantId,
+                    email: email,
+                    reason: "Reminder is still in cooldown.",
+                    nextAllowedAt: reminderCooldownUntil(logMeta.lastSentAt, stateInfo.state)
+                });
+                continue;
+            }
+
+            const applicantName = [
+                profile.first_name,
+                profile.middle_name,
+                profile.last_name
+            ].map(function (value) {
+                return (value || "").toString().trim();
+            }).filter(Boolean).join(" ").trim() || email;
+
+            try {
+                await sendApplicantReminderMail({
+                    email: email,
+                    applicantName: applicantName,
+                    state: stateInfo.state,
+                    actionUrl: reminderActionUrl(baseUrl, stateInfo.state, stateInfo.draftApplicationId)
+                });
+
+                const insertResult = await request.auth.client
+                    .from(REMINDER_LOGS_TABLE)
+                    .insert({
+                        applicant_id: applicantId,
+                        application_id: stateInfo.draftApplicationId || null,
+                        reminder_type: stateInfo.state,
+                        channel: "email",
+                        status: "sent",
+                        recipient_email: email,
+                        sent_by: request.auth.user.id
+                    });
+
+                if (insertResult.error) {
+                    throw new Error(insertResult.error.message || "Reminder log write failed.");
+                }
+
+                sent.push({ id: applicantId, email: email, state: stateInfo.state });
+            } catch (error) {
+                try {
+                    await request.auth.client
+                        .from(REMINDER_LOGS_TABLE)
+                        .insert({
+                            applicant_id: applicantId,
+                            application_id: stateInfo.draftApplicationId || null,
+                            reminder_type: stateInfo.state,
+                            channel: "email",
+                            status: "failed",
+                            recipient_email: email,
+                            sent_by: request.auth.user.id,
+                            error_message: error && error.message ? error.message : "Email send failed."
+                        });
+                } catch (_logError) {
+                    // Best effort only; keep the original email failure below.
+                }
+                failed.push({
+                    id: applicantId,
+                    email: email,
+                    error: error && error.message ? error.message : "Email send failed."
+                });
+            }
+        }
+
+        response.json({
+            ok: true,
+            sentCount: sent.length,
+            skippedCount: skipped.length,
+            failedCount: failed.length,
+            sent: sent,
+            skipped: skipped,
+            failed: failed
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Reminder campaign failed.");
     }
 });
 

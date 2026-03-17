@@ -51,6 +51,43 @@
     // still clear enough for profile display and print preview.
     const APPLICANT_PHOTO_MAX_DIMENSION = 640;
     const APPLICANT_PHOTO_JPEG_QUALITY = 0.82;
+    const CORRECTION_TARGET_META = {
+        full_application: {
+            label: "Application Form",
+            sectionId: "applicationSectionCard",
+            fieldId: "lastName"
+        },
+        applicant_photo: {
+            label: "Applicant 1x1 Picture",
+            sectionId: "applicationSectionPhoto",
+            fieldId: "reqApplicantPhoto"
+        },
+        personal_information: {
+            label: "Personal Information",
+            sectionId: "applicationSectionPersonal",
+            fieldId: "lastName"
+        },
+        address_contact: {
+            label: "Address and Contact",
+            sectionId: "applicationSectionPersonal",
+            fieldId: "permanentAddressBarangay"
+        },
+        education_background: {
+            label: "Education Background",
+            sectionId: "applicationSectionPersonal",
+            fieldId: "highestEducationAttainment"
+        },
+        family_background: {
+            label: "Family Background",
+            sectionId: "applicationSectionFamily",
+            fieldId: "fatherStatusAlive"
+        },
+        spouse_information: {
+            label: "Married / Spouse Section",
+            sectionId: "applicationSectionSpouse",
+            fieldId: "spouseName"
+        }
+    };
 
     const DOC_FIELDS = [
         {
@@ -77,6 +114,7 @@
     let submitErrorModalInstance = null;
     let privacyModalInstance = null;
     let applicationPolicyModalInstance = null;
+    let correctionPromptModalInstance = null;
     let submitErrorActionHandler = null;
     let pendingSubmitContext = null;
     let submittedTrackingUrl = "";
@@ -594,8 +632,16 @@
     function parseQuery() {
         const params = new URLSearchParams(window.location.search);
         return {
-            applicationId: params.get("application_id")
+            applicationId: params.get("application_id"),
+            correctionTarget: params.get("correction"),
+            correctionType: params.get("correction_type"),
+            correctionNote: params.get("correction_note")
         };
+    }
+
+    function correctionTargetMeta(targetKey) {
+        const normalized = (targetKey || "").toString().trim().toLowerCase();
+        return CORRECTION_TARGET_META[normalized] || CORRECTION_TARGET_META.full_application;
     }
 
     function profileCacheKey(userId) {
@@ -776,6 +822,131 @@
             applicationPolicyModalInstance = new window.bootstrap.Modal(modalEl);
         }
         return applicationPolicyModalInstance;
+    }
+
+    function getCorrectionPromptModal() {
+        const modalEl = byId("applicationCorrectionModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!correctionPromptModalInstance) {
+            correctionPromptModalInstance = new window.bootstrap.Modal(modalEl);
+        }
+        return correctionPromptModalInstance;
+    }
+
+    function clearCorrectionHighlights() {
+        document.querySelectorAll(".ldss-correction-highlight").forEach(function (element) {
+            element.classList.remove("ldss-correction-highlight");
+        });
+        document.querySelectorAll(".ldss-correction-field-focus").forEach(function (element) {
+            element.classList.remove("ldss-correction-field-focus");
+        });
+    }
+
+    function focusCorrectionTarget(targetKey) {
+        const meta = correctionTargetMeta(targetKey);
+        const section = byId(meta.sectionId);
+        const field = byId(meta.fieldId);
+        const scrollTarget = section || field || byId("applicationFormStatus");
+
+        clearCorrectionHighlights();
+        if (section) {
+            section.classList.add("ldss-correction-highlight");
+        }
+        if (field) {
+            field.classList.add("ldss-correction-field-focus");
+        }
+        if (scrollTarget && typeof scrollTarget.scrollIntoView === "function") {
+            scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+
+        window.setTimeout(function () {
+            if (field && !field.disabled && typeof field.focus === "function") {
+                try {
+                    field.focus({ preventScroll: true });
+                } catch (_error) {
+                    field.focus();
+                }
+            }
+        }, 220);
+
+        window.setTimeout(clearCorrectionHighlights, 6500);
+    }
+
+    function buildCorrectionPromptText(query) {
+        const meta = correctionTargetMeta(query && query.correctionTarget);
+        const correctionType = ((query && query.correctionType) || "").toString().trim().toLowerCase();
+        const note = nullIfBlank(query && query.correctionNote ? query.correctionNote : "");
+        const isReturned = correctionType === "return";
+
+        return {
+            title: isReturned ? "Returned for Correction" : "Update Required",
+            lead: isReturned
+                ? "The scholarship office returned your application and pointed you to the section below."
+                : "The scholarship office asked you to update this part of your submitted application.",
+            targetLabel: meta.label,
+            note: note
+                ? "Secretary remarks: " + note
+                : "Review the highlighted section and update the required information."
+        };
+    }
+
+    function clearCorrectionQueryFromUrl(applicationId) {
+        if (!applicationId) {
+            return;
+        }
+        window.history.replaceState({}, "", "applicant-application-form.html?application_id=" + encodeURIComponent(applicationId));
+    }
+
+    function maybeShowCorrectionPrompt(query, application) {
+        const hasCorrectionContext = !!(
+            query &&
+            (
+                nullIfBlank(query.correctionTarget) ||
+                nullIfBlank(query.correctionType) ||
+                nullIfBlank(query.correctionNote)
+            )
+        );
+        if (!hasCorrectionContext || !application || !isEditable(application)) {
+            return;
+        }
+
+        const prompt = buildCorrectionPromptText(query);
+        const targetKey = (query.correctionTarget || "full_application").toString().trim().toLowerCase();
+        const modal = getCorrectionPromptModal();
+        const openBtn = byId("applicationCorrectionModalOpenBtn");
+        const titleEl = byId("applicationCorrectionModalLabel");
+        const leadEl = byId("applicationCorrectionModalLead");
+        const targetEl = byId("applicationCorrectionModalTarget");
+        const noteEl = byId("applicationCorrectionModalNote");
+
+        clearCorrectionQueryFromUrl(application.id);
+
+        if (titleEl) {
+            titleEl.textContent = prompt.title;
+        }
+        if (leadEl) {
+            leadEl.textContent = prompt.lead;
+        }
+        if (targetEl) {
+            targetEl.textContent = prompt.targetLabel;
+        }
+        if (noteEl) {
+            noteEl.textContent = prompt.note;
+        }
+        if (openBtn) {
+            openBtn.setAttribute("data-correction-target", targetKey);
+        }
+
+        focusCorrectionTarget(targetKey);
+
+        if (modal) {
+            modal.show();
+            return;
+        }
+
+        setStatus(prompt.title + ": " + prompt.note, "alert-warning");
     }
 
     function openApplicationPolicyModal() {
@@ -2101,6 +2272,21 @@
         return result.data[0];
     }
 
+    async function findLatestBlockingApplication(context) {
+        const result = await context.client
+            .from("applications")
+            .select("id, application_no, status, is_locked")
+            .eq("applicant_id", context.user.id)
+            .neq("status", "draft")
+            .order("updated_at", { ascending: false })
+            .limit(1);
+
+        if (result.error || !result.data || result.data.length === 0) {
+            return null;
+        }
+        return result.data[0];
+    }
+
     function toIsoDateOnly(value) {
         if (!value) {
             return "";
@@ -2964,6 +3150,18 @@
                 }
             });
         }
+
+        const correctionOpenBtn = byId("applicationCorrectionModalOpenBtn");
+        if (correctionOpenBtn) {
+            correctionOpenBtn.addEventListener("click", function () {
+                const targetKey = correctionOpenBtn.getAttribute("data-correction-target") || "full_application";
+                const modal = getCorrectionPromptModal();
+                if (modal) {
+                    modal.hide();
+                }
+                focusCorrectionTarget(targetKey);
+            });
+        }
     }
 
     function bindFormActions(context) {
@@ -3044,24 +3242,55 @@
                             "alert-info"
                         );
                     }
+
+                    maybeShowCorrectionPrompt(query, existing);
                 }
             } else {
-                const latestDraft = await findLatestEditableDraft(context);
-                if (latestDraft) {
+                const latestBlocking = await findLatestBlockingApplication(context);
+                if (latestBlocking) {
+                    const existing = await loadApplication(context, latestBlocking.id);
+                    if (existing) {
+                        currentApplication = existing;
+                        applyApplicationToForm(existing);
+                        await hydrateAuxMeta(context, context.user.id, existing.id);
+                        applyActionLabels();
+
+                        if (!isEditable(existing)) {
+                            setFormEditableState(false);
+                            const detailLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
+                            setStatus(
+                                "Only 1 submitted application is allowed per user. Your current record is not editable. Use tracking instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
+                                "alert-warning",
+                                true
+                            );
+                            return;
+                        }
+
+                        const editLink = "applicant-application-form.html?application_id=" + encodeURIComponent(existing.id);
+                        setStatus(
+                            "Only 1 submitted application is allowed per user. Update your existing application instead: <a href=\"" + editLink + "\">Open Current Application</a>.",
+                            "alert-warning",
+                            true
+                        );
+                    }
+                } else {
+                    const latestDraft = await findLatestEditableDraft(context);
+                    if (latestDraft) {
                     const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
                     setStatus(
                         "You have an existing draft (" + latestDraft.application_no + "). <a href=\"" + continueLink + "\">Continue Draft</a> or start a new one below.",
                         "alert-info",
                         true
                     );
-                } else {
-                    const intakePolicy = await loadIntakePolicy(context);
-                    if (!intakePolicy.isOpen) {
-                        setFormEditableState(false);
-                        setStatus(describeIntakeClosedReason(intakePolicy), "alert-warning");
+                    } else {
+                        const intakePolicy = await loadIntakePolicy(context);
+                        if (!intakePolicy.isOpen) {
+                            setFormEditableState(false);
+                            setStatus(describeIntakeClosedReason(intakePolicy), "alert-warning");
+                        }
                     }
+                    applyAuxMeta(context.user.id, "new");
                 }
-                applyAuxMeta(context.user.id, "new");
             }
 
             queueInitialPrivacyNoticeModal(currentApplication);

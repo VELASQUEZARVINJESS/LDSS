@@ -466,7 +466,7 @@
         return INTERVIEW_META[status] || { label: valueOrDash(status), chipClass: "ldss-chip-neutral" };
     }
 
-    function setActionLink(anchorId, href, text, disabled) {
+    function setActionLink(anchorId, href, text, disabled, hint) {
         const el = byId(anchorId);
         if (!el) {
             return;
@@ -474,15 +474,19 @@
         el.textContent = text;
         if (disabled) {
             el.href = "javascript:void(0);";
-            el.classList.add("disabled");
+            el.classList.add("ldss-btn-disabled-hint");
             el.setAttribute("aria-disabled", "true");
-            el.setAttribute("tabindex", "-1");
+            if (hint) {
+                el.setAttribute("title", hint);
+            } else {
+                el.removeAttribute("title");
+            }
             return;
         }
         el.href = href;
-        el.classList.remove("disabled");
+        el.classList.remove("ldss-btn-disabled-hint");
         el.removeAttribute("aria-disabled");
-        el.removeAttribute("tabindex");
+        el.removeAttribute("title");
     }
 
     function latestDocByType(documents) {
@@ -654,6 +658,24 @@
         return "applicant-notifications.html";
     }
 
+    function notificationSummaryLabel(row) {
+        const title = (row && row.title ? row.title : "").toString().toLowerCase();
+        const message = (row && row.message ? row.message : "").toString().toLowerCase();
+
+        if (title.includes("returned for correction") || message.includes("returned for correction")) {
+            return "For Resubmission";
+        }
+        if (
+            title.includes("compliance notice") ||
+            title.includes("photo needs change") ||
+            message.includes("need to comply") ||
+            message.includes("replace your applicant 1x1 photo")
+        ) {
+            return "For Update";
+        }
+        return "General Notice";
+    }
+
     function renderNotificationDropdown(rows, unreadCount) {
         const bell = byId("applicantAlerts");
         const bellCount = byId("dashboardAlertsBellCount");
@@ -685,16 +707,14 @@
             return;
         }
 
+        list.classList.add("ldss-applicant-alerts-list");
         list.innerHTML = rows.map(function (row) {
             const link = resolveNotificationLink(row);
-            const title = valueOrDash(row.title || "Notification");
-            const message = valueOrDash(row.message || "");
+            const title = notificationSummaryLabel(row);
             const titleClass = row.is_read ? "" : " fw-600";
             return (
-                '<a class="dropdown-item small" href="' + escapeHtml(link) + '">' +
-                '<div class="small' + titleClass + '">' + escapeHtml(title) + "</div>" +
-                '<div class="small text-muted">' + escapeHtml(message) + "</div>" +
-                '<div class="small text-muted">' + escapeHtml(formatDateTime(row.created_at)) + "</div>" +
+                '<a class="dropdown-item small ldss-applicant-alert-item" href="' + escapeHtml(link) + '">' +
+                '<span class="small ldss-applicant-alert-item-title' + titleClass + '">' + escapeHtml(title) + "</span>" +
                 "</a>"
             );
         }).join("");
@@ -843,6 +863,21 @@
             .select("id")
             .eq("applicant_id", context.user.id)
             .in("status", ["draft", "returned_for_correction"])
+            .order("updated_at", { ascending: false })
+            .limit(1);
+
+        if (result.error || !result.data || result.data.length === 0) {
+            return null;
+        }
+        return result.data[0];
+    }
+
+    async function loadLatestBlockingApplication(context) {
+        const result = await context.client
+            .from("applications")
+            .select("id, application_no, status, is_locked, created_at, updated_at")
+            .eq("applicant_id", context.user.id)
+            .neq("status", "draft")
             .order("updated_at", { ascending: false })
             .limit(1);
 
@@ -1027,7 +1062,17 @@
         return fallback.data || null;
     }
 
-    function renderQuickActions(latestApplication, latestDraft) {
+    function renderQuickActions(latestApplication, latestDraft, latestBlockingApplication) {
+        setActionLink(
+            "dashboardNewApplicationBtn",
+            "applicant-application-form.html",
+            "New Application",
+            !!latestBlockingApplication,
+            latestBlockingApplication
+                ? "Only 1 submitted application is allowed per user. Update your existing application instead."
+                : ""
+        );
+
         if (latestApplication && latestApplication.id) {
             const detailUrl = "application-detail.html?id=" + encodeURIComponent(latestApplication.id);
             setActionLink("dashboardHeaderViewApplicationBtn", detailUrl, "View My Application", false);
@@ -1058,20 +1103,22 @@
                 loadProfileSummary(context),
                 loadLatestApplication(context),
                 loadLatestEditableDraft(context),
-                loadNotifications(context)
+                loadNotifications(context),
+                loadLatestBlockingApplication(context)
             ]);
 
             const profileSummary = headResults[0];
             const latestApplication = headResults[1];
             const latestDraft = headResults[2];
             const notificationPayload = headResults[3];
+            const latestBlockingApplication = headResults[4];
             const latestApplicationAuxMeta = latestApplication
                 ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
                 : { available: false, payload: null };
             const completionReminder = buildCompletionReminder(profileSummary, latestApplication, latestApplicationAuxMeta);
 
             renderProfileHeader(profileSummary, context.user.email);
-            renderQuickActions(latestApplication, latestDraft);
+            renderQuickActions(latestApplication, latestDraft, latestBlockingApplication);
             renderNotificationDropdown(notificationPayload.rows, notificationPayload.unreadCount);
             showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
             if (completionReminder) {

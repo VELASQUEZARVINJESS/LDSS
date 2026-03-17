@@ -128,8 +128,20 @@
         const openHref = btn.getAttribute("data-open-href") || btn.getAttribute("href") || "applicant-application-form.html";
         btn.setAttribute("data-open-href", openHref);
 
+        const latestBlockingApplication = applicationRows.find(function (row) {
+            return (row.status || "").toString().trim().toLowerCase() !== "draft";
+        }) || null;
+
+        if (latestBlockingApplication) {
+            btn.classList.add("ldss-btn-disabled-hint");
+            btn.setAttribute("href", "javascript:void(0);");
+            btn.setAttribute("aria-disabled", "true");
+            btn.setAttribute("title", "Only 1 submitted application is allowed per user. Update your existing application instead.");
+            return;
+        }
+
         if (policy && policy.isOpen) {
-            btn.classList.remove("disabled");
+            btn.classList.remove("ldss-btn-disabled-hint");
             btn.setAttribute("href", openHref);
             btn.removeAttribute("aria-disabled");
             btn.removeAttribute("title");
@@ -137,7 +149,7 @@
         }
 
         const message = intakeClosedMessage(policy);
-        btn.classList.add("disabled");
+        btn.classList.add("ldss-btn-disabled-hint");
         btn.setAttribute("href", "javascript:void(0);");
         btn.setAttribute("aria-disabled", "true");
         btn.setAttribute("title", message);

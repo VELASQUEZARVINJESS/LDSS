@@ -11,6 +11,7 @@
     let clientRef = null;
     let notificationsSupportDismissedAt = true;
     let relatedApplicationStatusById = {};
+    let relatedApplicationUpdatedAtById = {};
 
     function byId(id) {
         return document.getElementById(id);
@@ -136,6 +137,9 @@
         if (title.includes("photo needs change") || message.includes("replace your applicant 1x1 photo")) {
             return "application_update";
         }
+        if (title.includes("compliance notice") || message.includes("need to comply")) {
+            return "application_update_since_notice";
+        }
         return "";
     }
 
@@ -150,7 +154,7 @@
         }
 
         const status = relatedApplicationStatusById[row.related_application_id] || "";
-        if (!status) {
+        if (!status && requirement !== "application_update_since_notice") {
             return false;
         }
 
@@ -158,11 +162,22 @@
             return !["draft", "returned_for_correction"].includes(status);
         }
 
+        if (requirement === "application_update_since_notice") {
+            const updatedAt = relatedApplicationUpdatedAtById[row.related_application_id] || "";
+            const notificationAt = row && row.created_at ? new Date(row.created_at).getTime() : 0;
+            const applicationUpdatedAt = updatedAt ? new Date(updatedAt).getTime() : 0;
+            if (!applicationUpdatedAt || Number.isNaN(applicationUpdatedAt) || !notificationAt || Number.isNaN(notificationAt)) {
+                return false;
+            }
+            return applicationUpdatedAt > notificationAt;
+        }
+
         return true;
     }
 
     async function loadRelatedApplicationStatuses(rows) {
         relatedApplicationStatusById = {};
+        relatedApplicationUpdatedAtById = {};
 
         const applicationIds = Array.from(
             new Set(
@@ -178,7 +193,7 @@
 
         const result = await clientRef
             .from("applications")
-            .select("id, status")
+            .select("id, status, updated_at")
             .in("id", applicationIds);
 
         if (result.error) {
@@ -187,6 +202,7 @@
 
         (result.data || []).forEach(function (row) {
             relatedApplicationStatusById[row.id] = normalizeStatus(row.status);
+            relatedApplicationUpdatedAtById[row.id] = row.updated_at || "";
         });
     }
 
@@ -221,6 +237,24 @@
             return "ldss-chip-danger";
         }
         return "ldss-chip-neutral";
+    }
+
+    function notificationSummaryLabel(row) {
+        const title = (row && row.title ? row.title : "").toString().toLowerCase();
+        const message = (row && row.message ? row.message : "").toString().toLowerCase();
+
+        if (title.includes("returned for correction") || message.includes("returned for correction")) {
+            return "For Resubmission";
+        }
+        if (
+            title.includes("compliance notice") ||
+            title.includes("photo needs change") ||
+            message.includes("need to comply") ||
+            message.includes("replace your applicant 1x1 photo")
+        ) {
+            return "For Update";
+        }
+        return "General Notice";
     }
 
     function renderUnreadPill(unreadCount) {
@@ -299,6 +333,7 @@
         const link = resolveNotificationLink(row);
         const buttonText = isRead ? "Mark Unread" : "Mark Read";
         const titleClass = isRead ? "fw-600 mb-1" : "fw-700 mb-1";
+        const summaryLabel = notificationSummaryLabel(row);
         const acknowledgeReady = canAcknowledge(row);
         const acknowledgeText = acknowledgeReady ? "Acknowledge" : "Complete Task First";
         const acknowledgeClass = acknowledgeReady ? "btn btn-dark btn-sm" : "btn btn-outline-secondary btn-sm";
@@ -306,8 +341,7 @@
             '<div class="' + cardClass + '">' +
             '<div class="d-flex flex-column flex-lg-row justify-content-between gap-2">' +
             '<div class="pe-lg-3">' +
-            '<div class="' + titleClass + '">' + escapeHtml(row.title || "Notification") + "</div>" +
-            '<div class="small text-muted mb-2">' + escapeHtml(row.message || "-") + "</div>" +
+            '<div class="' + titleClass + '">' + escapeHtml(summaryLabel) + "</div>" +
             '<div class="d-flex flex-wrap gap-2">' +
             '<span class="ldss-chip ' + notificationTypeChipClass(row.notification_type) + '">' + escapeHtml(notificationTypeLabel(row.notification_type)) + "</span>" +
             '<span class="ldss-chip ' + (isRead ? "ldss-chip-neutral" : "ldss-chip-accent") + '">' + (isRead ? "Read" : "Unread") + "</span>" +

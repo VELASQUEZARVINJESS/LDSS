@@ -26,7 +26,7 @@
                         <i data-feather="bell"></i>
                         <span class="ldss-bell-count d-none" id="dashboardAlertsBellCount">0</span>
                     </a>
-                    <div class="dropdown-menu dropdown-menu-end border-0 shadow animated--fade-in-up" aria-labelledby="applicantAlerts">
+                    <div class="dropdown-menu dropdown-menu-end border-0 shadow animated--fade-in-up ldss-applicant-alerts-menu" aria-labelledby="applicantAlerts">
                         <h6 class="dropdown-header d-flex align-items-center justify-content-between">
                             <span>Notifications</span>
                             <span class="badge bg-light text-dark border" id="dashboardAlertsUnreadPill">0</span>
@@ -94,14 +94,13 @@
                             <div class="ldss-dashboard-overview-bar">
                                 <p class="ldss-dashboard-overview-note mb-0">A lighter snapshot of your latest application progress and shortcuts.</p>
                                 <div class="ldss-dashboard-inline-actions">
-                                    <a class="btn btn-dark btn-sm" href="applicant-application-form.html">New Application</a>
-                                    <a class="btn btn-outline-dark btn-sm" href="applicant-application-form.html" id="dashboardContinueDraftBtn">Continue Draft</a>
+                                    <a class="btn btn-dark btn-sm" id="dashboardNewApplicationBtn" href="applicant-application-form.html">New Application</a>
                                     <a class="btn btn-outline-dark btn-sm" href="application-detail.html" id="dashboardQuickViewApplicationBtn">View My Application</a>
                                 </div>
                             </div>
                         </section>
                         <div class="row g-2 mb-3">
-                            <div class="col-sm-6 col-xl-3">
+                            <div class="col-12 col-xl-9">
                                 <div class="ldss-status-card ldss-status-card-compact h-100">
                                     <div class="ldss-status-card-head">
                                         <div class="ldss-status-card-icon"><i data-feather="file-text"></i></div>
@@ -111,31 +110,11 @@
                                     <span class="ldss-chip ldss-chip-neutral" id="dashboardCurrentApplicationChip">No data yet</span>
                                 </div>
                             </div>
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-status-card ldss-status-card-compact h-100">
-                                    <div class="ldss-status-card-head">
-                                        <div class="ldss-status-card-icon"><i data-feather="clipboard"></i></div>
-                                        <div class="ldss-status-label mb-0">Exam Result Summary</div>
-                                    </div>
-                                    <div class="ldss-status-value" id="dashboardExamValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral" id="dashboardExamChip">No exam record yet</span>
-                                </div>
-                            </div>
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-status-card ldss-status-card-compact h-100">
-                                    <div class="ldss-status-card-head">
-                                        <div class="ldss-status-card-icon"><i data-feather="calendar"></i></div>
-                                        <div class="ldss-status-label mb-0">Interview Schedule</div>
-                                    </div>
-                                    <div class="ldss-status-value" id="dashboardInterviewValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral" id="dashboardInterviewChip">No interview yet</span>
-                                </div>
-                            </div>
-                            <div class="col-sm-6 col-xl-3">
+                            <div class="col-12 col-xl-3">
                                 <div class="ldss-status-card ldss-status-card-compact h-100">
                                     <div class="ldss-status-card-head">
                                         <div class="ldss-status-card-icon"><i data-feather="corner-down-right"></i></div>
-                                        <div class="ldss-status-label mb-0">Next Step</div>
+                                        <div class="ldss-status-label mb-0">Next Thing To Do</div>
                                     </div>
                                     <div class="ldss-status-value" id="dashboardNextStepValue">-</div>
                                     <span class="ldss-chip ldss-chip-neutral" id="dashboardNextStepChip">Waiting for application</span>

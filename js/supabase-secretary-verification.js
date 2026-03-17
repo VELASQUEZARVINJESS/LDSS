@@ -74,12 +74,23 @@
     const INTERVIEW_SCHEDULE_STORAGE_KEY = "ldss:default-interview-schedule:v1";
     const INTERVIEW_VENUE_STORAGE_KEY = "ldss:default-interview-venue:v1";
     const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
+    const COMPLIANCE_EMAIL_API_PATH = "/api/notifications/compliance-email";
     const DEFAULT_COUNSELOR_OPTIONS = [];
     const PHOTO_CHANGE_REMARK = "Please replace your applicant 1x1 photo with a clear and appropriate picture.";
+    const COMPLIANCE_NOTICE_TITLE = "Compliance Notice: Update Your Application";
     const REMARKS_COUNSELOR_META_START = "[[LDSS_COUNSELOR]]";
     const REMARKS_COUNSELOR_META_END = "[[/LDSS_COUNSELOR]]";
     const REMARKS_SECTOR_META_START = "[[LDSS_SECTOR_TAGS]]";
     const REMARKS_SECTOR_META_END = "[[/LDSS_SECTOR_TAGS]]";
+    const CORRECTION_TARGET_LABELS = {
+        full_application: "Entire Application Form",
+        applicant_photo: "Applicant 1x1 Photo",
+        personal_information: "Personal Information",
+        address_contact: "Address and Contact",
+        education_background: "Education Background",
+        family_background: "Family Background",
+        spouse_information: "Married / Spouse Section"
+    };
 
     let authContext = null;
     let currentApplication = null;
@@ -94,6 +105,7 @@
     let documentNotesById = {};
     let notesModalInstance = null;
     let applicantEditModalInstance = null;
+    let returnCorrectionModalInstance = null;
     let activeNotesDocId = "";
     let counselorOptions = DEFAULT_COUNSELOR_OPTIONS.slice();
     let selectedCounselor = "";
@@ -108,6 +120,97 @@
         return document.getElementById(id);
     }
 
+    function escapeRegExp(value) {
+        return (value || "").toString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function dedupeFixedRemark(text, fixedRemark) {
+        const normalizedText = (text || "").toString().replace(/\s+/g, " ").trim();
+        const normalizedFixed = (fixedRemark || "").toString().replace(/\s+/g, " ").trim();
+        if (!normalizedText || !normalizedFixed) {
+            return normalizedText;
+        }
+
+        const fixedBase = normalizedFixed.replace(/\.+$/g, "");
+        const fixedPattern = new RegExp(escapeRegExp(fixedBase) + "\\.?", "gi");
+        let seenFixed = false;
+        let cleaned = normalizedText.replace(fixedPattern, function () {
+            if (seenFixed) {
+                return " ";
+            }
+            seenFixed = true;
+            return fixedBase + ".";
+        });
+
+        cleaned = cleaned
+            .replace(/\s+/g, " ")
+            .replace(/\s+([,.;:!?])/g, "$1")
+            .replace(/([.?!]){2,}/g, "$1")
+            .trim();
+
+        return cleaned;
+    }
+
+    function appendFixedRemarkOnce(text, fixedRemark) {
+        const normalizedFixed = (fixedRemark || "").toString().replace(/\s+/g, " ").trim();
+        const deduped = dedupeFixedRemark(text, normalizedFixed);
+        if (!normalizedFixed) {
+            return deduped;
+        }
+        const fixedBase = normalizedFixed.replace(/\.+$/g, "");
+        const alreadyHasFixed = new RegExp(escapeRegExp(fixedBase) + "\\.?", "i").test(deduped);
+        if (!deduped) {
+            return normalizedFixed;
+        }
+        if (alreadyHasFixed) {
+            return deduped;
+        }
+        return deduped + (/[.!?]$/.test(deduped) ? "" : ".") + " " + normalizedFixed;
+    }
+
+    async function getAccessToken() {
+        if (!authContext || !authContext.client || !authContext.client.auth || typeof authContext.client.auth.getSession !== "function") {
+            throw new Error("Supabase session is not available.");
+        }
+
+        const result = await authContext.client.auth.getSession();
+        const session = result && result.data ? result.data.session : null;
+        const token = session && session.access_token ? session.access_token : "";
+        if (!token) {
+            throw new Error("No active access token found. Please sign in again.");
+        }
+        return token;
+    }
+
+    async function requestJson(path, options) {
+        const token = await getAccessToken();
+        const fetchOptions = Object.assign({ method: "GET" }, options || {});
+        const headers = new Headers(fetchOptions.headers || {});
+        headers.set("Authorization", "Bearer " + token);
+        fetchOptions.headers = headers;
+
+        const response = await fetch(path, fetchOptions);
+        const responseText = await response.text();
+        let payload = null;
+
+        if (responseText) {
+            try {
+                payload = JSON.parse(responseText);
+            } catch (_error) {
+                payload = null;
+            }
+        }
+
+        if (!response.ok) {
+            const fallbackMessage = response.status === 404
+                ? "Compliance email API route was not found. Open the site through the Node server."
+                : "Request failed.";
+            throw new Error(payload && payload.error ? payload.error : fallbackMessage);
+        }
+
+        return payload || {};
+    }
+
     function getApplicantEditModal() {
         if (!applicantEditModalInstance) {
             const modalEl = byId("verificationApplicantEditModal");
@@ -116,6 +219,16 @@
             }
         }
         return applicantEditModalInstance;
+    }
+
+    function getReturnCorrectionModal() {
+        if (!returnCorrectionModalInstance) {
+            const modalEl = byId("verificationReturnModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                returnCorrectionModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return returnCorrectionModalInstance;
     }
 
     function setApplicantEditStatus(message, type) {
@@ -354,6 +467,42 @@
 
     function buildVerificationUrl(applicationId) {
         return "secretary-interview-verification.html?id=" + encodeURIComponent(applicationId || "");
+    }
+
+    function correctionTargetLabel(targetKey) {
+        return CORRECTION_TARGET_LABELS[targetKey] || CORRECTION_TARGET_LABELS.full_application;
+    }
+
+    function selectedCorrectionTarget() {
+        const select = byId("verificationCorrectionTarget");
+        const raw = (select && select.value ? select.value : "full_application").toString().trim().toLowerCase();
+        return CORRECTION_TARGET_LABELS[raw] ? raw : "full_application";
+    }
+
+    function setReturnCorrectionRemarksPreview(message) {
+        const preview = byId("verificationCorrectionRemarksPreview");
+        if (!preview) {
+            return;
+        }
+        preview.textContent = valueOrDash(message);
+    }
+
+    function openReturnCorrectionModal() {
+        const remarksEl = byId("verificationRemarks");
+        const remarks = remarksEl ? remarksEl.value.trim() : "";
+        if (!remarks || remarks.length < 10) {
+            showStatus("Please provide clear remarks (at least 10 characters) before returning for correction.", "alert-warning");
+            if (remarksEl) {
+                remarksEl.focus();
+            }
+            return;
+        }
+
+        setReturnCorrectionRemarksPreview(remarks);
+        const modal = getReturnCorrectionModal();
+        if (modal) {
+            modal.show();
+        }
     }
 
     function isSecretaryCheckingStage(status) {
@@ -1660,11 +1809,9 @@
 
     function readFormValues() {
         const configuredSchedule = loadConfiguredInterviewSchedule();
-        const interviewDateTimeRaw = configuredSchedule || (byId("verificationInterviewDateTime") ? byId("verificationInterviewDateTime").value : "");
+        const interviewDateTimeRaw = configuredSchedule || "";
         const remarksValue = byId("verificationRemarks") ? byId("verificationRemarks").value.trim() : "";
-        const cleanCounselorEndorsement = byId("verificationCounselorEndorsement")
-            ? normalizeTag(byId("verificationCounselorEndorsement").value)
-            : normalizeTag(selectedCounselor);
+        const cleanCounselorEndorsement = normalizeTag(selectedCounselor);
         const configuredVenue = loadConfiguredInterviewVenue();
         const preservedInterviewStatus = currentInterview && currentInterview.status
             ? currentInterview.status
@@ -1675,7 +1822,7 @@
 
         return {
             interviewDateTimeIso: toIsoFromDatetimeLocal(interviewDateTimeRaw),
-            interviewVenue: configuredVenue || (byId("verificationInterviewVenue") ? byId("verificationInterviewVenue").value.trim() : ""),
+            interviewVenue: configuredVenue || (currentInterview && currentInterview.venue ? currentInterview.venue : ""),
             interviewStatus: preservedInterviewStatus,
             interviewResult: preservedInterviewResult,
             examScore: currentInterview && typeof currentInterview.exam_score !== "undefined"
@@ -1714,7 +1861,9 @@
 
     function actionButtonState(isLoading, activeButtonId, loadingText) {
         const saveBtn = byId("verificationSaveBtn");
+        const complianceBtn = byId("verificationComplianceBtn");
         const returnBtn = byId("verificationReturnBtn");
+        const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const recommendBtn = byId("verificationRecommendBtn");
         const forExamBtn = byId("verificationForExamBtn");
         const photoActionBtn = byId("verificationPhotoActionBtn");
@@ -1736,7 +1885,9 @@
         };
 
         setState(saveBtn, "Save Checking");
+        setState(complianceBtn, "Send Compliance Notice");
         setState(returnBtn, "Return for Correction");
+        setState(returnConfirmBtn, "Return and Redirect");
         setState(recommendBtn, "Recommend to Admin");
         setState(forExamBtn, "Set for Examination");
         if (photoActionBtn) {
@@ -1950,7 +2101,31 @@
         }
     }
 
-    async function notifyApplicant(type, title, message) {
+    function buildApplicantFormUrl() {
+        if (!currentApplication || !currentApplication.id) {
+            return "applicant-notifications.html";
+        }
+        return "applicant-application-form.html?application_id=" + encodeURIComponent(currentApplication.id);
+    }
+
+    function buildApplicantCorrectionUrl(targetKey, remarks, correctionType) {
+        if (!currentApplication || !currentApplication.id) {
+            return "applicant-notifications.html";
+        }
+
+        const params = new URLSearchParams();
+        params.set("application_id", currentApplication.id);
+        params.set("correction", targetKey || "full_application");
+        if (correctionType) {
+            params.set("correction_type", correctionType);
+        }
+        if (remarks) {
+            params.set("correction_note", remarks.slice(0, 500));
+        }
+        return "applicant-application-form.html?" + params.toString();
+    }
+
+    async function notifyApplicant(type, title, message, relatedUrl) {
         const payload = {
             recipient_user_id: currentApplication.applicant_id,
             sender_user_id: authContext.user.id,
@@ -1958,7 +2133,7 @@
             title: title,
             message: message,
             related_application_id: currentApplication.id,
-            related_url: "application-detail.html?id=" + encodeURIComponent(currentApplication.id)
+            related_url: relatedUrl || ("application-detail.html?id=" + encodeURIComponent(currentApplication.id))
         };
 
         const result = await authContext.client
@@ -1968,6 +2143,19 @@
         if (result.error) {
             throw new Error("Action saved but notification failed: " + result.error.message);
         }
+    }
+
+    async function sendComplianceEmail(remarks) {
+        return requestJson(COMPLIANCE_EMAIL_API_PATH, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                applicationId: currentApplication ? currentApplication.id : "",
+                remarks: remarks || ""
+            })
+        });
     }
 
     function allRequiredDocsVerified(docStates) {
@@ -1995,9 +2183,7 @@
         }
 
         if (isSecretaryCheckingStage(currentStatus)) {
-            return formValues.counselorEndorsement
-                ? "pending_exam"
-                : (currentStatus || "submitted");
+            return currentStatus || "submitted";
         }
 
         return currentStatus || "submitted";
@@ -2079,11 +2265,6 @@
             return;
         }
 
-        if (!formValues.counselorEndorsement) {
-            showStatus("Select a counselor endorsement before moving this application to Pending Exam.", "alert-warning");
-            return;
-        }
-
         const previousStatus = normalizedApplicationStatus();
         if (!isSecretaryCheckingStage(previousStatus) && previousStatus !== "pending_exam") {
             showStatus("This application is no longer in secretary checking stage.", "alert-warning");
@@ -2115,23 +2296,74 @@
             showStatus("Please provide clear remarks (at least 10 characters) before returning for correction.", "alert-warning");
             return;
         }
+        const correctionTarget = selectedCorrectionTarget();
 
         await persistVerification("returned_for_correction", false, false);
         await notifyApplicant(
             "application",
             "Application Returned for Correction",
-            "Your application was returned for correction. Remarks: " + remarks
+            "Your application was returned for correction. Please update: " +
+                correctionTargetLabel(correctionTarget) +
+                ". Remarks: " +
+                remarks,
+            buildApplicantCorrectionUrl(correctionTarget, remarks, "return")
+        );
+        const modal = getReturnCorrectionModal();
+        if (modal) {
+            modal.hide();
+        }
+
+        return "Application returned for correction. Applicant will open " + correctionTargetLabel(correctionTarget) + " first.";
+    }
+
+    async function handleSendComplianceNotice() {
+        const remarksEl = byId("verificationRemarks");
+        const remarks = dedupeFixedRemark(remarksEl ? remarksEl.value.trim() : "", PHOTO_CHANGE_REMARK);
+        if (!remarks || remarks.length < 10) {
+            showStatus("Please provide clear compliance remarks (at least 10 characters) before sending a notice.", "alert-warning");
+            return;
+        }
+        if (remarksEl) {
+            remarksEl.value = remarks;
+        }
+
+        if (!currentApplication) {
+            showStatus("No application is loaded yet.", "alert-warning");
+            return;
+        }
+
+        if (currentApplication.is_locked === true) {
+            showStatus("This application is locked. Unlock it first before asking the applicant to comply with updates.", "alert-warning");
+            return;
+        }
+
+        const currentStatus = normalizedApplicationStatus() || "submitted";
+        await persistVerification(currentStatus, null, false);
+        await notifyApplicant(
+            "reminder",
+            COMPLIANCE_NOTICE_TITLE,
+            "Your application remains submitted, but you need to comply with the following requirement(s): " +
+                remarks +
+                " Please open your application and update the required information.",
+            buildApplicantCorrectionUrl("full_application", remarks, "compliance")
         );
 
-        return "Application returned for correction.";
+        try {
+            await sendComplianceEmail(remarks);
+            return "Compliance notice sent. The application status stayed as " + statusMeta(currentStatus).label + ".";
+        } catch (emailError) {
+            return {
+                message: "Compliance notice was saved and shown to the applicant, but email failed: " +
+                    (emailError && emailError.message ? emailError.message : "Unknown email error."),
+                type: "alert-warning"
+            };
+        }
     }
 
     async function handleRequestPhotoChange() {
         const remarksEl = byId("verificationRemarks");
         const existingRemarks = remarksEl ? remarksEl.value.trim() : "";
-        const combinedRemarks = existingRemarks
-            ? (existingRemarks + (existingRemarks.endsWith(".") ? "" : ".") + " " + PHOTO_CHANGE_REMARK)
-            : PHOTO_CHANGE_REMARK;
+        const combinedRemarks = appendFixedRemarkOnce(existingRemarks, PHOTO_CHANGE_REMARK);
 
         if (remarksEl) {
             remarksEl.value = combinedRemarks;
@@ -2141,7 +2373,8 @@
         await notifyApplicant(
             "application",
             "Applicant Photo Needs Change",
-            "Please replace your applicant 1x1 photo with a clear and appropriate picture, then update your application. Remarks: " + combinedRemarks
+            "Please replace your applicant 1x1 photo with a clear and appropriate picture, then update your application. Remarks: " + combinedRemarks,
+            buildApplicantCorrectionUrl("applicant_photo", combinedRemarks, "return")
         );
 
         return "Photo change request sent to the applicant.";
@@ -2216,12 +2449,16 @@
         showStatus("");
 
         try {
-            const successMessage = await action();
-            if (!successMessage) {
+            const actionResult = await action();
+            if (!actionResult) {
                 return;
             }
             await loadPageData(currentApplication.id);
-            showStatus(successMessage, "alert-success");
+            if (typeof actionResult === "string") {
+                showStatus(actionResult, "alert-success");
+            } else {
+                showStatus(actionResult.message || "Action completed.", actionResult.type || "alert-success");
+            }
         } catch (error) {
             showStatus(error && error.message ? error.message : "Action failed. Please try again.", "alert-danger");
         } finally {
@@ -2292,7 +2529,9 @@
     function bindActions() {
         const printBtn = byId("verificationPrintBtn");
         const saveBtn = byId("verificationSaveBtn");
+        const complianceBtn = byId("verificationComplianceBtn");
         const returnBtn = byId("verificationReturnBtn");
+        const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const recommendBtn = byId("verificationRecommendBtn");
         const forExamBtn = byId("verificationForExamBtn");
         const prevBtn = byId("verificationPrevBtn");
@@ -2322,6 +2561,12 @@
             });
         }
 
+        if (complianceBtn) {
+            complianceBtn.addEventListener("click", function () {
+                runAction("verificationComplianceBtn", "Sending...", handleSendComplianceNotice);
+            });
+        }
+
         if (forExamBtn) {
             forExamBtn.addEventListener("click", function () {
                 runAction("verificationForExamBtn", "Sending...", handleSetForExamination);
@@ -2330,7 +2575,13 @@
 
         if (returnBtn) {
             returnBtn.addEventListener("click", function () {
-                runAction("verificationReturnBtn", "Returning...", handleReturnForCorrection);
+                openReturnCorrectionModal();
+            });
+        }
+
+        if (returnConfirmBtn) {
+            returnConfirmBtn.addEventListener("click", function () {
+                runAction("verificationReturnConfirmBtn", "Returning...", handleReturnForCorrection);
             });
         }
 
