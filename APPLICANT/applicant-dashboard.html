@@ -43,9 +43,6 @@
                     <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
                         <h6 class="dropdown-header" id="dashboardAccountHeader">Applicant Account</h6>
                         <a class="dropdown-item" href="applicant-profile.html">My Profile</a>
-                        <a class="dropdown-item" href="applicant-certification.html">Certification</a>
-                        <a class="dropdown-item" href="applicant-renewal.html">Renewal</a>
-                        <a class="dropdown-item" href="applicant-help.html">Help</a>
                         <div class="dropdown-divider"></div>
                         <a class="dropdown-item" href="../logout.html">Logout</a>
                     </div>
@@ -92,10 +89,9 @@
                         <div class="alert d-none" id="dashboardStatus" role="alert"></div>
                         <section class="ldss-dashboard-overview mb-3">
                             <div class="ldss-dashboard-overview-bar">
-                                <p class="ldss-dashboard-overview-note mb-0">A lighter snapshot of your latest application progress and shortcuts.</p>
+                                <p class="ldss-dashboard-overview-note mb-0">A lighter snapshot of your latest application progress.</p>
                                 <div class="ldss-dashboard-inline-actions">
                                     <a class="btn btn-dark btn-sm" id="dashboardNewApplicationBtn" href="applicant-application-form.html">New Application</a>
-                                    <a class="btn btn-outline-dark btn-sm" href="application-detail.html" id="dashboardQuickViewApplicationBtn">View My Application</a>
                                 </div>
                             </div>
                         </section>
@@ -118,45 +114,6 @@
                                     </div>
                                     <div class="ldss-status-value" id="dashboardNextStepValue">-</div>
                                     <span class="ldss-chip ldss-chip-neutral" id="dashboardNextStepChip">Waiting for application</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="row g-4">
-                            <div class="col-lg-4">
-                                <div class="card h-100">
-                                    <div class="card-header">Recent Activity</div>
-                                    <div class="card-body">
-                                        <ul class="list-group list-group-flush" id="dashboardRecentActivityList">
-                                            <li class="list-group-item px-0">
-                                                <div class="small fw-600">No recent activity yet.</div>
-                                                <div class="small text-muted">Start by creating your scholarship application.</div>
-                                            </li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-lg-4">
-                                <div class="card h-100">
-                                    <div class="card-header">Requirement Summary</div>
-                                    <div class="card-body" id="dashboardRequirementSummary">
-                                        <div class="d-flex justify-content-between mb-2">
-                                            <span class="small">No requirements yet.</span>
-                                            <span class="ldss-chip ldss-chip-neutral">No data</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-lg-4">
-                                <div class="card h-100">
-                                    <div class="card-header">Application Timeline</div>
-                                    <div class="card-body">
-                                        <ol class="ldss-timeline" id="dashboardTimelineList">
-                                            <li class="ldss-timeline-item">
-                                                <div class="small fw-600">No timeline yet.</div>
-                                                <div class="small text-muted">Submit your first application to begin tracking.</div>
-                                            </li>
-                                        </ol>
-                                    </div>
                                 </div>
                             </div>
                         </div>

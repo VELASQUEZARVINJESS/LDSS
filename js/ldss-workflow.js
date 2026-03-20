@@ -38,8 +38,8 @@
         },
         submitted: {
             label: "Submitted",
-            chipClass: "ldss-chip-neutral",
-            nextStep: "Wait for secretary screening and exam scheduling."
+            chipClass: "ldss-chip-info",
+            nextStep: "Wait for secretary checking for correction, screening, and exam scheduling."
         },
         pending_exam: {
             label: "Pending Exam",

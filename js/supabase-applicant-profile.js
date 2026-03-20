@@ -129,6 +129,112 @@
         }
     }
 
+    function setChip(id, label, tone) {
+        const target = byId(id);
+        if (!target) {
+            return;
+        }
+        target.textContent = textValue(label);
+        target.className = "ldss-chip";
+        if (tone === "success") {
+            target.classList.add("ldss-chip-success");
+            return;
+        }
+        if (tone === "danger") {
+            target.classList.add("ldss-chip-danger");
+            return;
+        }
+        if (tone === "accent") {
+            target.classList.add("ldss-chip-accent");
+            return;
+        }
+        target.classList.add("ldss-chip-neutral");
+    }
+
+    function hasProfileValue(value) {
+        if (value === 0) {
+            return true;
+        }
+        return (value || "").toString().trim().length > 0;
+    }
+
+    function formatSectorClassificationDisplay(value) {
+        const cleaned = (value || "").toString().trim();
+        return cleaned || "Degree Course";
+    }
+
+    function formatApplicationStatusLabel(value) {
+        const cleaned = (value || "").toString().trim();
+        if (!cleaned) {
+            return "No application yet";
+        }
+        return cleaned
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, function (char) {
+                return char.toUpperCase();
+            });
+    }
+
+    function applicationStatusTone(value) {
+        const normalized = (value || "").toString().trim().toLowerCase();
+        if (!normalized) {
+            return "neutral";
+        }
+        if (["approved", "released", "for_release"].includes(normalized)) {
+            return "success";
+        }
+        if (["rejected", "failed_exam"].includes(normalized)) {
+            return "danger";
+        }
+        if (
+            [
+                "submitted",
+                "pending_exam",
+                "exam_scheduled",
+                "exam_completed",
+                "passed_exam",
+                "special_endorsement_review",
+                "for_interview",
+                "interview_scheduled",
+                "interview_completed",
+                "hard_copy_verified",
+                "for_approval",
+                "waitlisted"
+            ].includes(normalized)
+        ) {
+            return "accent";
+        }
+        return "neutral";
+    }
+
+    function profileCompletionMeta(profile) {
+        const requiredFields = [
+            profile && profile.first_name,
+            profile && profile.last_name,
+            profile && profile.date_of_birth,
+            profile && profile.civil_status,
+            profile && profile.sex,
+            profile && profile.barangay,
+            profile && profile.email,
+            profile && profile.mobile_number,
+            profile && profile.address,
+            profile && profile.school_name,
+            profile && profile.course_or_strand,
+            profile && profile.year_level,
+            profile && profile.guardian_name,
+            profile && profile.guardian_occupation,
+            profile && profile.monthly_income
+        ];
+        const filled = requiredFields.filter(hasProfileValue).length;
+        const total = requiredFields.length;
+        const percent = Math.round((filled / total) * 100);
+        return {
+            filled: filled,
+            total: total,
+            percent: percent
+        };
+    }
+
     function setProfileOverviewPhoto(url, useFallback) {
         const image = byId("profileOverviewPhoto");
         if (!image) {
@@ -266,8 +372,45 @@
         return "Barangay " + cleaned + ", Daet";
     }
 
+    function normalizeAddressSegment(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .replace(/\.+$/g, "")
+            .toLowerCase();
+    }
+
+    function cleanupAddressDisplay(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s*,\s*/g, ", ")
+            .replace(/,\s*,+/g, ", ")
+            .replace(/\s{2,}/g, " ")
+            .replace(/^[,\s]+|[,\s]+$/g, "")
+            .trim();
+    }
+
+    function dedupeAddressSegments(value) {
+        const seen = new Set();
+        return cleanupAddressDisplay(value)
+            .split(",")
+            .map(function (segment) {
+                return cleanupAddressDisplay(segment);
+            })
+            .filter(function (segment) {
+                const key = normalizeAddressSegment(segment);
+                if (!key || key === "barangay" || key === "brgy" || seen.has(key)) {
+                    return false;
+                }
+                seen.add(key);
+                return true;
+            })
+            .join(", ");
+    }
+
     function buildFullAddress(profile) {
-        const address = textValue(profile && profile.address, "");
+        const address = dedupeAddressSegments(profile && profile.address ? profile.address : "");
         const barangay = normalizeBarangayLabel(profile && profile.barangay);
 
         if (!address && !barangay) {
@@ -280,18 +423,26 @@
             return address;
         }
 
-        const addressLower = address.toLowerCase();
-        const rawBarangay = textValue(profile && profile.barangay, "").toLowerCase();
-        const normalizedBarangay = barangay.toLowerCase();
-        if (
-            (rawBarangay && addressLower.includes(rawBarangay)) ||
-            addressLower.includes(normalizedBarangay) ||
-            addressLower.includes(normalizedBarangay.replace(", daet", ""))
-        ) {
+        const addressSegments = address
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const barangaySegments = cleanupAddressDisplay(barangay)
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const namedBarangayKey = barangaySegments.find(function (segment) {
+            return segment !== "daet";
+        });
+
+        if (namedBarangayKey && addressSegments.includes(namedBarangayKey)) {
+            if (barangaySegments.includes("daet") && !addressSegments.includes("daet")) {
+                return cleanupAddressDisplay(address + ", Daet");
+            }
             return address;
         }
 
-        return address + ", " + barangay;
+        return cleanupAddressDisplay([address, barangay].filter(Boolean).join(", "));
     }
 
     function parseBarangayText(text) {
@@ -394,7 +545,7 @@
     async function loadLatestApplicationSummary(context, profile) {
         let latest = await context.client
             .from("applications")
-            .select("id, application_no, sector_classification")
+            .select("id, application_no, sector_classification, status")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false })
             .limit(1);
@@ -402,7 +553,7 @@
         if (latest.error && isMissingApplicationsColumnError(latest.error, "sector_classification")) {
             latest = await context.client
                 .from("applications")
-                .select("id, application_no")
+                .select("id, application_no, status")
                 .eq("applicant_id", context.user.id)
                 .order("created_at", { ascending: false })
                 .limit(1);
@@ -410,25 +561,62 @@
 
         if (latest.error || !latest.data || latest.data.length === 0) {
             setText("profileLatestApplicationNo", "-");
-            setText("profileLatestScholarshipType", "DEGREE COURSE");
+            setText("profileLatestScholarshipType", "Degree Course");
+            setChip("profileLatestStatusChip", "No application yet", "neutral");
             return;
         }
 
         const row = latest.data[0];
         setText("profileLatestApplicationNo", row.application_no);
-        setText("profileLatestScholarshipType", "DEGREE COURSE");
+        setText("profileLatestScholarshipType", formatSectorClassificationDisplay(row.sector_classification));
+        setChip("profileLatestStatusChip", formatApplicationStatusLabel(row.status), applicationStatusTone(row.status));
     }
 
     function fillProfileDisplay(profile) {
         const fullName = composeFullName(profile);
-        setText("profileNameDisplay", fullName || contextUserEmailFallback(profile));
+        const email = contextUserEmailFallback(profile);
+        const mobile = formatMobileDisplay(profile.mobile_number);
+        const address = buildFullAddress(profile);
+        const completion = profileCompletionMeta(profile);
+
+        setText("profileNameDisplay", fullName || email);
+        setText("profileHeroEmailDisplay", email);
         setText("profileDobDisplay", formatDateDisplay(profile.date_of_birth));
         setText("profileCivilStatusDisplay", profile.civil_status);
         setText("profileSexDisplay", profile.sex);
         setText("profileBarangayDisplay", normalizeBarangayLabel(profile.barangay) || profile.barangay || "-");
-        setText("profileEmailDisplay", profile.email);
-        setText("profileMobileDisplay", formatMobileDisplay(profile.mobile_number));
-        setText("profileAddressDisplay", buildFullAddress(profile));
+        setText("profileEmailDisplay", email);
+        setText("profileMobileDisplay", mobile);
+        setText("profileAddressDisplay", address);
+        setText("profileHeroAddressDisplay", address);
+        setText("profileSchoolDisplay", profile.school_name);
+        setText("profileCourseDisplay", profile.course_or_strand);
+        setText("profileYearLevelDisplay", profile.year_level);
+        setText("profileGuardianDisplay", profile.guardian_name);
+        setText("profileOccupationDisplay", profile.guardian_occupation);
+        setText("profileIncomeDisplay", formatIncomeDisplay(profile.monthly_income));
+        setText("profileCompletionValueDisplay", completion.percent + "%");
+        setText("profileCompletionNoteDisplay", completion.filled + " of " + completion.total + " profile fields on file.");
+        setChip(
+            "profileCompletionChip",
+            completion.percent >= 100 ? "Profile complete" : "Profile " + completion.percent + "% complete",
+            completion.percent >= 100 ? "success" : completion.percent >= 60 ? "accent" : "neutral"
+        );
+        setChip(
+            "profileHeroMobileChip",
+            mobile === "-" ? "Add mobile number" : mobile,
+            mobile === "-" ? "neutral" : "accent"
+        );
+        setChip(
+            "profileApplicantPhotoChip",
+            profile && profile.applicant_photo_path ? "On File" : "Needs Upload",
+            profile && profile.applicant_photo_path ? "success" : "neutral"
+        );
+        setChip(
+            "profileInterviewVerificationChip",
+            profile && profile.verified_interview_photo_path ? "On File" : "Pending",
+            profile && profile.verified_interview_photo_path ? "success" : "neutral"
+        );
     }
 
     function contextUserEmailFallback(profile) {
@@ -562,7 +750,9 @@
                 const patch = {
                     email: byId("modalEmail") ? (byId("modalEmail").value.trim().toLowerCase() || null) : null,
                     mobile_number: byId("modalMobile") ? normalizeMobileForStorage(byId("modalMobile").value) : null,
-                    address: byId("modalAddress") ? (byId("modalAddress").value.trim() || null) : null
+                    address: byId("modalAddress")
+                        ? (dedupeAddressSegments(byId("modalAddress").value.trim()) || null)
+                        : null
                 };
                 const data = await updateProfile(context, patch, "Contact information updated.");
                 if (data) {

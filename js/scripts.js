@@ -14,6 +14,10 @@
         window.feather.replace();
     }
 
+    if (document.body.querySelector('#applicantUser')) {
+        document.body.classList.add('ldss-applicant-portal');
+    }
+
     const hasBootstrap = typeof window.bootstrap !== 'undefined';
 
     // Enable tooltips globally
@@ -43,23 +47,42 @@
 
     // Toggle the side navigation
     const sidebarToggle = document.body.querySelector('#sidebarToggle');
-    if (sidebarToggle) {
-        // Persist side navigation state between refreshes
-        if (localStorage.getItem('sb|sidebar-toggle') === 'true') {
-            document.body.classList.add('sidenav-toggled');
+    const BOOTSTRAP_LG_WIDTH = 992;
+    let desktopSidebarCollapsed = localStorage.getItem('sb|sidebar-toggle') === 'true';
+
+    function syncSidebarState() {
+        if (window.innerWidth >= BOOTSTRAP_LG_WIDTH) {
+            document.body.classList.toggle('sidenav-toggled', desktopSidebarCollapsed);
+            return;
         }
+
+        // Keep mobile sidenav temporary so phone pages never reopen with a blocking overlay.
+        document.body.classList.remove('sidenav-toggled');
+    }
+
+    if (sidebarToggle) {
+        syncSidebarState();
+
         sidebarToggle.addEventListener('click', event => {
             event.preventDefault();
+
+            if (window.innerWidth >= BOOTSTRAP_LG_WIDTH) {
+                desktopSidebarCollapsed = !desktopSidebarCollapsed;
+                document.body.classList.toggle('sidenav-toggled', desktopSidebarCollapsed);
+                localStorage.setItem('sb|sidebar-toggle', desktopSidebarCollapsed);
+                return;
+            }
+
             document.body.classList.toggle('sidenav-toggled');
-            localStorage.setItem('sb|sidebar-toggle', document.body.classList.contains('sidenav-toggled'));
         });
+
+        window.addEventListener('resize', syncSidebarState);
     }
 
     // Close side navigation when width < LG
     const sidenavContent = document.body.querySelector('#layoutSidenav_content');
     if (sidenavContent) {
         sidenavContent.addEventListener('click', event => {
-            const BOOTSTRAP_LG_WIDTH = 992;
             if (window.innerWidth >= 992) {
                 return;
             }
