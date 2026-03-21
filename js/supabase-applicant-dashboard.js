@@ -67,8 +67,16 @@
     ];
 
     const TERMINAL_APPLICATION_STATUSES = ["approved", "waitlisted", "rejected", "released"];
+    const MOBILE_DASHBOARD_BREAKPOINT = 768;
+    const MOBILE_DASHBOARD_SECTION_IDS = [
+        "dashboardRecentActivityCollapse",
+        "dashboardRequirementSummaryCollapse",
+        "dashboardTimelineCollapse"
+    ];
 
     let notificationsSupportDismissedAt = true;
+    let dashboardMobileSectionsBound = false;
+    let dashboardMobileSectionMode = "";
 
     function byId(id) {
         return document.getElementById(id);
@@ -1090,7 +1098,72 @@
         }
     }
 
+    function dashboardMobileSections() {
+        return MOBILE_DASHBOARD_SECTION_IDS
+            .map(function (id) { return byId(id); })
+            .filter(Boolean);
+    }
+
+    function syncDashboardMobileSections(forceDefaultState) {
+        if (!window.bootstrap || !window.bootstrap.Collapse) {
+            return;
+        }
+
+        const isMobile = window.innerWidth < MOBILE_DASHBOARD_BREAKPOINT;
+
+        dashboardMobileSections().forEach(function (section) {
+            const instance = window.bootstrap.Collapse.getOrCreateInstance(section, { toggle: false });
+
+            if (!isMobile) {
+                instance.show();
+                section.dataset.ldssMobileStateApplied = "";
+                return;
+            }
+
+            if (!forceDefaultState && section.dataset.ldssMobileStateApplied === "true") {
+                return;
+            }
+
+            if ((section.getAttribute("data-ldss-mobile-default") || "").toLowerCase() === "open") {
+                instance.show();
+            } else {
+                instance.hide();
+            }
+
+            section.dataset.ldssMobileStateApplied = "true";
+        });
+    }
+
+    function bindDashboardMobileSections() {
+        if (dashboardMobileSectionsBound || !dashboardMobileSections().length) {
+            return;
+        }
+
+        dashboardMobileSectionsBound = true;
+        dashboardMobileSectionMode = window.innerWidth < MOBILE_DASHBOARD_BREAKPOINT ? "mobile" : "desktop";
+
+        document.querySelectorAll(".ldss-mobile-section-toggle").forEach(function (toggle) {
+            toggle.addEventListener("click", function (event) {
+                if (window.innerWidth >= MOBILE_DASHBOARD_BREAKPOINT) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            });
+        });
+
+        window.addEventListener("resize", function () {
+            const nextMode = window.innerWidth < MOBILE_DASHBOARD_BREAKPOINT ? "mobile" : "desktop";
+            const shouldReset = nextMode !== dashboardMobileSectionMode;
+            dashboardMobileSectionMode = nextMode;
+            syncDashboardMobileSections(shouldReset);
+        });
+
+        syncDashboardMobileSections(true);
+    }
+
     async function init() {
+        bindDashboardMobileSections();
+
         const context = await window.ldssAuthReadyPromise;
         if (!context || !context.client || !context.user) {
             return;

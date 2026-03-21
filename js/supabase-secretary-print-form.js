@@ -560,17 +560,6 @@
         setText("sheetSpouseChildrenCount", safeMeta.spouseChildrenCount || "");
         setText("sheetSpouseOccupation", safeMeta.spouseOccupation || "");
 
-        if (!taxDoc) {
-            setText("sheetTaxRequirement", "Not uploaded");
-            setText("sheetTaxStatus", "Missing");
-            return;
-        }
-
-        const fileLabel = taxDoc.original_filename ? ("Uploaded: " + taxDoc.original_filename) : "Uploaded";
-        setText("sheetTaxRequirement", fileLabel);
-        setText("sheetTaxStatus", TAX_DOC_STATUS_META[taxDoc.verification_status]
-            ? TAX_DOC_STATUS_META[taxDoc.verification_status].label
-            : valueOrDash(taxDoc.verification_status));
     }
 
     async function loadRecord(context, lookup, requestedByUser) {

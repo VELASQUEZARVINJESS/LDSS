@@ -19,6 +19,8 @@
             notes: "",
             controls: {
                 application_intake_enabled: true,
+                application_open_time: "",
+                application_close_time: "",
                 require_admin_remarks: true,
                 lock_ranking_after_decision: true,
                 allow_special_endorsement: true,
@@ -105,6 +107,49 @@
         return numeric.toFixed(2).replace(/\.00$/, "") + "%";
     }
 
+    function normalizeTimeValue(value) {
+        const raw = (value || "").toString().trim();
+        const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+        return match ? (match[1] + ":" + match[2]) : "";
+    }
+
+    function formatTimeValue(value) {
+        const normalized = normalizeTimeValue(value);
+        if (!normalized) {
+            return "";
+        }
+        const parts = normalized.split(":");
+        const hours = Number(parts[0]);
+        const minutes = parts[1];
+        const suffix = hours >= 12 ? "PM" : "AM";
+        const hour12 = hours % 12 || 12;
+        return hour12 + ":" + minutes + " " + suffix;
+    }
+
+    function formatScheduleLabel(dateValue, timeValue) {
+        if (!dateValue) {
+            return "-";
+        }
+        const dateLabel = formatDateDisplay(dateValue);
+        const timeLabel = formatTimeValue(timeValue);
+        return timeLabel ? (dateLabel + " at " + timeLabel + " (Asia/Manila)") : dateLabel;
+    }
+
+    function formatDateDisplay(value) {
+        if (!value) {
+            return "-";
+        }
+        const parsed = new Date(value + "T12:00:00");
+        if (Number.isNaN(parsed.getTime())) {
+            return value;
+        }
+        return parsed.toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric"
+        });
+    }
+
     function renderWeightTotal() {
         const exam = readNumberField("superSettingsWeightExam");
         const interview = readNumberField("superSettingsWeightInterview");
@@ -130,14 +175,16 @@
             return;
         }
         const ranking = settings.ranking_basis || {};
+        const controls = ranking.controls || {};
         const lines = [
             "School Year: " + (settings.school_year || "-"),
             "Quota: " + Number(settings.quota_slots || 0),
             "Waitlist Buffer: " + Number(settings.waitlist_slots || 0),
             "Passing Score: " + formatPercent(settings.passing_score || 0),
-            "New Application Filing: " + ((ranking.controls && ranking.controls.application_intake_enabled !== false) ? "Open" : "Closed"),
-            "Secretary Applicant Detail Edit: " + ((ranking.controls && ranking.controls.allow_secretary_applicant_edits) ? "Enabled" : "Disabled"),
-            "Special Endorsement: " + ((ranking.controls && ranking.controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
+            "Application Window: " + formatScheduleLabel(settings.application_open_date || "", controls.application_open_time || "") + " to " + formatScheduleLabel(settings.application_close_date || "", controls.application_close_time || ""),
+            "New Application Filing: " + ((controls.application_intake_enabled !== false) ? "Open" : "Closed"),
+            "Secretary Applicant Detail Edit: " + (controls.allow_secretary_applicant_edits ? "Enabled" : "Disabled"),
+            "Special Endorsement: " + ((controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
             "Weights (Exam/Interview/Income/Requirements): "
                 + Number(ranking.exam_weight || 0) + "/"
                 + Number(ranking.interview_weight || 0) + "/"
@@ -161,7 +208,9 @@
         writeInput("superSettingsExamItems", settings.exam_total_items || 0);
         writeInput("superSettingsPassingScore", settings.passing_score || 0);
         writeInput("superSettingsCycleOpen", settings.application_open_date || "");
+        writeInput("superSettingsCycleOpenTime", controls.application_open_time || "");
         writeInput("superSettingsCycleClose", settings.application_close_date || "");
+        writeInput("superSettingsCycleCloseTime", controls.application_close_time || "");
         writeInput("superSettingsWeightExam", ranking.exam_weight || 0);
         writeInput("superSettingsWeightInterview", ranking.interview_weight || 0);
         writeInput("superSettingsWeightIncome", ranking.income_weight || 0);
@@ -189,6 +238,10 @@
         const interviewWeight = readNumberField("superSettingsWeightInterview");
         const incomeWeight = readNumberField("superSettingsWeightIncome");
         const requirementsWeight = readNumberField("superSettingsWeightRequirements");
+        const openDate = byId("superSettingsCycleOpen") ? (byId("superSettingsCycleOpen").value || null) : null;
+        const closeDate = byId("superSettingsCycleClose") ? (byId("superSettingsCycleClose").value || null) : null;
+        const openTime = normalizeTimeValue(byId("superSettingsCycleOpenTime") ? byId("superSettingsCycleOpenTime").value : "");
+        const closeTime = normalizeTimeValue(byId("superSettingsCycleCloseTime") ? byId("superSettingsCycleCloseTime").value : "");
 
         if (!/^[0-9]{4}-[0-9]{4}$/.test(schoolYear)) {
             return { error: "School year must follow YYYY-YYYY format." };
@@ -209,6 +262,15 @@
         if (weightTotal <= 0) {
             return { error: "Ranking weight total must be greater than zero." };
         }
+        if ((openTime && !openDate) || (closeTime && !closeDate)) {
+            return { error: "Set the application date before assigning an open or close time." };
+        }
+        if (openDate && closeDate && closeDate < openDate) {
+            return { error: "Application close date cannot be earlier than the open date." };
+        }
+        if (openDate && closeDate && openDate === closeDate && openTime && closeTime && closeTime <= openTime) {
+            return { error: "On the same day, application close time must be later than the open time." };
+        }
 
         return {
             school_year: schoolYear,
@@ -216,8 +278,8 @@
             waitlist_slots: Math.trunc(waitlistSlots),
             exam_total_items: Math.trunc(examItems),
             passing_score: passingScore,
-            application_open_date: byId("superSettingsCycleOpen") ? (byId("superSettingsCycleOpen").value || null) : null,
-            application_close_date: byId("superSettingsCycleClose") ? (byId("superSettingsCycleClose").value || null) : null,
+            application_open_date: openDate,
+            application_close_date: closeDate,
             ranking_basis: {
                 exam_weight: examWeight,
                 interview_weight: interviewWeight,
@@ -226,6 +288,8 @@
                 notes: byId("superSettingsRankingNotes") ? byId("superSettingsRankingNotes").value.trim() : "",
                 controls: {
                     application_intake_enabled: Boolean(byId("superSettingsApplicationIntakeEnabled") && byId("superSettingsApplicationIntakeEnabled").checked),
+                    application_open_time: openTime,
+                    application_close_time: closeTime,
                     require_admin_remarks: Boolean(byId("superSettingsRequireRemarks") && byId("superSettingsRequireRemarks").checked),
                     lock_ranking_after_decision: Boolean(byId("superSettingsLockRankingAfterDecision") && byId("superSettingsLockRankingAfterDecision").checked),
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),

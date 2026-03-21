@@ -25,32 +25,7 @@
 
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="js/supabase-config.js"></script>
-        <script>
-            (function () {
-                "use strict";
-
-                var statusEl = document.getElementById("logoutStatus");
-                function setStatus(message) {
-                    if (statusEl) {
-                        statusEl.textContent = message;
-                    }
-                }
-
-                async function signOutAndRedirect() {
-                    try {
-                        if (window.supabase && window.supabase.createClient && window.LDSS_SUPABASE_URL && window.LDSS_SUPABASE_ANON_KEY) {
-                            var client = window.supabase.createClient(window.LDSS_SUPABASE_URL, window.LDSS_SUPABASE_ANON_KEY);
-                            await client.auth.signOut();
-                        }
-                    } catch (error) {
-                        setStatus("Session sign-out encountered an issue. Redirecting...");
-                    }
-                    window.location.href = "login.html";
-                }
-
-                signOutAndRedirect();
-            })();
-        </script>
+        <script src="js/supabase-logout.js"></script>
     </body>
 </html>
 

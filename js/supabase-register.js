@@ -5,6 +5,10 @@
     const MIN_PASSWORD_LENGTH = 12;
     let resendController = null;
 
+    function authHelper() {
+        return window.LDSSAuthEmailHelper || null;
+    }
+
     function setStatus(message, type) {
         const el = document.getElementById("registerStatus");
         if (!el) {
@@ -61,26 +65,6 @@
         });
     }
 
-    function normalizePhone(identifier) {
-        const raw = (identifier || "").trim();
-        const cleaned = raw.replace(/[\s()-]/g, "");
-        const digits = cleaned.replace(/\D/g, "");
-
-        if (/^09\d{9}$/.test(digits)) {
-            return "+63" + digits.slice(1);
-        }
-        if (/^9\d{9}$/.test(digits)) {
-            return "+63" + digits;
-        }
-        if (/^63\d{10}$/.test(digits)) {
-            return "+" + digits;
-        }
-        if (/^\+639\d{9}$/.test(cleaned)) {
-            return cleaned;
-        }
-        return null;
-    }
-
     function validatePasswordSecurity(password) {
         if (/\s/.test(password)) {
             return "Password cannot contain spaces.";
@@ -107,9 +91,12 @@
         event.preventDefault();
         setStatus("");
 
+        const helper = authHelper();
         const firstName = (document.getElementById("firstName")?.value || "").trim();
         const lastName = (document.getElementById("lastName")?.value || "").trim();
-        const email = (document.getElementById("email")?.value || "").trim().toLowerCase();
+        const email = helper && typeof helper.normalizeEmailAddress === "function"
+            ? helper.normalizeEmailAddress(document.getElementById("email")?.value || "")
+            : (document.getElementById("email")?.value || "").trim().toLowerCase();
         const mobileRaw = (document.getElementById("mobile")?.value || "").trim();
         const password = document.getElementById("password")?.value || "";
         const confirmPassword = document.getElementById("confirmPassword")?.value || "";
@@ -123,6 +110,10 @@
             setStatus("Please confirm that your information is true and accurate.", "alert-danger");
             return;
         }
+        if (!helper.isValidEmail(email)) {
+            setStatus("Please enter a valid email address.", "alert-danger");
+            return;
+        }
         const passwordPolicyError = validatePasswordSecurity(password);
         if (passwordPolicyError) {
             setStatus(passwordPolicyError, "alert-danger");
@@ -133,7 +124,7 @@
             return;
         }
 
-        const mobileE164 = normalizePhone(mobileRaw);
+        const mobileE164 = helper.normalizePhoneNumber(mobileRaw);
         if (!mobileE164) {
             setStatus("Enter a valid mobile number (example: 09XXXXXXXXX).", "alert-danger");
             return;

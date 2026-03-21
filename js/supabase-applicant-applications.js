@@ -82,12 +82,42 @@
         return date.toISOString().slice(0, 10);
     }
 
+    function normalizeTimeValue(value) {
+        const raw = (value || "").toString().trim();
+        const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+        return match ? (match[1] + ":" + match[2]) : "";
+    }
+
+    function formatTimeValue(value) {
+        const normalized = normalizeTimeValue(value);
+        if (!normalized) {
+            return "";
+        }
+        const parts = normalized.split(":");
+        const hours = Number(parts[0]);
+        const minutes = parts[1];
+        const suffix = hours >= 12 ? "PM" : "AM";
+        const hour12 = hours % 12 || 12;
+        return hour12 + ":" + minutes + " " + suffix;
+    }
+
+    function formatScheduleLabel(dateValue, timeValue) {
+        if (!dateValue) {
+            return "-";
+        }
+        const dateLabel = formatDate(dateValue);
+        const timeLabel = formatTimeValue(timeValue);
+        return timeLabel ? (dateLabel + " at " + timeLabel) : dateLabel;
+    }
+
     async function loadIntakePolicy(context) {
         const fallback = {
             isOpen: true,
             reason: "open",
             openDate: "",
-            closeDate: ""
+            closeDate: "",
+            openTime: "",
+            closeTime: ""
         };
 
         const result = await context.client.rpc("application_intake_is_open");
@@ -99,7 +129,9 @@
             isOpen: result.data.is_open !== false,
             reason: (result.data.reason || "open").toString(),
             openDate: toIsoDateOnly(result.data.open_date || ""),
-            closeDate: toIsoDateOnly(result.data.close_date || "")
+            closeDate: toIsoDateOnly(result.data.close_date || ""),
+            openTime: normalizeTimeValue(result.data.open_time || ""),
+            closeTime: normalizeTimeValue(result.data.close_time || "")
         };
     }
 
@@ -108,10 +140,10 @@
             return "New application filing is currently closed by System Administrator.";
         }
         if (policy.reason === "before_open_date" && policy.openDate) {
-            return "New application filing opens on " + formatDate(policy.openDate) + ".";
+            return "New application filing opens on " + formatScheduleLabel(policy.openDate, policy.openTime) + ".";
         }
         if (policy.reason === "after_close_date" && policy.closeDate) {
-            return "New application filing closed on " + formatDate(policy.closeDate) + ".";
+            return "New application filing closed on " + formatScheduleLabel(policy.closeDate, policy.closeTime) + ".";
         }
         if (policy.reason === "closed_by_admin") {
             return "New application filing is currently turned OFF by System Administrator.";

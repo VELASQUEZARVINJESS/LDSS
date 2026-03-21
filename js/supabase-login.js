@@ -11,6 +11,10 @@
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
     let resendController = null;
 
+    function authHelper() {
+        return window.LDSSAuthEmailHelper || null;
+    }
+
     function setStatus(message, type) {
         const el = document.getElementById("loginStatus");
         if (!el) {
@@ -103,23 +107,50 @@
         const passwordInput = document.getElementById("loginPassword");
         const identifier = identifierInput ? identifierInput.value.trim() : "";
         const password = passwordInput ? passwordInput.value : "";
+        const helper = authHelper();
 
         if (!identifier || !password) {
-            setStatus("Please enter your email and password.", "alert-danger");
-            return;
-        }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-            setStatus("Please enter a valid email address.", "alert-danger");
+            setStatus("Please enter your email/mobile and password.", "alert-danger");
             return;
         }
 
-        const payload = { email: identifier.toLowerCase(), password: password };
+        const isEmail = helper && typeof helper.looksLikeEmail === "function"
+            ? helper.looksLikeEmail(identifier)
+            : identifier.includes("@");
+        let payload;
+        if (isEmail) {
+            const normalizedEmail = helper && typeof helper.normalizeEmailAddress === "function"
+                ? helper.normalizeEmailAddress(identifier)
+                : identifier.toLowerCase();
+            const isValidEmail = helper && typeof helper.isValidEmail === "function"
+                ? helper.isValidEmail(normalizedEmail)
+                : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+            if (!isValidEmail) {
+                setStatus("Please enter a valid email address.", "alert-danger");
+                return;
+            }
+            payload = { email: normalizedEmail, password: password };
+        } else {
+            const normalizedPhone = helper && typeof helper.normalizePhoneNumber === "function"
+                ? helper.normalizePhoneNumber(identifier)
+                : identifier;
+            if (!normalizedPhone) {
+                setStatus("Please enter a valid email address or mobile number.", "alert-danger");
+                return;
+            }
+            payload = { phone: normalizedPhone, password: password };
+        }
 
         setSubmitLoading(true);
         try {
             const { data, error } = await client.auth.signInWithPassword(payload);
             if (error) {
-                if (window.LDSSAuthEmailHelper && window.LDSSAuthEmailHelper.isEmailNotConfirmedError(error)) {
+                if (
+                    payload.email &&
+                    helper &&
+                    typeof helper.isEmailNotConfirmedError === "function" &&
+                    helper.isEmailNotConfirmedError(error)
+                ) {
                     await resendController.request(client, payload.email, {
                         automatic: true,
                         fallbackErrorMessage: "Failed to resend confirmation email.",
@@ -144,7 +175,7 @@
                     return;
                 }
                 resendController.hide();
-                setStatus(window.LDSSAuthEmailHelper.getErrorMessage(error, "Invalid login credentials."), "alert-danger");
+                setStatus(helper.getErrorMessage(error, "Invalid login credentials."), "alert-danger");
                 return;
             }
             if (!data || !data.user) {
@@ -156,7 +187,7 @@
             await fetchRoleAndRedirect(client, data.user.id);
         } catch (err) {
             resendController.hide();
-            setStatus(window.LDSSAuthEmailHelper.getErrorMessage(err, "Unexpected login error. Please try again."), "alert-danger");
+            setStatus(helper.getErrorMessage(err, "Unexpected login error. Please try again."), "alert-danger");
         } finally {
             setSubmitLoading(false);
         }

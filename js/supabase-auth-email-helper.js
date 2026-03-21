@@ -1,12 +1,22 @@
 (function () {
     "use strict";
 
-    const DEFAULT_PRODUCTION_LOGIN_URL = "https://iskolarngdaet.app/login.html";
+    const DEFAULT_PRODUCTION_LOGIN_URL = "https://daet-scholarship.gt.tc/login.html";
+    const DEFAULT_PRODUCTION_RESET_URL = "https://daet-scholarship.gt.tc/reset-password.html";
     const DEFAULT_COOLDOWN_MS = 60 * 1000;
+    const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     function getErrorMessage(error, fallbackMessage) {
         if (!error) {
             return fallbackMessage;
+        }
+        const combinedText = [
+            error && error.code ? error.code : "",
+            error && error.message ? error.message : "",
+            error && error.error_description ? error.error_description : ""
+        ].join(" ").toLowerCase();
+        if (combinedText.includes("rate") && combinedText.includes("email")) {
+            return "Email rate limit exceeded. Wait at least 60 seconds, then try again.";
         }
         if (typeof error === "string" && error.trim()) {
             return error.trim();
@@ -31,22 +41,72 @@
         return fallbackMessage;
     }
 
+    function currentOrigin() {
+        const protocol = (window.location.protocol || "").toString().trim().toLowerCase();
+        const hostname = (window.location.hostname || "").toString().trim().toLowerCase();
+        const origin = (window.location.origin || "").toString().trim().replace(/\/+$/, "");
+
+        if ((protocol === "http:" || protocol === "https:") && /^https?:\/\//i.test(origin) && hostname) {
+            return origin;
+        }
+        return "";
+    }
+
+    function resolveOriginPath(pathname, fallbackUrl) {
+        const origin = currentOrigin();
+        const normalizedPath = (pathname || "").toString().trim() || "/";
+        if (origin) {
+            return origin + (normalizedPath.startsWith("/") ? normalizedPath : "/" + normalizedPath);
+        }
+        return fallbackUrl || "";
+    }
+
     function resolveEmailConfirmRedirectUrl(defaultUrl) {
         const configured = (window.LDSS_EMAIL_CONFIRM_REDIRECT_URL || "").toString().trim();
         if (configured) {
             return configured;
         }
+        return resolveOriginPath("/login.html", defaultUrl || DEFAULT_PRODUCTION_LOGIN_URL);
+    }
 
-        const protocol = (window.location.protocol || "").toString().trim().toLowerCase();
-        const hostname = (window.location.hostname || "").toString().trim().toLowerCase();
-        const origin = (window.location.origin || "").toString().trim().replace(/\/+$/, "");
-        const isLocal = protocol === "file:" || hostname === "localhost" || hostname === "127.0.0.1";
-
-        if (!isLocal && /^https?:\/\//i.test(origin)) {
-            return origin + "/login.html";
+    function resolvePasswordResetRedirectUrl(defaultUrl) {
+        const configured = (window.LDSS_PASSWORD_RESET_REDIRECT_URL || "").toString().trim();
+        if (configured) {
+            return configured;
         }
+        return resolveOriginPath("/reset-password.html", defaultUrl || DEFAULT_PRODUCTION_RESET_URL);
+    }
 
-        return defaultUrl || DEFAULT_PRODUCTION_LOGIN_URL;
+    function normalizeEmailAddress(value) {
+        return (value || "").toString().trim().toLowerCase();
+    }
+
+    function looksLikeEmail(value) {
+        return (value || "").toString().includes("@");
+    }
+
+    function isValidEmail(value) {
+        return EMAIL_PATTERN.test(normalizeEmailAddress(value));
+    }
+
+    function normalizePhoneNumber(value) {
+        const raw = (value || "").toString().trim();
+        const cleaned = raw.replace(/[\s()-]/g, "");
+        const digits = cleaned.replace(/\D/g, "");
+
+        if (/^09\d{9}$/.test(digits)) {
+            return "+63" + digits.slice(1);
+        }
+        if (/^9\d{9}$/.test(digits)) {
+            return "+63" + digits;
+        }
+        if (/^63\d{10}$/.test(digits)) {
+            return "+" + digits;
+        }
+        if (/^\+639\d{9}$/.test(cleaned)) {
+            return cleaned;
+        }
+        return null;
     }
 
     function isEmailNotConfirmedError(error) {
@@ -172,7 +232,7 @@
         }
 
         async function request(client, email, options) {
-            const lowerEmail = (email || "").trim().toLowerCase();
+            const lowerEmail = normalizeEmailAddress(email);
             const automatic = !!(options && options.automatic);
             const fallbackErrorMessage = options && options.fallbackErrorMessage
                 ? options.fallbackErrorMessage
@@ -250,6 +310,11 @@
         createResendController: createResendController,
         getErrorMessage: getErrorMessage,
         isEmailNotConfirmedError: isEmailNotConfirmedError,
-        resolveEmailConfirmRedirectUrl: resolveEmailConfirmRedirectUrl
+        isValidEmail: isValidEmail,
+        looksLikeEmail: looksLikeEmail,
+        normalizeEmailAddress: normalizeEmailAddress,
+        normalizePhoneNumber: normalizePhoneNumber,
+        resolveEmailConfirmRedirectUrl: resolveEmailConfirmRedirectUrl,
+        resolvePasswordResetRedirectUrl: resolvePasswordResetRedirectUrl
     };
 })();

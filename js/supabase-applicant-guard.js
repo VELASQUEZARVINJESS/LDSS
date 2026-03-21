@@ -14,6 +14,7 @@
         super_admin: "System Administrator"
     };
     const DESKTOP_ONLY_MIN_WIDTH = 992;
+    let authRedirectInProgress = false;
 
     function roleRequiresDesktop(role) {
         return Object.prototype.hasOwnProperty.call(DESKTOP_ONLY_ROLE_LABELS, role || "");
@@ -113,10 +114,19 @@
         box.textContent = message;
     }
 
-    async function failClosed(client, message) {
+    async function failClosed(client, message, options) {
+        if (authRedirectInProgress) {
+            return null;
+        }
+        authRedirectInProgress = true;
         showGuardError(message);
         try {
-            if (client && client.auth && typeof client.auth.signOut === "function") {
+            if (
+                (!options || options.signOut !== false) &&
+                client &&
+                client.auth &&
+                typeof client.auth.signOut === "function"
+            ) {
                 await client.auth.signOut();
             }
         } catch (error) {
@@ -124,6 +134,30 @@
         }
         window.location.replace("../login.html");
         return null;
+    }
+
+    function bindAuthStateMonitor(client, expectedUserId) {
+        if (!client || !client.auth || typeof client.auth.onAuthStateChange !== "function") {
+            return;
+        }
+
+        let handled = false;
+        client.auth.onAuthStateChange(function (_event, nextSession) {
+            if (handled || authRedirectInProgress) {
+                return;
+            }
+
+            if (!nextSession || !nextSession.user) {
+                handled = true;
+                failClosed(null, "Your session has ended. Please sign in again.", { signOut: false });
+                return;
+            }
+
+            if (expectedUserId && nextSession.user.id !== expectedUserId) {
+                handled = true;
+                failClosed(null, "Your signed-in account changed. Please sign in again.", { signOut: false });
+            }
+        });
     }
 
     async function guardApplicant() {
@@ -171,6 +205,7 @@
         }
 
         setupDesktopOnlyGuard(role);
+        bindAuthStateMonitor(client, session.user.id);
 
         const authContext = {
             client: client,

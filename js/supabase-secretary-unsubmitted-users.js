@@ -4,7 +4,9 @@
     const PAGE_SIZE_DEFAULT = 10;
     const SUPABASE_FETCH_LIMIT = 1000;
     const REMINDER_CAMPAIGN_API_PATH = "/api/notifications/reminder-campaign";
+    const REMINDER_CAMPAIGN_JOBS_TABLE = "reminder_campaign_jobs";
     const REMINDER_LOGS_TABLE = "reminder_email_logs";
+    const REMINDER_CAMPAIGN_STATUS_POLL_MS = 15000;
     const REMINDER_COOLDOWN_DAYS = {
         draft_only: 5,
         no_application: 7,
@@ -56,6 +58,8 @@
     let authContext = null;
     let reminderCampaignModalInstance = null;
     let reminderLogLookup = {};
+    let currentReminderCampaignJobId = "";
+    let reminderCampaignStatusPollHandle = 0;
 
     function byId(id) {
         return document.getElementById(id);
@@ -192,6 +196,258 @@
         }
         box.className = "alert " + (type || "alert-info");
         box.textContent = message;
+    }
+
+    function setText(id, value) {
+        const element = byId(id);
+        if (element) {
+            element.textContent = value;
+        }
+    }
+
+    function reminderCampaignTypeLabel(type) {
+        if (type === "draft_only") {
+            return "Draft Only";
+        }
+        if (type === "no_application") {
+            return "No Application Yet";
+        }
+        return "All Filtered Users";
+    }
+
+    function reminderCampaignStatusLabel(status) {
+        if (status === "processing") {
+            return "Sending";
+        }
+        if (status === "completed") {
+            return "Completed";
+        }
+        if (status === "failed") {
+            return "Failed";
+        }
+        if (status === "cancelled") {
+            return "Cancelled";
+        }
+        return "Queued";
+    }
+
+    function reminderCampaignBadgeClass(status) {
+        if (status === "processing") {
+            return "badge bg-primary";
+        }
+        if (status === "completed") {
+            return "badge bg-success";
+        }
+        if (status === "failed") {
+            return "badge bg-danger";
+        }
+        if (status === "cancelled") {
+            return "badge bg-dark";
+        }
+        return "badge bg-warning text-dark";
+    }
+
+    function reminderCampaignProgressClasses(status) {
+        if (status === "processing") {
+            return "progress-bar progress-bar-striped progress-bar-animated bg-primary";
+        }
+        if (status === "completed") {
+            return "progress-bar bg-success";
+        }
+        if (status === "failed") {
+            return "progress-bar bg-danger";
+        }
+        if (status === "cancelled") {
+            return "progress-bar bg-dark";
+        }
+        return "progress-bar bg-warning";
+    }
+
+    function hideReminderCampaignError() {
+        const wrap = byId("secretaryReminderJobErrorWrap");
+        const messageBox = byId("secretaryReminderJobError");
+        if (wrap) {
+            wrap.classList.add("d-none");
+        }
+        if (messageBox) {
+            messageBox.textContent = "";
+        }
+    }
+
+    function showReminderCampaignError(message) {
+        const wrap = byId("secretaryReminderJobErrorWrap");
+        const messageBox = byId("secretaryReminderJobError");
+        if (wrap) {
+            wrap.classList.remove("d-none");
+        }
+        if (messageBox) {
+            messageBox.textContent = message;
+        }
+    }
+
+    function renderReminderCampaignIndicatorEmpty(message, details) {
+        const badge = byId("secretaryReminderJobBadge");
+        const progressBar = byId("secretaryReminderJobProgressBar");
+
+        if (badge) {
+            badge.className = "badge bg-secondary";
+            badge.textContent = "No Campaign Yet";
+        }
+        setText("secretaryReminderJobHeadline", message || "No queued reminder campaign yet.");
+        setText(
+            "secretaryReminderJobMeta",
+            details || "Single-recipient reminders send immediately and update the Last Reminder column."
+        );
+        setText("secretaryReminderJobTiming", "Waiting for reminder campaign activity.");
+        setText("secretaryReminderJobTotal", "0");
+        setText("secretaryReminderJobSent", "0");
+        setText("secretaryReminderJobSkipped", "0");
+        setText("secretaryReminderJobFailed", "0");
+
+        if (progressBar) {
+            progressBar.className = "progress-bar";
+            progressBar.style.width = "0%";
+            progressBar.setAttribute("aria-valuenow", "0");
+            progressBar.textContent = "0%";
+        }
+
+        hideReminderCampaignError();
+    }
+
+    function selectReminderCampaignJob(rows) {
+        const jobRows = Array.isArray(rows) ? rows : [];
+        let selectedJob = null;
+
+        if (currentReminderCampaignJobId) {
+            selectedJob = jobRows.find(function (row) {
+                return row && row.id === currentReminderCampaignJobId;
+            }) || null;
+            if (!selectedJob) {
+                currentReminderCampaignJobId = "";
+            }
+        }
+
+        if (!selectedJob) {
+            selectedJob = jobRows.find(function (row) {
+                const status = ((row && row.status) || "").toString().trim().toLowerCase();
+                return status === "queued" || status === "processing";
+            }) || null;
+        }
+
+        return selectedJob || jobRows[0] || null;
+    }
+
+    function renderReminderCampaignIndicator(job) {
+        if (!job) {
+            renderReminderCampaignIndicatorEmpty();
+            return;
+        }
+
+        const status = ((job.status || "queued").toString().trim().toLowerCase()) || "queued";
+        const totalRecipients = Math.max(0, Number(job.total_recipients) || 0);
+        const processedCount = Math.max(0, Number(job.processed_count) || 0);
+        const sentCount = Math.max(0, Number(job.sent_count) || 0);
+        const skippedCount = Math.max(0, Number(job.skipped_count) || 0);
+        const failedCount = Math.max(0, Number(job.failed_count) || 0);
+        const batchSize = Math.max(1, Number(job.batch_size) || 100);
+        const batchDelayMinutes = Math.max(1, Number(job.batch_delay_minutes) || 10);
+        const progressPercent = totalRecipients > 0
+            ? Math.max(0, Math.min(100, Math.round((processedCount / totalRecipients) * 100)))
+            : 0;
+        const badge = byId("secretaryReminderJobBadge");
+        const progressBar = byId("secretaryReminderJobProgressBar");
+        const campaignLabel = reminderCampaignTypeLabel(job.campaign_type);
+        let headline = campaignLabel + " reminder campaign is queued.";
+        let timingText = "Created " + formatDateTime(job.created_at) + ".";
+
+        if (status === "processing") {
+            headline = campaignLabel + " reminder campaign is now sending emails.";
+            timingText = "Started " + formatDateTime(job.started_at || job.created_at) +
+                ". Last updated " + formatDateTime(job.updated_at || job.started_at || job.created_at) + ".";
+        } else if (status === "completed") {
+            headline = campaignLabel + " reminder campaign finished sending.";
+            timingText = "Completed " + formatDateTime(job.completed_at || job.updated_at || job.created_at) + ".";
+        } else if (status === "failed") {
+            headline = campaignLabel + " reminder campaign stopped before completion.";
+            timingText = "Last updated " + formatDateTime(job.updated_at || job.completed_at || job.created_at) + ".";
+        } else if (status === "cancelled") {
+            headline = campaignLabel + " reminder campaign was cancelled.";
+            timingText = "Last updated " + formatDateTime(job.updated_at || job.created_at) + ".";
+        } else if (job.next_run_at) {
+            timingText = "Next batch " + formatDateTime(job.next_run_at) + ".";
+        }
+
+        if (badge) {
+            badge.className = reminderCampaignBadgeClass(status);
+            badge.textContent = reminderCampaignStatusLabel(status);
+        }
+        setText("secretaryReminderJobHeadline", headline);
+        setText(
+            "secretaryReminderJobMeta",
+            "Processed " + processedCount + " of " + totalRecipients +
+            " recipients. Batch size " + batchSize + " every " + batchDelayMinutes +
+            " minutes. Sent " + sentCount + ", skipped " + skippedCount + ", failed " + failedCount + "."
+        );
+        setText("secretaryReminderJobTiming", timingText);
+        setText("secretaryReminderJobTotal", String(totalRecipients));
+        setText("secretaryReminderJobSent", String(sentCount));
+        setText("secretaryReminderJobSkipped", String(skippedCount));
+        setText("secretaryReminderJobFailed", String(failedCount));
+
+        if (progressBar) {
+            progressBar.className = reminderCampaignProgressClasses(status);
+            progressBar.style.width = progressPercent + "%";
+            progressBar.setAttribute("aria-valuenow", String(progressPercent));
+            progressBar.textContent = progressPercent + "%";
+        }
+
+        if (job.last_error) {
+            showReminderCampaignError(job.last_error);
+        } else {
+            hideReminderCampaignError();
+        }
+    }
+
+    async function fetchReminderCampaignJobs(context) {
+        return context.client
+            .from(REMINDER_CAMPAIGN_JOBS_TABLE)
+            .select("id, campaign_type, total_recipients, processed_count, sent_count, skipped_count, failed_count, batch_size, batch_delay_minutes, status, next_run_at, started_at, completed_at, last_error, created_at, updated_at, created_by")
+            .eq("created_by", context.user.id)
+            .order("created_at", { ascending: false })
+            .limit(10);
+    }
+
+    async function refreshReminderCampaignIndicator() {
+        if (!authContext || !authContext.client || !authContext.user) {
+            return;
+        }
+
+        const result = await fetchReminderCampaignJobs(authContext);
+        if (result.error) {
+            renderReminderCampaignIndicatorEmpty(
+                "Reminder campaign activity could not be loaded.",
+                "The batch email queue is available, but the live status panel could not read the latest campaign."
+            );
+            showReminderCampaignError(result.error.message || "Unable to load reminder campaign progress.");
+            return;
+        }
+
+        const job = selectReminderCampaignJob(result.data || []);
+        if (job) {
+            currentReminderCampaignJobId = job.id || currentReminderCampaignJobId;
+        }
+        renderReminderCampaignIndicator(job);
+    }
+
+    function startReminderCampaignStatusPolling() {
+        if (reminderCampaignStatusPollHandle) {
+            window.clearInterval(reminderCampaignStatusPollHandle);
+        }
+        reminderCampaignStatusPollHandle = window.setInterval(function () {
+            refreshReminderCampaignIndicator().catch(function () {
+                // Keep polling quiet; the status card already explains the failure state.
+            });
+        }, REMINDER_CAMPAIGN_STATUS_POLL_MS);
     }
 
     async function getAccessToken() {
@@ -508,7 +764,7 @@
                 ". No Application Yet: " + noApplicationCount +
                 ". Ready now: " + readyNowCount +
                 ". In cooldown: " + cooldownCount +
-                ". Users without email will be skipped automatically.";
+                ". Users without email will be skipped automatically. Multi-user campaigns are queued and sent in background batches.";
         }
         if (sendBtn) {
             sendBtn.disabled = !readyNowCount;
@@ -552,6 +808,25 @@
                 })
             });
 
+            if (result && result.queued) {
+                const totalRecipients = Number(result.totalRecipients || rows.length || 0);
+                const batchSize = Number(result.batchSize || 100);
+                const batchDelayMinutes = Number(result.batchDelayMinutes || 10);
+                const estimatedBatches = Number(result.estimatedBatches || Math.ceil(totalRecipients / Math.max(1, batchSize)));
+                const queuedSummary = "Reminder campaign queued for " + totalRecipients + " recipients. The server will send up to " + batchSize + " emails every " + batchDelayMinutes + " minutes in about " + estimatedBatches + " batch(es).";
+                currentReminderCampaignJobId = (result.jobId || "").toString();
+                showStatus(queuedSummary, "alert-info");
+                setReminderCampaignStatus(queuedSummary + " You may close this window while it continues in the background.", "alert-info");
+                await refreshReminderCampaignIndicator();
+                const modal = getReminderCampaignModal();
+                if (modal) {
+                    window.setTimeout(function () {
+                        modal.hide();
+                    }, 900);
+                }
+                return;
+            }
+
             const sentCount = Number(result.sentCount || 0);
             const skippedCount = Number(result.skippedCount || 0);
             const failedCount = Number(result.failedCount || 0);
@@ -561,6 +836,7 @@
             setReminderCampaignStatus(summary, failedCount > 0 ? "alert-warning" : "alert-success");
             await refreshReminderLogState(authContext);
             applyFilters(false);
+            await refreshReminderCampaignIndicator();
 
             const modal = getReminderCampaignModal();
             if (modal && failedCount === 0) {
@@ -625,6 +901,7 @@
             showStatus(summary, failedCount > 0 ? "alert-warning" : "alert-success");
             await refreshReminderLogState(authContext);
             applyFilters(false);
+            await refreshReminderCampaignIndicator();
         } catch (error) {
             showStatus(error && error.message ? error.message : "Failed to send reminder email.", "alert-danger");
         } finally {
@@ -897,6 +1174,8 @@
         authContext = context;
         bindEvents();
         await loadData(context);
+        await refreshReminderCampaignIndicator();
+        startReminderCampaignStatusPolling();
     }
 
     window.addEventListener("DOMContentLoaded", init);

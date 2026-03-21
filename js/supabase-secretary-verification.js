@@ -40,6 +40,7 @@
     };
 
     const APPLICATION_STATUS_META = {
+        draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
         submitted: { label: "Submitted", chipClass: "ldss-chip-neutral" },
         pending_exam: { label: "Pending Exam", chipClass: "ldss-chip-accent" },
         exam_scheduled: { label: "Exam Scheduled", chipClass: "ldss-chip-accent" },
@@ -76,7 +77,7 @@
     const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
     const COMPLIANCE_EMAIL_API_PATH = "/api/notifications/compliance-email";
     const DEFAULT_COUNSELOR_OPTIONS = [];
-    const PHOTO_CHANGE_REMARK = "Please replace your applicant 1x1 photo with a clear and appropriate picture.";
+    const PHOTO_CHANGE_REMARK = "Please replace your applicant 1x1 photo with a clear picture on a white background while wearing formal attire or your school uniform.";
     const COMPLIANCE_NOTICE_TITLE = "Compliance Notice: Update Your Application";
     const REMARKS_COUNSELOR_META_START = "[[LDSS_COUNSELOR]]";
     const REMARKS_COUNSELOR_META_END = "[[/LDSS_COUNSELOR]]";
@@ -91,6 +92,7 @@
         family_background: "Family Background",
         spouse_information: "Married / Spouse Section"
     };
+    const CORRECTION_TARGET_KEYS = Object.keys(CORRECTION_TARGET_LABELS);
 
     let authContext = null;
     let currentApplication = null;
@@ -115,6 +117,7 @@
     let profilesSupportsPlaceOfBirth = true;
     let applicationAuxDataAvailable = true;
     let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+    let latestCorrectionNotice = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -458,11 +461,26 @@
         return APPLICATION_STATUS_META[status] || { label: status || "-", chipClass: "ldss-chip-neutral" };
     }
 
-    function normalizedApplicationStatus() {
-        return ((currentApplication && currentApplication.status) || "")
+    function normalizeStatus(status) {
+        return (status || "")
             .toString()
             .trim()
             .toLowerCase();
+    }
+
+    function normalizedApplicationStatus() {
+        return normalizeStatus(currentApplication && currentApplication.status);
+    }
+
+    function isDraftApplication(application) {
+        return (((application || {}).status) || "")
+            .toString()
+            .trim()
+            .toLowerCase() === "draft";
+    }
+
+    function isDraftReadOnlyMode() {
+        return isDraftApplication(currentApplication);
     }
 
     function buildVerificationUrl(applicationId) {
@@ -473,10 +491,143 @@
         return CORRECTION_TARGET_LABELS[targetKey] || CORRECTION_TARGET_LABELS.full_application;
     }
 
+    function normalizeCorrectionTargetKey(targetKey) {
+        const normalized = (targetKey || "").toString().trim().toLowerCase();
+        return CORRECTION_TARGET_LABELS[normalized] ? normalized : "";
+    }
+
+    function normalizeCorrectionTargetKeys(rawValue) {
+        let values = [];
+        if (Array.isArray(rawValue)) {
+            values = rawValue.slice();
+        } else if (typeof rawValue === "string") {
+            values = rawValue.split(",");
+        } else if (rawValue) {
+            values = [rawValue];
+        }
+
+        const seen = {};
+        const keys = values
+            .map(function (item) {
+                return normalizeCorrectionTargetKey(item);
+            })
+            .filter(function (item) {
+                if (!item || seen[item]) {
+                    return false;
+                }
+                seen[item] = true;
+                return true;
+            });
+        return keys;
+    }
+
+    function parseCorrectionTargetKeys(rawValue) {
+        const keys = normalizeCorrectionTargetKeys(rawValue);
+        if (keys.includes("full_application")) {
+            return ["full_application"];
+        }
+        return keys;
+    }
+
+    function checkedCorrectionTargetKeys() {
+        return normalizeCorrectionTargetKeys(
+            Array.from(document.querySelectorAll("input[name='verificationCorrectionTargets']:checked")).map(function (input) {
+                return input.value;
+            })
+        );
+    }
+
+    function selectedCorrectionTargets() {
+        const keys = checkedCorrectionTargetKeys();
+        return keys.length ? keys : ["full_application"];
+    }
+
     function selectedCorrectionTarget() {
-        const select = byId("verificationCorrectionTarget");
-        const raw = (select && select.value ? select.value : "full_application").toString().trim().toLowerCase();
-        return CORRECTION_TARGET_LABELS[raw] ? raw : "full_application";
+        return selectedCorrectionTargets()[0];
+    }
+
+    function correctionTargetsLabelText(targetKeys) {
+        const labels = selectedOrProvidedCorrectionTargetLabels(targetKeys);
+        if (labels.length === 1) {
+            return labels[0];
+        }
+        if (labels.length === 2) {
+            return labels[0] + " and " + labels[1];
+        }
+        return labels.slice(0, -1).join(", ") + ", and " + labels[labels.length - 1];
+    }
+
+    function selectedOrProvidedCorrectionTargetLabels(targetKeys) {
+        return (parseCorrectionTargetKeys(targetKeys).length ? parseCorrectionTargetKeys(targetKeys) : ["full_application"]).map(function (key) {
+            return correctionTargetLabel(key);
+        });
+    }
+
+    function setCorrectionTargetCheckboxState(targetKeys) {
+        const rawTargets = normalizeCorrectionTargetKeys(targetKeys);
+        const normalizedTargets = rawTargets.length ? rawTargets : ["full_application"];
+        const fullApplicationOnly = normalizedTargets.includes("full_application");
+
+        CORRECTION_TARGET_KEYS.forEach(function (targetKey) {
+            const input = document.querySelector("input[name='verificationCorrectionTargets'][value='" + targetKey + "']");
+            if (!input) {
+                return;
+            }
+            input.checked = fullApplicationOnly
+                ? targetKey === "full_application"
+                : normalizedTargets.includes(targetKey);
+            if (input.parentElement) {
+                input.parentElement.classList.toggle("is-selected", !!input.checked);
+            }
+        });
+
+        updateReturnCorrectionSelectionSummary();
+    }
+
+    function updateReturnCorrectionSelectionSummary() {
+        const summary = byId("verificationCorrectionSelectionSummary");
+        if (!summary) {
+            return;
+        }
+
+        const targets = selectedCorrectionTargets();
+        const primaryTarget = targets[0] || "full_application";
+        const targetText = correctionTargetsLabelText(targets);
+
+        if (targets.length === 1 && primaryTarget === "full_application") {
+            summary.textContent = "Applicant will reopen the full application form.";
+            return;
+        }
+
+        summary.textContent = "Selected sections: " + targetText + ". Applicant will open " + correctionTargetLabel(primaryTarget) + " first.";
+    }
+
+    function handleCorrectionTargetCheckboxChange(event) {
+        const input = event && event.target ? event.target : null;
+        const changedTarget = normalizeCorrectionTargetKey(input && input.value ? input.value : "");
+        let targets = checkedCorrectionTargetKeys();
+
+        if (!changedTarget) {
+            setCorrectionTargetCheckboxState(targets);
+            return;
+        }
+
+        if (changedTarget === "full_application") {
+            if (input && input.checked) {
+                targets = ["full_application"];
+            } else if (!targets.length) {
+                targets = ["full_application"];
+            }
+        } else {
+            targets = targets.filter(function (targetKey) {
+                return targetKey !== "full_application";
+            });
+            if (!targets.length) {
+                targets = ["full_application"];
+            }
+        }
+
+        setCorrectionTargetCheckboxState(targets);
     }
 
     function setReturnCorrectionRemarksPreview(message) {
@@ -490,15 +641,8 @@
     function openReturnCorrectionModal() {
         const remarksEl = byId("verificationRemarks");
         const remarks = remarksEl ? remarksEl.value.trim() : "";
-        if (!remarks || remarks.length < 10) {
-            showStatus("Please provide clear remarks (at least 10 characters) before returning for correction.", "alert-warning");
-            if (remarksEl) {
-                remarksEl.focus();
-            }
-            return;
-        }
-
         setReturnCorrectionRemarksPreview(remarks);
+        updateReturnCorrectionSelectionSummary();
         const modal = getReturnCorrectionModal();
         if (modal) {
             modal.show();
@@ -527,6 +671,75 @@
         box.textContent = message;
     }
 
+    function isCorrectionNotification(row) {
+        const title = (row && row.title ? row.title : "").toString().trim().toLowerCase();
+        const message = (row && row.message ? row.message : "").toString().trim().toLowerCase();
+        return title.indexOf("returned for correction") !== -1 ||
+            title.indexOf("compliance notice") !== -1 ||
+            title.indexOf("photo needs change") !== -1 ||
+            message.indexOf("returned for correction") !== -1 ||
+            message.indexOf("need to comply") !== -1 ||
+            message.indexOf("replace your applicant 1x1 photo") !== -1;
+    }
+
+    function correctionNoticeLabel(notice, application) {
+        const title = (notice && notice.title ? notice.title : "").toString().trim().toLowerCase();
+        const status = normalizeStatus(application && application.status);
+
+        if (title.indexOf("photo needs change") !== -1) {
+            return "Photo Change";
+        }
+        if (title.indexOf("compliance notice") !== -1) {
+            return "Compliance Notice";
+        }
+        if (title.indexOf("returned for correction") !== -1 || status === "returned_for_correction") {
+            return "Returned for Correction";
+        }
+        return "Correction Notice";
+    }
+
+    function hasApplicationUpdatedSinceNotice(application, notice) {
+        const status = normalizeStatus(application && application.status);
+        const noticeAt = new Date(notice && notice.created_at ? notice.created_at : 0).getTime();
+        const applicationUpdatedAt = new Date(
+            (application && (application.updated_at || application.created_at)) || 0
+        ).getTime();
+
+        return !!(
+            notice &&
+            noticeAt &&
+            applicationUpdatedAt &&
+            applicationUpdatedAt > noticeAt &&
+            status !== "returned_for_correction"
+        );
+    }
+
+    function renderCorrectionHistoryNotice() {
+        const box = byId("verificationCorrectionHistoryNotice");
+        if (!box) {
+            return;
+        }
+
+        if (!latestCorrectionNotice || !currentApplication) {
+            box.className = "alert alert-light d-none";
+            box.textContent = "";
+            return;
+        }
+
+        const label = correctionNoticeLabel(latestCorrectionNotice, currentApplication);
+        const sentAt = formatDateTime(latestCorrectionNotice.created_at);
+        const hasUpdated = hasApplicationUpdatedSinceNotice(currentApplication, latestCorrectionNotice);
+
+        if (hasUpdated) {
+            box.className = "alert alert-info";
+            box.textContent = "Resubmitted after " + label + " sent on " + sentAt + ". This record is back in the verification queue for secretary re-check.";
+            return;
+        }
+
+        box.className = "alert alert-warning";
+        box.textContent = label + " sent on " + sentAt + ". Waiting for applicant update or completion.";
+    }
+
     function updateVerificationNavigationButtons() {
         const prevBtn = byId("verificationPrevBtn");
         const nextBtn = byId("verificationNextBtn");
@@ -541,8 +754,97 @@
             nextBtn.disabled = isProcessing || !hasNext;
         }
         if (forExamBtn) {
-            forExamBtn.disabled = isProcessing || !currentApplication;
+            forExamBtn.disabled = isProcessing || !currentApplication || isDraftReadOnlyMode();
         }
+        syncDraftReadOnlyState();
+    }
+
+    function syncDraftReadOnlyState() {
+        const draftMode = isDraftReadOnlyMode();
+        const notice = byId("verificationDraftReadOnlyNotice");
+        const remarks = byId("verificationRemarks");
+        const interviewDateTime = byId("verificationInterviewDateTime");
+        const interviewVenue = byId("verificationInterviewVenue");
+        const counselorSelect = byId("verificationCounselorEndorsement");
+        const recommendationSelect = byId("verificationRecommendationDecision");
+        const verifiedPhotoInput = byId("verificationVerifiedPhotoFile");
+        const cameraStartBtn = byId("verificationStartCameraBtn");
+        const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
+        const cameraStopBtn = byId("verificationStopCameraBtn");
+        const saveBtn = byId("verificationSaveBtn");
+        const complianceBtn = byId("verificationComplianceBtn");
+        const returnBtn = byId("verificationReturnBtn");
+        const returnConfirmBtn = byId("verificationReturnConfirmBtn");
+        const photoActionBtn = byId("verificationPhotoActionBtn");
+        const approvePhotoBtn = byId("verificationApprovePhotoBtn");
+        const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
+        const editApplicantSaveBtn = byId("verificationApplicantEditSaveBtn");
+
+        if (notice) {
+            if (draftMode) {
+                notice.className = "alert alert-info";
+                notice.textContent = "Draft preview only. Secretary checking, correction routing, photo actions, and workflow updates stay disabled until the applicant submits the application.";
+            } else {
+                notice.className = "alert alert-info d-none";
+                notice.textContent = "";
+            }
+        }
+
+        if (remarks) {
+            remarks.readOnly = draftMode;
+        }
+        if (interviewDateTime) {
+            interviewDateTime.disabled = draftMode;
+        }
+        if (interviewVenue) {
+            interviewVenue.disabled = draftMode;
+        }
+        if (counselorSelect) {
+            counselorSelect.disabled = draftMode;
+        }
+        if (recommendationSelect) {
+            recommendationSelect.disabled = draftMode;
+        }
+        if (verifiedPhotoInput) {
+            verifiedPhotoInput.disabled = draftMode;
+        }
+        if (cameraStartBtn) {
+            cameraStartBtn.disabled = draftMode;
+        }
+        if (cameraCaptureBtn) {
+            cameraCaptureBtn.disabled = draftMode;
+        }
+        if (cameraStopBtn) {
+            cameraStopBtn.disabled = draftMode;
+        }
+        if (saveBtn) {
+            saveBtn.disabled = draftMode || isProcessing || !currentApplication;
+        }
+        if (complianceBtn) {
+            complianceBtn.disabled = draftMode || isProcessing || !currentApplication;
+        }
+        if (returnBtn) {
+            returnBtn.disabled = draftMode || isProcessing || !currentApplication;
+        }
+        if (returnConfirmBtn) {
+            returnConfirmBtn.disabled = draftMode || isProcessing;
+        }
+        if (photoActionBtn) {
+            photoActionBtn.disabled = draftMode || isProcessing;
+        }
+        if (approvePhotoBtn) {
+            approvePhotoBtn.disabled = draftMode || isProcessing;
+        }
+        if (photoChangeBtn) {
+            photoChangeBtn.disabled = draftMode || isProcessing;
+        }
+        if (editApplicantSaveBtn) {
+            editApplicantSaveBtn.disabled = draftMode || isProcessing;
+        }
+
+        document.querySelectorAll(".ldss-verification-status-select, [data-doc-note-open='1']").forEach(function (element) {
+            element.disabled = draftMode;
+        });
     }
 
     function readStoredVerificationQueue() {
@@ -1314,6 +1616,33 @@
         return fallbackResult.data[0];
     }
 
+    async function fetchLatestCorrectionNotice(applicationId) {
+        if (!applicationId) {
+            return null;
+        }
+
+        const result = await authContext.client
+            .from("notifications")
+            .select("notification_type, title, message, created_at")
+            .eq("related_application_id", applicationId)
+            .in("notification_type", ["application", "reminder"])
+            .order("created_at", { ascending: false })
+            .limit(25);
+
+        if (result.error) {
+            return null;
+        }
+
+        const notices = result.data || [];
+        for (let index = 0; index < notices.length; index += 1) {
+            if (isCorrectionNotification(notices[index])) {
+                return notices[index];
+            }
+        }
+
+        return null;
+    }
+
     async function fetchProfile(userId) {
         let result = await authContext.client
             .from("profiles")
@@ -1409,9 +1738,10 @@
         const appNo = currentApplication ? currentApplication.application_no : "-";
         const applicantName = buildApplicantName(currentProfile);
         const meta = byId("secretaryVerificationHeaderMeta");
+        const isDraft = isDraftReadOnlyMode();
 
         if (meta) {
-            meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName;
+            meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName + (isDraft ? " | Draft Preview" : "");
         }
 
         renderApplicantDetailSheet();
@@ -1483,17 +1813,20 @@
     function syncApplicantEditAccess() {
         const editBtn = byId("verificationEditApplicantBtn");
         const meta = byId("verificationEditApplicantMeta");
-        const enabled = workflowControls.allow_secretary_applicant_edits === true;
+        const draftMode = isDraftReadOnlyMode();
+        const enabled = workflowControls.allow_secretary_applicant_edits === true && !draftMode;
 
         if (editBtn) {
             editBtn.classList.toggle("d-none", !enabled);
             editBtn.disabled = !enabled;
         }
         if (meta) {
-            meta.classList.toggle("d-none", !enabled);
-            meta.textContent = enabled
-                ? "Applicant detail editing is enabled by System Administrator."
-                : "Applicant detail editing is off in System Administrator settings.";
+            meta.classList.toggle("d-none", !enabled && !draftMode);
+            meta.textContent = draftMode
+                ? "Draft preview is read-only. Applicant detail editing is unavailable until the applicant submits the form."
+                : enabled
+                    ? "Applicant detail editing is enabled by System Administrator."
+                    : "Applicant detail editing is off in System Administrator settings.";
         }
     }
 
@@ -1573,6 +1906,10 @@
             year_level: nullIfBlank(byId("verificationEditYearLevel") ? byId("verificationEditYearLevel").value : ""),
             student_number: upperTextOrNull(byId("verificationEditStudentNumber") ? byId("verificationEditStudentNumber").value : "")
         };
+
+        if (!profilesSupportsPlaceOfBirth) {
+            delete profilePatch.place_of_birth;
+        }
 
         const applicationPatch = {
             sector_classification: nullIfBlank(byId("verificationEditSectorClassification") ? byId("verificationEditSectorClassification").value : ""),
@@ -1699,10 +2036,6 @@
 
         renderCounselorOptions();
 
-        const recommendation = byId("verificationRecommendationDecision");
-        if (recommendation && !recommendation.value) {
-            recommendation.value = "approved";
-        }
     }
 
     function documentRowMarkup(definition) {
@@ -1856,6 +2189,9 @@
         if (!currentApplication) {
             return false;
         }
+        if (isDraftReadOnlyMode()) {
+            return false;
+        }
         return currentFormSnapshot !== buildFormSnapshot();
     }
 
@@ -1864,7 +2200,6 @@
         const complianceBtn = byId("verificationComplianceBtn");
         const returnBtn = byId("verificationReturnBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
-        const recommendBtn = byId("verificationRecommendBtn");
         const forExamBtn = byId("verificationForExamBtn");
         const photoActionBtn = byId("verificationPhotoActionBtn");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
@@ -1888,7 +2223,6 @@
         setState(complianceBtn, "Send Compliance Notice");
         setState(returnBtn, "Return for Correction");
         setState(returnConfirmBtn, "Return and Redirect");
-        setState(recommendBtn, "Recommend to Admin");
         setState(forExamBtn, "Set for Examination");
         if (photoActionBtn) {
             photoActionBtn.disabled = isLoading;
@@ -1901,9 +2235,10 @@
             }
         }
         if (approvePhotoBtn) {
-            approvePhotoBtn.disabled = isLoading;
+            approvePhotoBtn.disabled = isLoading || isDraftReadOnlyMode();
         }
         setState(photoChangeBtn, "Change Photo");
+        syncDraftReadOnlyState();
         updateVerificationNavigationButtons();
     }
 
@@ -2108,14 +2443,19 @@
         return "applicant-application-form.html?application_id=" + encodeURIComponent(currentApplication.id);
     }
 
-    function buildApplicantCorrectionUrl(targetKey, remarks, correctionType) {
+    function buildApplicantCorrectionUrl(targetKey, remarks, correctionType, targetKeys) {
         if (!currentApplication || !currentApplication.id) {
             return "applicant-notifications.html";
         }
 
+        const effectiveTargets = parseCorrectionTargetKeys(targetKeys);
+        const primaryTarget = normalizeCorrectionTargetKey(targetKey) || effectiveTargets[0] || "full_application";
         const params = new URLSearchParams();
         params.set("application_id", currentApplication.id);
-        params.set("correction", targetKey || "full_application");
+        params.set("correction", primaryTarget);
+        if (effectiveTargets.length) {
+            params.set("correction_targets", effectiveTargets.join(","));
+        }
         if (correctionType) {
             params.set("correction_type", correctionType);
         }
@@ -2145,7 +2485,7 @@
         }
     }
 
-    async function sendComplianceEmail(remarks) {
+    async function sendComplianceEmail(remarks, correctionTarget, correctionTargets) {
         return requestJson(COMPLIANCE_EMAIL_API_PATH, {
             method: "POST",
             headers: {
@@ -2153,7 +2493,9 @@
             },
             body: JSON.stringify({
                 applicationId: currentApplication ? currentApplication.id : "",
-                remarks: remarks || ""
+                remarks: remarks || "",
+                correctionTarget: correctionTarget || "full_application",
+                correctionTargets: Array.isArray(correctionTargets) ? correctionTargets : []
             })
         });
     }
@@ -2292,33 +2634,34 @@
 
     async function handleReturnForCorrection() {
         const remarks = byId("verificationRemarks") ? byId("verificationRemarks").value.trim() : "";
-        if (!remarks || remarks.length < 10) {
-            showStatus("Please provide clear remarks (at least 10 characters) before returning for correction.", "alert-warning");
-            return;
-        }
+        const correctionTargets = selectedCorrectionTargets();
         const correctionTarget = selectedCorrectionTarget();
+        const targetSummary = correctionTargetsLabelText(correctionTargets);
+        const applicantMessage = "Your application was returned for correction. Please update: " +
+            targetSummary +
+            (remarks ? ". Remarks: " + remarks : ".");
 
         await persistVerification("returned_for_correction", false, false);
         await notifyApplicant(
             "application",
             "Application Returned for Correction",
-            "Your application was returned for correction. Please update: " +
-                correctionTargetLabel(correctionTarget) +
-                ". Remarks: " +
-                remarks,
-            buildApplicantCorrectionUrl(correctionTarget, remarks, "return")
+            applicantMessage,
+            buildApplicantCorrectionUrl(correctionTarget, remarks, "return", correctionTargets)
         );
         const modal = getReturnCorrectionModal();
         if (modal) {
             modal.hide();
         }
 
-        return "Application returned for correction. Applicant will open " + correctionTargetLabel(correctionTarget) + " first.";
+        return "Application returned for correction. Applicant will open " + correctionTargetLabel(correctionTarget) + " first and review " + targetSummary + ".";
     }
 
     async function handleSendComplianceNotice() {
         const remarksEl = byId("verificationRemarks");
         const remarks = dedupeFixedRemark(remarksEl ? remarksEl.value.trim() : "", PHOTO_CHANGE_REMARK);
+        const correctionTargets = selectedCorrectionTargets();
+        const correctionTarget = selectedCorrectionTarget();
+        const targetSummary = correctionTargetsLabelText(correctionTargets);
         if (!remarks || remarks.length < 10) {
             showStatus("Please provide clear compliance remarks (at least 10 characters) before sending a notice.", "alert-warning");
             return;
@@ -2344,12 +2687,14 @@
             COMPLIANCE_NOTICE_TITLE,
             "Your application remains submitted, but you need to comply with the following requirement(s): " +
                 remarks +
-                " Please open your application and update the required information.",
-            buildApplicantCorrectionUrl("full_application", remarks, "compliance")
+                " Please open your application and update: " +
+                targetSummary +
+                ".",
+            buildApplicantCorrectionUrl(correctionTarget, remarks, "compliance", correctionTargets)
         );
 
         try {
-            await sendComplianceEmail(remarks);
+            await sendComplianceEmail(remarks, correctionTarget, correctionTargets);
             return "Compliance notice sent. The application status stayed as " + statusMeta(currentStatus).label + ".";
         } catch (emailError) {
             return {
@@ -2373,7 +2718,7 @@
         await notifyApplicant(
             "application",
             "Applicant Photo Needs Change",
-            "Please replace your applicant 1x1 photo with a clear and appropriate picture, then update your application. Remarks: " + combinedRemarks,
+            "Please replace your applicant 1x1 photo with a clear picture on a white background while wearing formal attire or your school uniform, then update your application. Remarks: " + combinedRemarks,
             buildApplicantCorrectionUrl("applicant_photo", combinedRemarks, "return")
         );
 
@@ -2399,44 +2744,6 @@
         );
 
         return "Photo approval notice sent to the applicant.";
-    }
-
-    async function handleRecommendToAdmin() {
-        const formValues = readFormValues();
-        if (formValues.error) {
-            showStatus(formValues.error, "alert-danger");
-            return;
-        }
-
-        const docStates = documentVerificationState();
-        const checks = missingOrUnverifiedRequiredDocs(docStates);
-        if (checks.missing.length > 0) {
-            showStatus("Cannot recommend yet. Missing required document(s): " + checks.missing.map(function (row) { return row.label; }).join(", ") + ".", "alert-warning");
-            return;
-        }
-        if (checks.notVerified.length > 0) {
-            showStatus("Cannot recommend yet. Verify all required documents first.", "alert-warning");
-            return;
-        }
-
-        if (!formValues.remarks || formValues.remarks.length < 10) {
-            showStatus("Please include recommendation remarks before sending to admin.", "alert-warning");
-            return;
-        }
-
-        await persistVerification("for_approval", true, true);
-
-        const recommendationText = formValues.recommendationDecision === "approved"
-            ? "approved"
-            : (formValues.recommendationDecision === "waitlisted" ? "waitlisted" : "not recommended");
-
-        await notifyApplicant(
-            "approval",
-            "Application Endorsed to Admin",
-            "Your application has been endorsed to admin with secretary recommendation: " + recommendationText + "."
-        );
-
-        return "Application endorsed to admin approval queue.";
     }
 
     async function runAction(buttonId, loadingText, action) {
@@ -2471,6 +2778,13 @@
         if (!authContext || !authContext.client) {
             applicationNavigationIds = [];
             currentNavigationIndex = -1;
+            updateVerificationNavigationButtons();
+            return;
+        }
+
+        if (currentApplicationId && isDraftReadOnlyMode()) {
+            applicationNavigationIds = [currentApplicationId];
+            currentNavigationIndex = 0;
             updateVerificationNavigationButtons();
             return;
         }
@@ -2532,7 +2846,7 @@
         const complianceBtn = byId("verificationComplianceBtn");
         const returnBtn = byId("verificationReturnBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
-        const recommendBtn = byId("verificationRecommendBtn");
+        const correctionTargetInputs = document.querySelectorAll("input[name='verificationCorrectionTargets']");
         const forExamBtn = byId("verificationForExamBtn");
         const prevBtn = byId("verificationPrevBtn");
         const nextBtn = byId("verificationNextBtn");
@@ -2585,11 +2899,10 @@
             });
         }
 
-        if (recommendBtn) {
-            recommendBtn.addEventListener("click", function () {
-                runAction("verificationRecommendBtn", "Submitting...", handleRecommendToAdmin);
-            });
-        }
+        correctionTargetInputs.forEach(function (input) {
+            input.addEventListener("change", handleCorrectionTargetCheckboxChange);
+        });
+        setCorrectionTargetCheckboxState(selectedCorrectionTargets());
 
         if (prevBtn) {
             prevBtn.addEventListener("click", function () {
@@ -2731,12 +3044,14 @@
         counselorOptions = loadCounselorOptions();
         currentAuxMeta = {};
         currentFormSnapshot = "";
+        latestCorrectionNotice = null;
 
         currentApplication = await fetchApplication(targetApplicationId || queryApplicationId());
         if (!currentApplication) {
             showStatus("No application records are currently available for secretary verification.", "alert-warning");
             applicationNavigationIds = [];
             currentNavigationIndex = -1;
+            renderCorrectionHistoryNotice();
             updateVerificationNavigationButtons();
             return;
         }
@@ -2748,12 +3063,14 @@
         const dataResults = await Promise.all([
             fetchProfile(currentApplication.applicant_id),
             fetchInterview(currentApplication.id),
-            fetchDocuments(currentApplication.id)
+            fetchDocuments(currentApplication.id),
+            fetchLatestCorrectionNotice(currentApplication.id)
         ]);
 
         currentProfile = dataResults[0];
         currentInterview = dataResults[1];
         latestDocumentByType = latestDocumentsByType(dataResults[2]);
+        latestCorrectionNotice = dataResults[3] || null;
 
         signedDocumentUrlByType = {};
         for (let i = 0; i < REQUIRED_DOCUMENTS.length; i += 1) {
@@ -2777,9 +3094,11 @@
         ]);
 
         renderHeaderAndSummary();
+        renderCorrectionHistoryNotice();
         renderInterviewForm();
         syncApplicantEditAccess();
         await loadApplicationNavigationQueue(currentApplication.id);
+        syncDraftReadOnlyState();
 
         clearLocalPreviewObjectUrl();
 

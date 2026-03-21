@@ -88,7 +88,6 @@
             fieldId: "spouseName"
         }
     };
-
     const DOC_FIELDS = [
         {
             inputId: "reqApplicantPhoto",
@@ -101,6 +100,9 @@
             syncToProfilePhoto: true
         }
     ];
+    const FILE_HELPER_MESSAGES = {
+        reqApplicantPhoto: "Use a white background and wear formal attire or your school uniform."
+    };
 
     const DOC_LABELS = {
         applicant_photo: "Applicant 1x1 Photo"
@@ -629,11 +631,45 @@
         return text.includes(normalizedColumn) && (text.includes("does not exist") || text.includes("schema cache"));
     }
 
+    function parseCorrectionTargetKeys(rawValue, fallbackTarget) {
+        let values = [];
+        if (Array.isArray(rawValue)) {
+            values = rawValue.slice();
+        } else if (typeof rawValue === "string") {
+            values = rawValue.split(",");
+        } else if (rawValue) {
+            values = [rawValue];
+        }
+        if (fallbackTarget) {
+            values.push(fallbackTarget);
+        }
+
+        const seen = {};
+        const keys = values
+            .map(function (item) {
+                return (item || "").toString().trim().toLowerCase();
+            })
+            .filter(function (item) {
+                if (!item || !CORRECTION_TARGET_META[item] || seen[item]) {
+                    return false;
+                }
+                seen[item] = true;
+                return true;
+            });
+
+        if (keys.includes("full_application")) {
+            return ["full_application"];
+        }
+        return keys;
+    }
+
     function parseQuery() {
         const params = new URLSearchParams(window.location.search);
+        const correctionTargets = parseCorrectionTargetKeys(params.get("correction_targets"), params.get("correction"));
         return {
             applicationId: params.get("application_id"),
-            correctionTarget: params.get("correction"),
+            correctionTarget: correctionTargets[0] || params.get("correction"),
+            correctionTargets: correctionTargets,
             correctionType: params.get("correction_type"),
             correctionNote: params.get("correction_note")
         };
@@ -844,24 +880,33 @@
         });
     }
 
-    function focusCorrectionTarget(targetKey) {
-        const meta = correctionTargetMeta(targetKey);
-        const section = byId(meta.sectionId);
-        const field = byId(meta.fieldId);
-        const scrollTarget = section || field || byId("applicationFormStatus");
+    function focusCorrectionTargets(targetKeys) {
+        const normalizedTargets = parseCorrectionTargetKeys(targetKeys);
+        const effectiveTargets = normalizedTargets.length ? normalizedTargets : ["full_application"];
+        const primaryMeta = correctionTargetMeta(effectiveTargets[0]);
+        const scrollTarget = byId(primaryMeta.sectionId) || byId(primaryMeta.fieldId) || byId("applicationFormStatus");
 
         clearCorrectionHighlights();
-        if (section) {
-            section.classList.add("ldss-correction-highlight");
-        }
-        if (field) {
-            field.classList.add("ldss-correction-field-focus");
-        }
+
+        effectiveTargets.forEach(function (targetKey) {
+            const meta = correctionTargetMeta(targetKey);
+            const section = byId(meta.sectionId);
+            const field = byId(meta.fieldId);
+
+            if (section) {
+                section.classList.add("ldss-correction-highlight");
+            }
+            if (field) {
+                field.classList.add("ldss-correction-field-focus");
+            }
+        });
+
         if (scrollTarget && typeof scrollTarget.scrollIntoView === "function") {
             scrollTarget.scrollIntoView({ behavior: "smooth", block: "start" });
         }
 
         window.setTimeout(function () {
+            const field = byId(primaryMeta.fieldId);
             if (field && !field.disabled && typeof field.focus === "function") {
                 try {
                     field.focus({ preventScroll: true });
@@ -874,21 +919,68 @@
         window.setTimeout(clearCorrectionHighlights, 6500);
     }
 
+    function focusCorrectionTarget(targetKey) {
+        focusCorrectionTargets([targetKey]);
+    }
+
+    function correctionTargetLabels(targetKeys) {
+        const keys = parseCorrectionTargetKeys(targetKeys);
+        const effectiveTargets = keys.length ? keys : ["full_application"];
+        return effectiveTargets.map(function (targetKey) {
+            return correctionTargetMeta(targetKey).label;
+        });
+    }
+
+    function renderCorrectionTargetList(targetLabels) {
+        const wrap = byId("applicationCorrectionModalTargetsWrap");
+        const list = byId("applicationCorrectionModalTargets");
+        const labels = Array.isArray(targetLabels) ? targetLabels.filter(Boolean) : [];
+
+        if (!wrap || !list) {
+            return;
+        }
+
+        list.textContent = "";
+        if (labels.length < 2) {
+            wrap.classList.add("d-none");
+            return;
+        }
+
+        labels.forEach(function (label) {
+            const item = document.createElement("div");
+            item.className = "ldss-correction-target-item";
+            item.textContent = label;
+            list.appendChild(item);
+        });
+
+        wrap.classList.remove("d-none");
+    }
+
     function buildCorrectionPromptText(query) {
-        const meta = correctionTargetMeta(query && query.correctionTarget);
+        const targetKeys = parseCorrectionTargetKeys(query && query.correctionTargets, query && query.correctionTarget);
+        const primaryMeta = correctionTargetMeta(targetKeys[0]);
+        const targetLabels = correctionTargetLabels(targetKeys);
         const correctionType = ((query && query.correctionType) || "").toString().trim().toLowerCase();
         const note = nullIfBlank(query && query.correctionNote ? query.correctionNote : "");
         const isReturned = correctionType === "return";
+        const hasMultipleTargets = targetLabels.length > 1;
 
         return {
             title: isReturned ? "Returned for Correction" : "Update Required",
             lead: isReturned
-                ? "The scholarship office returned your application and pointed you to the section below."
-                : "The scholarship office asked you to update this part of your submitted application.",
-            targetLabel: meta.label,
+                ? (hasMultipleTargets
+                    ? "The scholarship office returned your application. Review each section listed below."
+                    : "The scholarship office returned your application and pointed you to the section below.")
+                : (hasMultipleTargets
+                    ? "The scholarship office asked you to update the sections listed below in your submitted application."
+                    : "The scholarship office asked you to update this part of your submitted application."),
+            targetLabel: hasMultipleTargets ? targetLabels.length + " sections need updates" : primaryMeta.label,
+            targetLabels: targetLabels,
             note: note
                 ? "Secretary remarks: " + note
-                : "Review the highlighted section and update the required information."
+                : (hasMultipleTargets
+                    ? "Review each highlighted section and update the required information."
+                    : "Review the highlighted section and update the required information.")
         };
     }
 
@@ -913,7 +1005,8 @@
         }
 
         const prompt = buildCorrectionPromptText(query);
-        const targetKey = (query.correctionTarget || "full_application").toString().trim().toLowerCase();
+        const targetKeys = parseCorrectionTargetKeys(query.correctionTargets, query.correctionTarget);
+        const targetKey = targetKeys[0] || "full_application";
         const modal = getCorrectionPromptModal();
         const openBtn = byId("applicationCorrectionModalOpenBtn");
         const titleEl = byId("applicationCorrectionModalLabel");
@@ -935,11 +1028,13 @@
         if (noteEl) {
             noteEl.textContent = prompt.note;
         }
+        renderCorrectionTargetList(prompt.targetLabels);
         if (openBtn) {
             openBtn.setAttribute("data-correction-target", targetKey);
+            openBtn.setAttribute("data-correction-targets", targetKeys.join(","));
         }
 
-        focusCorrectionTarget(targetKey);
+        focusCorrectionTargets(targetKeys);
 
         if (modal) {
             modal.show();
@@ -1677,7 +1772,7 @@
         if (!feedback) {
             return;
         }
-        feedback.textContent = message || "";
+        feedback.textContent = message || FILE_HELPER_MESSAGES[inputId] || "";
         feedback.className = "form-text " + (isError ? "text-danger" : "text-muted");
     }
 
@@ -2298,15 +2393,43 @@
         return date.toISOString().slice(0, 10);
     }
 
+    function normalizeTimeValue(value) {
+        const raw = (value || "").toString().trim();
+        const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+        return match ? (match[1] + ":" + match[2]) : "";
+    }
+
+    function formatTimeValue(value) {
+        const normalized = normalizeTimeValue(value);
+        if (!normalized) {
+            return "";
+        }
+        const parts = normalized.split(":");
+        const hours = Number(parts[0]);
+        const minutes = parts[1];
+        const suffix = hours >= 12 ? "PM" : "AM";
+        const hour12 = hours % 12 || 12;
+        return hour12 + ":" + minutes + " " + suffix;
+    }
+
+    function formatScheduleLabel(dateValue, timeValue) {
+        if (!dateValue) {
+            return "-";
+        }
+        const dateLabel = formatDate(dateValue);
+        const timeLabel = formatTimeValue(timeValue);
+        return timeLabel ? (dateLabel + " at " + timeLabel) : dateLabel;
+    }
+
     function describeIntakeClosedReason(policy) {
         if (!policy) {
             return "New application filing is currently closed by System Administrator.";
         }
         if (policy.reason === "before_open_date" && policy.openDate) {
-            return "New application filing opens on " + formatDate(policy.openDate) + ".";
+            return "New application filing opens on " + formatScheduleLabel(policy.openDate, policy.openTime) + ".";
         }
         if (policy.reason === "after_close_date" && policy.closeDate) {
-            return "New application filing closed on " + formatDate(policy.closeDate) + ".";
+            return "New application filing closed on " + formatScheduleLabel(policy.closeDate, policy.closeTime) + ".";
         }
         if (policy.reason === "closed_by_admin") {
             return "New application filing is currently turned OFF by System Administrator.";
@@ -2319,7 +2442,9 @@
             isOpen: true,
             reason: "open",
             openDate: "",
-            closeDate: ""
+            closeDate: "",
+            openTime: "",
+            closeTime: ""
         };
 
         const result = await context.client.rpc("application_intake_is_open");
@@ -2331,7 +2456,9 @@
             isOpen: result.data.is_open !== false,
             reason: (result.data.reason || "open").toString(),
             openDate: toIsoDateOnly(result.data.open_date || ""),
-            closeDate: toIsoDateOnly(result.data.close_date || "")
+            closeDate: toIsoDateOnly(result.data.close_date || ""),
+            openTime: normalizeTimeValue(result.data.open_time || ""),
+            closeTime: normalizeTimeValue(result.data.close_time || "")
         };
     }
 
@@ -2554,6 +2681,8 @@
         }
 
         const submittedAt = currentApplication.submitted_at || new Date().toISOString();
+
+        await assertApplicationIntakeOpen(context);
 
         await ensureSingleAttemptPerSchoolYear(
             context,
@@ -3154,12 +3283,15 @@
         const correctionOpenBtn = byId("applicationCorrectionModalOpenBtn");
         if (correctionOpenBtn) {
             correctionOpenBtn.addEventListener("click", function () {
-                const targetKey = correctionOpenBtn.getAttribute("data-correction-target") || "full_application";
+                const targetKeys = parseCorrectionTargetKeys(
+                    correctionOpenBtn.getAttribute("data-correction-targets"),
+                    correctionOpenBtn.getAttribute("data-correction-target")
+                );
                 const modal = getCorrectionPromptModal();
                 if (modal) {
                     modal.hide();
                 }
-                focusCorrectionTarget(targetKey);
+                focusCorrectionTargets(targetKeys);
             });
         }
     }
@@ -3224,6 +3356,7 @@
                     applyApplicationToForm(existing);
                     await hydrateAuxMeta(context, context.user.id, existing.id);
                     applyActionLabels();
+                    const intakePolicy = await loadIntakePolicy(context);
 
                     if (!isEditable(existing)) {
                         setFormEditableState(false);
@@ -3241,6 +3374,8 @@
                             "This submitted application is still editable until the scholarship office locks it. Save your corrections, then update the same record.",
                             "alert-info"
                         );
+                    } else if (!intakePolicy.isOpen) {
+                        setStatus(describeIntakeClosedReason(intakePolicy) + " Draft changes may still be saved, but submission is blocked after the cutoff.", "alert-warning");
                     }
 
                     maybeShowCorrectionPrompt(query, existing);
@@ -3276,12 +3411,16 @@
                 } else {
                     const latestDraft = await findLatestEditableDraft(context);
                     if (latestDraft) {
-                    const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
-                    setStatus(
-                        "You have an existing draft (" + latestDraft.application_no + "). <a href=\"" + continueLink + "\">Continue Draft</a> or start a new one below.",
-                        "alert-info",
-                        true
-                    );
+                        const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
+                        const intakePolicy = await loadIntakePolicy(context);
+                        const draftMessage = !intakePolicy.isOpen
+                            ? describeIntakeClosedReason(intakePolicy) + ' You may review your existing draft (' + latestDraft.application_no + '), but submission is blocked after the cutoff. <a href="' + continueLink + '">Open Draft</a>.'
+                            : 'You have an existing draft (' + latestDraft.application_no + '). <a href="' + continueLink + '">Continue Draft</a> or start a new one below.';
+                        setStatus(
+                            draftMessage,
+                            !intakePolicy.isOpen ? "alert-warning" : "alert-info",
+                            true
+                        );
                     } else {
                         const intakePolicy = await loadIntakePolicy(context);
                         if (!intakePolicy.isOpen) {

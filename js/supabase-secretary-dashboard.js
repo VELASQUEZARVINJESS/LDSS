@@ -4,6 +4,9 @@
     const QUEUE_PAGE_SIZE = 5;
     const PROFILE_BATCH_SIZE = 120;
     const SUPABASE_FETCH_LIMIT = 1000;
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
+    const REMINDER_LOGS_TABLE = "reminder_email_logs";
+    const SECONDARY_LOAD_DELAY_MS = 120;
     const BARANGAY_CHART_LIMIT_DESKTOP = 8;
     const BARANGAY_CHART_LIMIT_TABLET = 6;
     const BARANGAY_CHART_LIMIT_PHONE = 5;
@@ -89,22 +92,46 @@
         { fill: "rgba(244, 63, 94, 0.8)", stroke: "rgb(225, 29, 72)" },
         { fill: "rgba(56, 189, 248, 0.84)", stroke: "rgb(14, 165, 233)" }
     ];
+    const REMINDER_COOLDOWN_DAYS = {
+        draft_only: 5,
+        no_application: 7,
+        returned_resubmission: 3
+    };
     let queueRows = [];
     let queueCurrentPage = 1;
     let noFormRows = [];
     let noFormCurrentPage = 1;
+    let draftRows = [];
+    let draftCurrentPage = 1;
     let correctionMonitoringRows = [];
     let correctionMonitoringCurrentPage = 1;
     let sectorChart = null;
     let registeredChart = null;
     let barangayChart = null;
     let correctionChart = null;
+    let reminderChart = null;
     let registeredApplicantCount = 0;
     let barangayLookup = null;
     let sectorLookup = null;
     let barangayChartExpanded = false;
     let applicationsSupportsSectorClassification = true;
     let correctionNoticeByApplicationId = {};
+    let dashboardContext = null;
+    let dashboardLoadToken = 0;
+    let queueVisualsPromise = null;
+    let registeredDataPromise = null;
+    let correctionDataPromise = null;
+    let reminderDataPromise = null;
+    let secondaryWarmupTimer = 0;
+    let queueEducationByApplicationId = {};
+    let queueEducationLoadingByApplicationId = {};
+    let reminderLogLookup = {};
+    let registeredStatusCounts = {
+        registered: 0,
+        submitted: 0,
+        draft: 0,
+        notSubmitted: 0
+    };
 
     function byId(id) {
         return document.getElementById(id);
@@ -202,6 +229,14 @@
         return (select.value || "").toString().trim().toLowerCase();
     }
 
+    function selectedReminderFilter() {
+        const select = byId("secretaryDashboardReminderFilter");
+        if (!select) {
+            return "";
+        }
+        return (select.value || "").toString().trim().toLowerCase();
+    }
+
     function sectorShortLabel(label) {
         const normalized = normalizeSectorClassification(label);
         if (normalized === "Person with Disability (PWD)") {
@@ -228,9 +263,9 @@
 
     function applicationsSelectFields() {
         if (applicationsSupportsSectorClassification) {
-            return "id, application_no, applicant_id, sector_classification, status, created_at, updated_at";
+            return "id, application_no, applicant_id, sector_classification, status, submitted_at, created_at, updated_at";
         }
-        return "id, application_no, applicant_id, status, created_at, updated_at";
+        return "id, application_no, applicant_id, status, submitted_at, created_at, updated_at";
     }
 
     function sectorColorMeta(label) {
@@ -347,7 +382,46 @@
         }
     }
 
-    function renderRegisteredChart(registeredCount, submittedCount) {
+    function resetRegisteredStatusCounts() {
+        registeredStatusCounts = {
+            registered: 0,
+            submitted: 0,
+            draft: 0,
+            notSubmitted: 0
+        };
+    }
+
+    function setRegisteredStatusCounts(counts) {
+        const safeRegistered = Math.max(0, Number((counts && counts.registered) || 0));
+        const safeSubmitted = Math.max(0, Math.min(safeRegistered, Number((counts && counts.submitted) || 0)));
+        const safeDraft = Math.max(0, Math.min(safeRegistered - safeSubmitted, Number((counts && counts.draft) || 0)));
+        const safeNotSubmitted = Math.max(
+            0,
+            Math.min(safeRegistered - safeSubmitted - safeDraft, Number((counts && counts.notSubmitted) || 0))
+        );
+
+        registeredStatusCounts = {
+            registered: safeRegistered,
+            submitted: safeSubmitted,
+            draft: safeDraft,
+            notSubmitted: safeNotSubmitted
+        };
+    }
+
+    function buildRegisteredStatusCounts(registeredCount, submittedCount, draftCount) {
+        const safeRegistered = Math.max(0, Number(registeredCount || 0));
+        const safeSubmitted = Math.max(0, Math.min(safeRegistered, Number(submittedCount || 0)));
+        const safeDraft = Math.max(0, Math.min(safeRegistered - safeSubmitted, Number(draftCount || 0)));
+
+        return {
+            registered: safeRegistered,
+            submitted: safeSubmitted,
+            draft: safeDraft,
+            notSubmitted: Math.max(0, safeRegistered - safeSubmitted - safeDraft)
+        };
+    }
+
+    function renderRegisteredChart(counts) {
         const wrap = byId("secretaryDashboardRegisteredChartWrap");
         const canvas = byId("secretaryDashboardRegisteredChart");
         const empty = byId("secretaryDashboardRegisteredChartEmpty");
@@ -363,13 +437,15 @@
             registeredChart = null;
         }
 
-        const safeRegisteredCount = Math.max(0, Number(registeredCount || 0));
-        const safeSubmittedCount = Math.max(0, Math.min(safeRegisteredCount, Number(submittedCount || 0)));
-        const notSubmittedCount = Math.max(0, safeRegisteredCount - safeSubmittedCount);
+        setRegisteredStatusCounts(counts);
+        const safeRegisteredCount = registeredStatusCounts.registered;
+        const safeSubmittedCount = registeredStatusCounts.submitted;
+        const safeDraftCount = registeredStatusCounts.draft;
+        const notSubmittedCount = registeredStatusCounts.notSubmitted;
 
         const activeFilter = selectedRegisteredFilter();
-        let chartLabels = ["Submitted / Returned", "No Submitted Form"];
-        let chartData = [safeSubmittedCount, notSubmittedCount];
+        let chartLabels = ["Submitted", "Draft", "No Form"];
+        let chartData = [safeSubmittedCount, safeDraftCount, notSubmittedCount];
         let centerLabel = "Registered";
         let centerTotal = safeRegisteredCount;
 
@@ -389,25 +465,56 @@
             return;
         }
 
-        const colors = [
+        let colors = [
             "rgba(30, 64, 175, 0.88)",
+            "rgba(217, 119, 6, 0.88)",
             "rgba(148, 163, 184, 0.92)"
         ];
-        const borders = [
+        let borders = [
             "rgb(30, 58, 138)",
+            "rgb(180, 83, 9)",
             "rgb(100, 116, 139)"
         ];
 
         if (activeFilter === "submitted") {
-            chartLabels = ["Submitted / Returned", "Other Registered"];
-            chartData = [safeSubmittedCount, notSubmittedCount];
+            chartLabels = ["Submitted", "Other Registered"];
+            chartData = [safeSubmittedCount, safeDraftCount + notSubmittedCount];
             centerLabel = "Submitted";
             centerTotal = safeSubmittedCount;
+            colors = [
+                "rgba(30, 64, 175, 0.88)",
+                "rgba(148, 163, 184, 0.92)"
+            ];
+            borders = [
+                "rgb(30, 58, 138)",
+                "rgb(100, 116, 139)"
+            ];
+        } else if (activeFilter === "draft") {
+            chartLabels = ["Draft", "Other Registered"];
+            chartData = [safeDraftCount, safeSubmittedCount + notSubmittedCount];
+            centerLabel = "Draft";
+            centerTotal = safeDraftCount;
+            colors = [
+                "rgba(217, 119, 6, 0.88)",
+                "rgba(148, 163, 184, 0.92)"
+            ];
+            borders = [
+                "rgb(180, 83, 9)",
+                "rgb(100, 116, 139)"
+            ];
         } else if (activeFilter === "not_submitted") {
-            chartLabels = ["No Submitted Form", "Other Registered"];
-            chartData = [notSubmittedCount, safeSubmittedCount];
+            chartLabels = ["No Form", "Other Registered"];
+            chartData = [notSubmittedCount, safeSubmittedCount + safeDraftCount];
             centerLabel = "No Form";
             centerTotal = notSubmittedCount;
+            colors = [
+                "rgba(148, 163, 184, 0.92)",
+                "rgba(30, 64, 175, 0.88)"
+            ];
+            borders = [
+                "rgb(100, 116, 139)",
+                "rgb(30, 58, 138)"
+            ];
         }
 
         label.textContent = centerLabel;
@@ -462,6 +569,10 @@
             return joined;
         }
         return profile && profile.email ? profile.email : "Unknown Applicant";
+    }
+
+    function buildVerificationUrl(applicationId) {
+        return "secretary-interview-verification.html?id=" + encodeURIComponent(applicationId || "");
     }
 
     async function loadProfilesByIds(context, applicantIds) {
@@ -539,6 +650,48 @@
         };
     }
 
+    async function fetchDraftApplications(context) {
+        const result = await context.client
+            .from("applications")
+            .select("id, application_no, applicant_id, status, created_at, updated_at")
+            .eq("status", "draft")
+            .order("updated_at", { ascending: false });
+
+        if (result.error) {
+            return {
+                data: [],
+                error: result.error
+            };
+        }
+
+        return {
+            data: result.data || [],
+            error: null
+        };
+    }
+
+    function buildLatestDraftLookup(rows) {
+        const lookup = {};
+
+        (rows || []).forEach(function (row) {
+            if (!row || !row.applicant_id || lookup[row.applicant_id]) {
+                return;
+            }
+            lookup[row.applicant_id] = row;
+        });
+
+        return lookup;
+    }
+
+    function countDraftApplicants(registeredProfiles, submittedApplicantIds, draftLookup) {
+        return (registeredProfiles || []).reduce(function (count, profile) {
+            if (!profile || !profile.id || submittedApplicantIds.has(profile.id) || !draftLookup[profile.id]) {
+                return count;
+            }
+            return count + 1;
+        }, 0);
+    }
+
     async function loadLatestCorrectionNoticesByApplicationIds(context, applicationIds) {
         const noticeMap = {};
         let lastError = null;
@@ -597,6 +750,23 @@
         });
     }
 
+    function formatDateTime(value) {
+        if (!value) {
+            return "-";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "-";
+        }
+        return date.toLocaleString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+        });
+    }
+
     function correctionNoticeLabel(notice, row) {
         const title = (notice && notice.title ? notice.title : "").toString().trim().toLowerCase();
         const status = normalizeStatus(row && row.status);
@@ -631,6 +801,9 @@
                 if (!notice && status !== "returned_for_correction") {
                     return null;
                 }
+                if (hasUpdatedSinceNotice) {
+                    return null;
+                }
 
                 return {
                     id: row.id,
@@ -641,6 +814,8 @@
                     applicant_update_chip: hasUpdatedSinceNotice ? "ldss-chip-success" : "ldss-chip-danger",
                     follow_up_label: hasUpdatedSinceNotice ? "For Checking Again" : "Waiting for Applicant",
                     follow_up_chip: hasUpdatedSinceNotice ? "ldss-chip-accent" : "ldss-chip-neutral",
+                    submitted_at: row.submitted_at || row.created_at || "",
+                    notice_sent_at: notice && notice.created_at ? notice.created_at : "",
                     updated_at: row.updated_at || row.created_at || "",
                     sort_time: Math.max(noticeAt || 0, applicationUpdatedAt || 0),
                     open_url: "secretary-interview-verification.html?id=" + encodeURIComponent(row.id)
@@ -672,6 +847,587 @@
             }
         });
         return profileMap;
+    }
+
+    function waitForNextPaint(delayMs) {
+        const waitMs = Math.max(0, Number(delayMs) || 0);
+        return new Promise(function (resolve) {
+            window.setTimeout(function () {
+                if (typeof window.requestAnimationFrame === "function") {
+                    window.requestAnimationFrame(resolve);
+                    return;
+                }
+                resolve();
+            }, waitMs);
+        });
+    }
+
+    function getSubmittedApplicantIds() {
+        return new Set(
+            queueRows.map(function (row) {
+                return row.applicant_id;
+            }).filter(Boolean)
+        );
+    }
+
+    function getQueueApplicationIds() {
+        return Array.from(new Set(
+            queueRows.map(function (row) {
+                return row.id;
+            }).filter(Boolean)
+        ));
+    }
+
+    function educationTrackLabel(value) {
+        const raw = (value || "").toString().trim();
+        const normalized = raw.toLowerCase();
+
+        if (!normalized) {
+            return "";
+        }
+        if (normalized === "senior high school graduate") {
+            return "Senior High";
+        }
+        if (normalized === "college graduate" || normalized === "college level") {
+            return "College";
+        }
+        if (normalized === "als graduate") {
+            return "ALS";
+        }
+
+        return raw;
+    }
+
+    async function loadQueueEducationData(applicationIds, loadToken) {
+        const currentContext = dashboardContext;
+        if (!currentContext || !currentContext.client || !applicationIds.length) {
+            return;
+        }
+
+        const result = await currentContext.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .select("application_id, payload")
+            .in("application_id", applicationIds);
+
+        if (loadToken !== dashboardLoadToken) {
+            return;
+        }
+
+        const foundMap = {};
+        if (!result.error) {
+            (result.data || []).forEach(function (row) {
+                const applicationId = row && row.application_id ? row.application_id : "";
+                const payload = row && row.payload && typeof row.payload === "object" ? row.payload : {};
+                foundMap[applicationId] = educationTrackLabel(payload.highestEducationAttainment || "");
+            });
+        }
+
+        applicationIds.forEach(function (applicationId) {
+            queueEducationByApplicationId[applicationId] = foundMap[applicationId] || "";
+            delete queueEducationLoadingByApplicationId[applicationId];
+        });
+
+        applyQueuePagination(false);
+    }
+
+    function ensureQueueEducationData(rows) {
+        const loadToken = dashboardLoadToken;
+        const pendingIds = (rows || [])
+            .map(function (row) {
+                return row && row.id ? row.id : "";
+            })
+            .filter(function (applicationId) {
+                return !!applicationId &&
+                    !Object.prototype.hasOwnProperty.call(queueEducationByApplicationId, applicationId) &&
+                    !queueEducationLoadingByApplicationId[applicationId];
+            });
+
+        if (!pendingIds.length) {
+            return;
+        }
+
+        pendingIds.forEach(function (applicationId) {
+            queueEducationLoadingByApplicationId[applicationId] = true;
+        });
+
+        loadQueueEducationData(pendingIds, loadToken);
+    }
+
+    function resetDeferredDashboardLoads() {
+        if (secondaryWarmupTimer) {
+            window.clearTimeout(secondaryWarmupTimer);
+            secondaryWarmupTimer = 0;
+        }
+
+        queueVisualsPromise = null;
+        registeredDataPromise = null;
+        correctionDataPromise = null;
+        reminderDataPromise = null;
+    }
+
+    function ensureQueueVisualsLoaded(loadToken) {
+        if (queueVisualsPromise) {
+            return queueVisualsPromise;
+        }
+
+        queueVisualsPromise = (async function () {
+            await waitForNextPaint(0);
+            if (loadToken !== dashboardLoadToken) {
+                return;
+            }
+
+            renderSectorChart(queueRows);
+            renderBarangayChart(queueRows, getQueueProfileMap());
+        })();
+
+        return queueVisualsPromise;
+    }
+
+    function ensureRegisteredDataLoaded(context, loadToken) {
+        if (!context || !context.client) {
+            return Promise.resolve();
+        }
+        if (registeredDataPromise) {
+            return registeredDataPromise;
+        }
+
+        registeredDataPromise = (async function () {
+            const submittedApplicantIds = getSubmittedApplicantIds();
+            const submittedApplicantCount = submittedApplicantIds.size;
+            const results = await Promise.all([
+                fetchAllApplicantProfiles(context),
+                fetchDraftApplications(context)
+            ]);
+
+            if (loadToken !== dashboardLoadToken) {
+                return;
+            }
+
+            const registeredProfilesResult = results[0];
+            const draftApplicationsResult = results[1];
+            const draftLookup = buildLatestDraftLookup(draftApplicationsResult.data || []);
+
+            if (registeredProfilesResult.error) {
+                setRegisteredCount(0);
+                registeredApplicantCount = 0;
+                resetRegisteredStatusCounts();
+                renderRegisteredChart(registeredStatusCounts);
+                noFormRows = [];
+                draftRows = [];
+                applyNoFormPagination(true, "Unable to load users without form right now.");
+                applyDraftPagination(true, "Unable to load draft users right now.");
+                return;
+            }
+
+            if (draftApplicationsResult.error) {
+                showStatus("Registered applicants loaded, but draft preview links are temporarily unavailable.", "alert-warning");
+            }
+
+            const registeredProfiles = registeredProfilesResult.data || [];
+            registeredApplicantCount = registeredProfilesResult.count || registeredProfiles.length || 0;
+            setRegisteredCount(registeredApplicantCount);
+            setRegisteredStatusCounts(buildRegisteredStatusCounts(
+                registeredApplicantCount,
+                submittedApplicantCount,
+                countDraftApplicants(registeredProfiles, submittedApplicantIds, draftLookup)
+            ));
+            renderRegisteredChart(registeredStatusCounts);
+
+            const pendingProfiles = registeredProfiles
+                .filter(function (profile) {
+                    return !submittedApplicantIds.has(profile.id);
+                })
+                .map(function (profile) {
+                    const draft = draftLookup[profile.id] || null;
+                    return {
+                        id: profile.id,
+                        applicant_name: buildApplicantName(profile),
+                        barangay: normalizeBarangay(profile.barangay || "") || "No Barangay",
+                        email: profile.email || "",
+                        created_at: profile.created_at || "",
+                        draft_application_id: draft && draft.id ? draft.id : "",
+                        draft_application_no: draft && draft.application_no ? draft.application_no : "",
+                        draft_updated_at: draft ? (draft.updated_at || draft.created_at || "") : ""
+                    };
+                });
+
+            noFormRows = pendingProfiles.filter(function (row) {
+                return !row.draft_application_id;
+            });
+            draftRows = pendingProfiles.filter(function (row) {
+                return !!row.draft_application_id;
+            });
+
+            applyNoFormPagination(true);
+            applyDraftPagination(true);
+        })();
+
+        return registeredDataPromise;
+    }
+
+    function reminderStateKey(row) {
+        return row && row.draft_application_id ? "draft_only" : "no_application";
+    }
+
+    function reminderLookupKey(applicantId, reminderType) {
+        return (applicantId || "") + "::" + (reminderType || "");
+    }
+
+    function cooldownDaysForType(reminderType) {
+        return REMINDER_COOLDOWN_DAYS[reminderType] || 7;
+    }
+
+    function addDaysToIso(value, days) {
+        const parsed = new Date(value || "");
+        if (Number.isNaN(parsed.getTime())) {
+            return "";
+        }
+        parsed.setDate(parsed.getDate() + days);
+        return parsed.toISOString();
+    }
+
+    function buildReminderLogLookup(logRows) {
+        const lookup = {};
+        (logRows || []).forEach(function (row) {
+            if (!row || row.status !== "sent" || !row.applicant_id || !row.reminder_type || !row.sent_at) {
+                return;
+            }
+
+            const key = reminderLookupKey(row.applicant_id, row.reminder_type);
+            if (!lookup[key]) {
+                lookup[key] = {
+                    lastSentAt: row.sent_at,
+                    timesSent: 1
+                };
+                return;
+            }
+
+            lookup[key].timesSent += 1;
+            if (new Date(row.sent_at).getTime() > new Date(lookup[key].lastSentAt).getTime()) {
+                lookup[key].lastSentAt = row.sent_at;
+            }
+        });
+
+        return lookup;
+    }
+
+    function fetchReminderRows() {
+        return draftRows.concat(noFormRows);
+    }
+
+    function isReminderCooldownActive(row) {
+        if (!row || !row.cooldown_until) {
+            return false;
+        }
+        const parsed = new Date(row.cooldown_until);
+        return !Number.isNaN(parsed.getTime()) && parsed.getTime() > Date.now();
+    }
+
+    function applyReminderLogStateToRows(rows) {
+        (rows || []).forEach(function (row) {
+            const type = reminderStateKey(row);
+            const logMeta = reminderLogLookup[reminderLookupKey(row.id, type)] || null;
+            row.last_reminder_sent_at = logMeta ? logMeta.lastSentAt : "";
+            row.reminder_times_sent = logMeta ? logMeta.timesSent : 0;
+            row.cooldown_until = logMeta ? addDaysToIso(logMeta.lastSentAt, cooldownDaysForType(type)) : "";
+        });
+    }
+
+    async function fetchReminderLogs(context, applicantIds) {
+        const uniqueIds = Array.from(new Set((applicantIds || []).filter(Boolean)));
+        if (!uniqueIds.length) {
+            return { data: [], error: null };
+        }
+
+        const rows = [];
+        for (let index = 0; index < uniqueIds.length; index += 200) {
+            const batchIds = uniqueIds.slice(index, index + 200);
+            const result = await context.client
+                .from(REMINDER_LOGS_TABLE)
+                .select("applicant_id, reminder_type, status, sent_at")
+                .in("applicant_id", batchIds)
+                .eq("channel", "email")
+                .order("sent_at", { ascending: false });
+
+            if (result.error) {
+                return {
+                    data: rows,
+                    error: result.error
+                };
+            }
+
+            rows.push.apply(rows, result.data || []);
+        }
+
+        return {
+            data: rows,
+            error: null
+        };
+    }
+
+    function buildReminderFollowupCounts(rows) {
+        return (rows || []).reduce(function (counts, row) {
+            counts.total += 1;
+
+            if (!row || !row.last_reminder_sent_at) {
+                counts.newNeed += 1;
+                return counts;
+            }
+
+            if (isReminderCooldownActive(row)) {
+                counts.recent += 1;
+                return counts;
+            }
+
+            counts.readyAgain += 1;
+            return counts;
+        }, {
+            total: 0,
+            newNeed: 0,
+            readyAgain: 0,
+            recent: 0,
+            unavailable: false
+        });
+    }
+
+    function renderReminderChart(counts) {
+        const wrap = byId("secretaryDashboardReminderChartWrap");
+        const canvas = byId("secretaryDashboardReminderChart");
+        const empty = byId("secretaryDashboardReminderChartEmpty");
+        const summary = byId("secretaryDashboardReminderChartSummary");
+        const label = byId("secretaryDashboardReminderChartLabel");
+        const total = byId("secretaryDashboardReminderChartTotal");
+        if (!wrap || !canvas || !empty || !summary || !label || !total) {
+            return;
+        }
+
+        if (reminderChart) {
+            reminderChart.destroy();
+            reminderChart = null;
+        }
+
+        if (!window.Chart) {
+            wrap.classList.add("d-none");
+            empty.textContent = "Chart library did not load.";
+            empty.classList.remove("d-none");
+            summary.textContent = "Unable to render reminder chart.";
+            summary.classList.remove("d-none");
+            label.textContent = "Reminder Users";
+            total.textContent = "0";
+            return;
+        }
+
+        const safeCounts = Object.assign({
+            total: 0,
+            newNeed: 0,
+            readyAgain: 0,
+            recent: 0,
+            unavailable: false
+        }, counts || {});
+
+        total.textContent = String(safeCounts.total);
+        if (safeCounts.unavailable) {
+            wrap.classList.add("d-none");
+            empty.textContent = "Reminder history is unavailable right now.";
+            empty.classList.remove("d-none");
+            summary.textContent = "Run the reminder logs hotfix or check reminder log access.";
+            summary.classList.remove("d-none");
+            label.textContent = "Reminder Users";
+            return;
+        }
+
+        const activeFilter = selectedReminderFilter();
+        let chartLabels = ["Needs First Reminder", "Ready Again", "Recently Reminded"];
+        let chartData = [safeCounts.newNeed, safeCounts.readyAgain, safeCounts.recent];
+        let chartColors = [
+            { fill: "rgba(217, 119, 6, 0.88)", stroke: "rgb(180, 83, 9)" },
+            { fill: "rgba(14, 116, 144, 0.86)", stroke: "rgb(8, 145, 178)" },
+            { fill: "rgba(148, 163, 184, 0.9)", stroke: "rgb(100, 116, 139)" }
+        ];
+        let centerLabel = "Reminder Users";
+
+        if (activeFilter === "new") {
+            chartLabels = ["Needs First Reminder", "Other Reminder Users"];
+            chartData = [safeCounts.newNeed, safeCounts.readyAgain + safeCounts.recent];
+            chartColors = [
+                { fill: "rgba(217, 119, 6, 0.88)", stroke: "rgb(180, 83, 9)" },
+                { fill: "rgba(203, 213, 225, 0.95)", stroke: "rgb(148, 163, 184)" }
+            ];
+            centerLabel = "New Users";
+        } else if (activeFilter === "ready_again") {
+            chartLabels = ["Ready Again", "Other Reminder Users"];
+            chartData = [safeCounts.readyAgain, safeCounts.newNeed + safeCounts.recent];
+            chartColors = [
+                { fill: "rgba(14, 116, 144, 0.86)", stroke: "rgb(8, 145, 178)" },
+                { fill: "rgba(203, 213, 225, 0.95)", stroke: "rgb(148, 163, 184)" }
+            ];
+            centerLabel = "Ready Again";
+        } else if (activeFilter === "recent") {
+            chartLabels = ["Recently Reminded", "Other Reminder Users"];
+            chartData = [safeCounts.recent, safeCounts.newNeed + safeCounts.readyAgain];
+            chartColors = [
+                { fill: "rgba(148, 163, 184, 0.9)", stroke: "rgb(100, 116, 139)" },
+                { fill: "rgba(203, 213, 225, 0.95)", stroke: "rgb(148, 163, 184)" }
+            ];
+            centerLabel = "Recent";
+        }
+
+        const hasData = chartData.some(function (value) { return Number(value) > 0; });
+        if (!hasData) {
+            wrap.classList.add("d-none");
+            empty.textContent = "No reminder follow-up data yet.";
+            empty.classList.remove("d-none");
+            summary.textContent = "No draft or no-form users are waiting for reminders right now.";
+            summary.classList.remove("d-none");
+            label.textContent = centerLabel;
+            return;
+        }
+
+        wrap.classList.remove("d-none");
+        empty.classList.add("d-none");
+        summary.textContent = "";
+        summary.classList.add("d-none");
+        label.textContent = centerLabel;
+
+        reminderChart = new window.Chart(canvas.getContext("2d"), {
+            type: "doughnut",
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    data: chartData,
+                    backgroundColor: chartColors.map(function (color) { return color.fill; }),
+                    borderColor: chartColors.map(function (color) { return color.stroke; }),
+                    borderWidth: 1.5,
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: "66%",
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function (context) {
+                                const value = Number(context.raw || 0);
+                                return context.label + ": " + value;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function ensureReminderDataLoaded(context, loadToken) {
+        if (!context || !context.client) {
+            return Promise.resolve();
+        }
+        if (reminderDataPromise) {
+            return reminderDataPromise;
+        }
+
+        reminderDataPromise = (async function () {
+            await ensureRegisteredDataLoaded(context, loadToken);
+            if (loadToken !== dashboardLoadToken) {
+                return;
+            }
+
+            const reminderRows = fetchReminderRows();
+            if (!reminderRows.length) {
+                reminderLogLookup = {};
+                renderReminderChart(buildReminderFollowupCounts([]));
+                return;
+            }
+
+            const result = await fetchReminderLogs(context, reminderRows.map(function (row) { return row.id; }));
+            if (loadToken !== dashboardLoadToken) {
+                return;
+            }
+
+            if (result.error) {
+                reminderLogLookup = {};
+                renderReminderChart({
+                    total: reminderRows.length,
+                    newNeed: 0,
+                    readyAgain: 0,
+                    recent: 0,
+                    unavailable: true
+                });
+                showStatus("Reminder follow-up history could not be loaded. Showing the rest of the dashboard normally.", "alert-warning");
+                return;
+            }
+
+            reminderLogLookup = buildReminderLogLookup(result.data || []);
+            applyReminderLogStateToRows(reminderRows);
+            renderReminderChart(buildReminderFollowupCounts(reminderRows));
+        })();
+
+        return reminderDataPromise;
+    }
+
+    function ensureCorrectionDataLoaded(context, loadToken) {
+        if (!context || !context.client) {
+            return Promise.resolve();
+        }
+        if (correctionDataPromise) {
+            return correctionDataPromise;
+        }
+
+        correctionDataPromise = (async function () {
+            const applicationIds = getQueueApplicationIds();
+
+            if (!applicationIds.length) {
+                correctionNoticeByApplicationId = {};
+                correctionMonitoringRows = [];
+                renderCorrectionChart([], {});
+                applyCorrectionMonitoringPagination(true);
+                return;
+            }
+
+            const correctionNoticeLoad = await loadLatestCorrectionNoticesByApplicationIds(context, applicationIds);
+            if (loadToken !== dashboardLoadToken) {
+                return;
+            }
+
+            correctionNoticeByApplicationId = correctionNoticeLoad.noticeMap || {};
+            if (correctionNoticeLoad.error) {
+                showStatus(
+                    "Correction history could not be loaded completely. Showing available pending correction data only.",
+                    "alert-warning"
+                );
+            }
+
+            correctionMonitoringRows = buildCorrectionMonitoringRows(queueRows, correctionNoticeByApplicationId);
+            renderCorrectionChart(queueRows, correctionNoticeByApplicationId);
+            applyCorrectionMonitoringPagination(true);
+        })();
+
+        return correctionDataPromise;
+    }
+
+    function warmDashboardSecondaryData(context, loadToken) {
+        if (!context || !context.client) {
+            return;
+        }
+
+        if (secondaryWarmupTimer) {
+            window.clearTimeout(secondaryWarmupTimer);
+        }
+
+        secondaryWarmupTimer = window.setTimeout(function () {
+            secondaryWarmupTimer = 0;
+            if (loadToken !== dashboardLoadToken) {
+                return;
+            }
+
+            ensureRegisteredDataLoaded(context, loadToken);
+            ensureCorrectionDataLoaded(context, loadToken);
+            ensureReminderDataLoaded(context, loadToken);
+        }, SECONDARY_LOAD_DELAY_MS);
     }
 
     function populateBarangayFilter() {
@@ -1271,6 +2027,36 @@
         pagination.innerHTML = items.join("");
     }
 
+    function renderDraftPaginationInfo(totalRows) {
+        const info = byId("secretaryDashboardDraftPaginationInfo");
+        if (!info) {
+            return;
+        }
+        if (totalRows <= 0) {
+            info.textContent = "No records";
+            return;
+        }
+        info.textContent = totalRows + " records";
+    }
+
+    function renderDraftPagination(totalRows) {
+        const pagination = byId("secretaryDashboardDraftPagination");
+        if (!pagination) {
+            return;
+        }
+        if (totalRows <= 0) {
+            pagination.innerHTML = "";
+            return;
+        }
+
+        const pageCount = getPageCount(totalRows);
+        const items = [];
+        items.push(pageItemMarkup("Previous", draftCurrentPage - 1, draftCurrentPage <= 1, false, "Previous page"));
+        items.push(pageStatusItemMarkup(String(draftCurrentPage) + " / " + String(pageCount)));
+        items.push(pageItemMarkup("Next", draftCurrentPage + 1, draftCurrentPage >= pageCount, false, "Next page"));
+        pagination.innerHTML = items.join("");
+    }
+
     function isExamStage(status) {
         const normalized = normalizeStatus(status);
         return ["pending_exam", "exam_scheduled", "exam_completed", "failed_exam", "passed_exam", "special_endorsement_review"].includes(normalized);
@@ -1295,20 +2081,26 @@
         }
 
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted">No queue records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No queue records found.</td></tr>';
             return;
         }
 
         tbody.innerHTML = rows.map(function (row) {
             const meta = statusMeta(row.status);
+            const educationValue = Object.prototype.hasOwnProperty.call(queueEducationByApplicationId, row.id)
+                ? (queueEducationByApplicationId[row.id] || "-")
+                : (queueEducationLoadingByApplicationId[row.id] ? "Loading..." : "Loading...");
             return (
                 "<tr>" +
                 '<td title="' + escapeHtml((row.applicant_name || "Unknown") + " - " + (row.application_no || "-")) + '">' +
-                '<span class="ldss-table-ellipsis fw-semibold">' + escapeHtml(row.applicant_name || "Unknown") + "</span>" +
+                '<span class="ldss-table-ellipsis ldss-uniform-table-primary">' + escapeHtml(row.applicant_name || "Unknown") + "</span>" +
                 '<span class="ldss-table-ellipsis ldss-dashboard-meta">' + escapeHtml(row.application_no || "-") + "</span>" +
                 "</td>" +
+                "<td>" + escapeHtml(educationValue) + "</td>" +
                 '<td><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
-                "<td>" + escapeHtml(formatDate(row.updated_at || row.created_at)) + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.submitted_at || row.created_at)) + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.updated_at || row.created_at)) + "</td>" +
+                '<td class="text-end"><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(buildVerificationUrl(row.id)) + '">Open</a></td>' +
                 "</tr>"
             );
         }).join("");
@@ -1321,8 +2113,8 @@
         }
 
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted">' +
-                escapeHtml(emptyMessage || "No registered users without a submitted form.") +
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">' +
+                escapeHtml(emptyMessage || "No users without a submitted or draft form.") +
                 "</td></tr>";
             return;
         }
@@ -1330,11 +2122,42 @@
         tbody.innerHTML = rows.map(function (row) {
             return (
                 "<tr>" +
-                '<td title="' + escapeHtml(row.applicant_name || "Unknown Applicant") + '">' +
-                '<span class="ldss-table-ellipsis fw-semibold">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</span>" +
+                '<td title="' + escapeHtml((row.applicant_name || "Unknown Applicant") + " - No form submitted") + '">' +
+                '<span class="ldss-table-ellipsis ldss-uniform-table-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</span>" +
+                '<span class="ldss-table-ellipsis ldss-dashboard-meta">No draft or submitted form yet</span>' +
                 "</td>" +
                 "<td>" + escapeHtml(row.barangay || "No Barangay") + "</td>" +
-                "<td>" + escapeHtml(formatDate(row.created_at)) + "</td>" +
+                "<td>" + escapeHtml(row.email || "-") + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.created_at)) + "</td>" +
+                "</tr>"
+            );
+        }).join("");
+    }
+
+    function renderDraftTable(rows, emptyMessage) {
+        const tbody = byId("secretaryDashboardDraftBody");
+        if (!tbody) {
+            return;
+        }
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">' +
+                escapeHtml(emptyMessage || "No saved draft forms found.") +
+                "</td></tr>";
+            return;
+        }
+
+        tbody.innerHTML = rows.map(function (row) {
+            return (
+                "<tr>" +
+                '<td title="' + escapeHtml((row.applicant_name || "Unknown Applicant") + " - " + (row.barangay || "No Barangay")) + '">' +
+                '<span class="ldss-table-ellipsis ldss-uniform-table-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</span>" +
+                '<span class="ldss-table-ellipsis ldss-dashboard-meta">' + escapeHtml(row.barangay || "No Barangay") + "</span>" +
+                "</td>" +
+                "<td>" + escapeHtml(row.draft_application_no || "-") + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.draft_updated_at || row.created_at)) + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.created_at)) + "</td>" +
+                '<td class="text-end"><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(buildVerificationUrl(row.draft_application_id)) + '">View Draft</a></td>' +
                 "</tr>"
             );
         }).join("");
@@ -1347,8 +2170,8 @@
         }
 
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center py-4 text-muted">' +
-                escapeHtml(emptyMessage || "No return or resubmission records found.") +
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">' +
+                escapeHtml(emptyMessage || "No pending correction records found.") +
                 "</td></tr>";
             return;
         }
@@ -1357,10 +2180,12 @@
             return (
                 "<tr>" +
                 '<td title="' + escapeHtml((row.applicant_name || "Unknown") + " - " + (row.application_no || "-") + " - " + (row.notice_label || "")) + '">' +
-                '<span class="ldss-table-ellipsis fw-semibold">' + escapeHtml(row.applicant_name || "Unknown") + "</span>" +
-                '<span class="ldss-table-ellipsis ldss-dashboard-meta">' + escapeHtml(row.notice_label || row.application_no || "-") + "</span>" +
+                '<span class="ldss-table-ellipsis ldss-uniform-table-primary">' + escapeHtml(row.applicant_name || "Unknown") + "</span>" +
+                '<span class="ldss-table-ellipsis ldss-dashboard-meta">' + escapeHtml(row.application_no || "-") + "</span>" +
                 "</td>" +
-                '<td><span class="ldss-chip ' + row.applicant_update_chip + '">' + escapeHtml(row.applicant_update_label) + '</span><span class="ldss-dashboard-meta d-block mt-1">' + escapeHtml(row.follow_up_label) + "</span></td>" +
+                "<td>" + escapeHtml(row.notice_label || "-") + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.submitted_at)) + "</td>" +
+                "<td>" + escapeHtml(formatDateTime(row.notice_sent_at || row.updated_at)) + "</td>" +
                 '<td class="text-end"><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(row.open_url) + '">Open</a></td>' +
                 "</tr>"
             );
@@ -1386,6 +2211,7 @@
         renderQueue(pageRows);
         renderQueuePaginationInfo(queueRows.length);
         renderQueuePagination(queueRows.length);
+        ensureQueueEducationData(pageRows);
     }
 
     function applyNoFormPagination(resetPage, emptyMessage) {
@@ -1407,6 +2233,27 @@
         renderNoFormTable(pageRows, emptyMessage);
         renderNoFormPaginationInfo(noFormRows.length);
         renderNoFormPagination(noFormRows.length);
+    }
+
+    function applyDraftPagination(resetPage, emptyMessage) {
+        if (resetPage) {
+            draftCurrentPage = 1;
+        }
+
+        const pageCount = getPageCount(draftRows.length);
+        if (draftCurrentPage > pageCount) {
+            draftCurrentPage = pageCount;
+        }
+        if (draftCurrentPage < 1) {
+            draftCurrentPage = 1;
+        }
+
+        const start = (draftCurrentPage - 1) * QUEUE_PAGE_SIZE;
+        const pageRows = draftRows.slice(start, start + QUEUE_PAGE_SIZE);
+
+        renderDraftTable(pageRows, emptyMessage);
+        renderDraftPaginationInfo(draftRows.length);
+        renderDraftPagination(draftRows.length);
     }
 
     function renderCorrectionMonitoringPaginationInfo(totalRows) {
@@ -1461,6 +2308,30 @@
     }
 
     function bindEvents() {
+        const sectionTabs = byId("secretaryDashboardSectionTabs");
+        if (sectionTabs) {
+            sectionTabs.addEventListener("shown.bs.tab", function (event) {
+                const tabButton = event.target;
+                const tabId = tabButton && tabButton.id ? tabButton.id : "";
+                const currentContext = dashboardContext;
+                const currentLoadToken = dashboardLoadToken;
+
+                if (tabId === "secretaryDashboardNoFormTab" || tabId === "secretaryDashboardDraftTab") {
+                    ensureRegisteredDataLoaded(currentContext, currentLoadToken);
+                    return;
+                }
+
+                if (tabId === "secretaryDashboardCorrectionTab") {
+                    ensureCorrectionDataLoaded(currentContext, currentLoadToken);
+                    return;
+                }
+
+                if (tabId === "secretaryDashboardQueueTab") {
+                    ensureQueueVisualsLoaded(currentLoadToken);
+                }
+            });
+        }
+
         const pagination = byId("secretaryDashboardQueuePagination");
         if (pagination) {
             pagination.addEventListener("click", function (event) {
@@ -1496,6 +2367,25 @@
 
                 noFormCurrentPage = nextPage;
                 applyNoFormPagination(false);
+            });
+        }
+
+        const draftPagination = byId("secretaryDashboardDraftPagination");
+        if (draftPagination) {
+            draftPagination.addEventListener("click", function (event) {
+                const button = event.target.closest("button[data-page]");
+                if (!button || button.closest(".disabled")) {
+                    return;
+                }
+
+                const nextPage = Number(button.getAttribute("data-page"));
+                const pageCount = getPageCount(draftRows.length);
+                if (Number.isNaN(nextPage) || nextPage < 1 || nextPage > pageCount) {
+                    return;
+                }
+
+                draftCurrentPage = nextPage;
+                applyDraftPagination(false);
             });
         }
 
@@ -1536,12 +2426,8 @@
         const registeredFilter = byId("secretaryDashboardRegisteredFilter");
         if (registeredFilter) {
             registeredFilter.addEventListener("change", function () {
-                const submittedApplicantCount = new Set(
-                    queueRows.map(function (row) {
-                        return row.applicant_id;
-                    }).filter(Boolean)
-                ).size;
-                renderRegisteredChart(registeredApplicantCount, submittedApplicantCount);
+                ensureRegisteredDataLoaded(dashboardContext, dashboardLoadToken);
+                renderRegisteredChart(registeredStatusCounts);
             });
         }
 
@@ -1555,7 +2441,16 @@
         const correctionFilter = byId("secretaryDashboardCorrectionFilter");
         if (correctionFilter) {
             correctionFilter.addEventListener("change", function () {
+                ensureCorrectionDataLoaded(dashboardContext, dashboardLoadToken);
                 renderCorrectionChart(queueRows, correctionNoticeByApplicationId);
+            });
+        }
+
+        const reminderFilter = byId("secretaryDashboardReminderFilter");
+        if (reminderFilter) {
+            reminderFilter.addEventListener("change", function () {
+                ensureReminderDataLoaded(dashboardContext, dashboardLoadToken);
+                renderReminderChart(buildReminderFollowupCounts(fetchReminderRows()));
             });
         }
 
@@ -1567,57 +2462,63 @@
         });
     }
 
+    async function fetchAllApplications(context) {
+        const allRows = [];
+        let from = 0;
+        const batchSize = 1000;
+        while (true) {
+            const { data, error } = await context.client
+                .from("applications")
+                .select(applicationsSelectFields())
+                .neq("status", "draft")
+                .order("updated_at", { ascending: false })
+                .range(from, from + batchSize - 1);
+            if (error) {
+                throw error;
+            }
+            if (!data || data.length === 0) {
+                break;
+            }
+            allRows.push(...data);
+            if (data.length < batchSize) {
+                break;
+            }
+            from += batchSize;
+        }
+        return allRows;
+    }
+
     async function loadDashboard(context) {
+        const loadToken = dashboardLoadToken + 1;
+        dashboardLoadToken = loadToken;
+        dashboardContext = context;
+        resetDeferredDashboardLoads();
+
         setDashboardLoading(true);
         try {
             showStatus("");
 
+            queueRows = [];
+            queueEducationByApplicationId = {};
+            queueEducationLoadingByApplicationId = {};
             setRegisteredCount(0);
             registeredApplicantCount = 0;
             correctionNoticeByApplicationId = {};
             noFormRows = [];
+            draftRows = [];
             correctionMonitoringRows = [];
-            renderRegisteredChart(0, 0);
+            reminderLogLookup = {};
+            resetRegisteredStatusCounts();
+            renderRegisteredChart(registeredStatusCounts);
             renderCorrectionChart([], {});
-            applyNoFormPagination(true, "Loading registered users...");
-            applyCorrectionMonitoringPagination(true, "Loading return and resubmission records...");
+            renderReminderChart(buildReminderFollowupCounts([]));
+            applyNoFormPagination(true, "Loading users without form...");
+            applyDraftPagination(true, "Loading draft users...");
+            applyCorrectionMonitoringPagination(true, "Loading pending correction records...");
 
-            const registeredProfilesPromise = fetchAllApplicantProfiles(context);
-
-            let appResult = await context.client
-                .from("applications")
-                .select(applicationsSelectFields())
-                .neq("status", "draft")
-                .order("updated_at", { ascending: false });
-
-            if (applicationsSupportsSectorClassification && isMissingApplicationsColumnError(appResult.error, "sector_classification")) {
-                applicationsSupportsSectorClassification = false;
-                appResult = await context.client
-                    .from("applications")
-                    .select(applicationsSelectFields())
-                    .neq("status", "draft")
-                    .order("updated_at", { ascending: false });
-            }
-
-            if (appResult.error) {
-                showStatus("Failed to load dashboard data: " + appResult.error.message, "alert-danger");
-                const registeredProfilesResult = await registeredProfilesPromise;
-                if (!registeredProfilesResult.error) {
-                    setRegisteredCount(registeredProfilesResult.count || (registeredProfilesResult.data || []).length || 0);
-                } else {
-                    setRegisteredCount(0);
-                }
-                applyNoFormPagination(true, "Unable to compare submitted forms right now.");
-                applyCorrectionMonitoringPagination(true, "Unable to load return and resubmission records right now.");
-                return;
-            }
-
-            const rows = appResult.data || [];
+            const rows = await fetchAllApplications(context);
             const applicantIds = Array.from(new Set(rows.map(function (row) {
                 return row.applicant_id;
-            }).filter(Boolean)));
-            const applicationIds = Array.from(new Set(rows.map(function (row) {
-                return row.id;
             }).filter(Boolean)));
 
             let profileMap = {};
@@ -1643,66 +2544,13 @@
                 });
             });
 
-            const correctionNoticeLoad = applicationIds.length > 0
-                ? await loadLatestCorrectionNoticesByApplicationIds(context, applicationIds)
-                : { noticeMap: {}, error: null };
-            correctionNoticeByApplicationId = correctionNoticeLoad.noticeMap || {};
-            if (correctionNoticeLoad.error) {
-                showStatus(
-                    "Correction history could not be loaded completely. Showing available return and resubmission data only.",
-                    "alert-warning"
-                );
-            }
-            correctionMonitoringRows = buildCorrectionMonitoringRows(enriched, correctionNoticeByApplicationId);
-
-            const submittedApplicantCount = new Set(
-                enriched.map(function (row) {
-                    return row.applicant_id;
-                }).filter(Boolean)
-            ).size;
-
-            const submittedApplicantIds = new Set(
-                enriched.map(function (row) {
-                    return row.applicant_id;
-                }).filter(Boolean)
-            );
-
-            const registeredProfilesResult = await registeredProfilesPromise;
-            if (registeredProfilesResult.error) {
-                setRegisteredCount(0);
-                registeredApplicantCount = 0;
-                renderRegisteredChart(0, submittedApplicantCount);
-                noFormRows = [];
-                applyNoFormPagination(true, "Unable to load registered applicants right now.");
-            } else {
-                const registeredProfiles = registeredProfilesResult.data || [];
-                registeredApplicantCount = registeredProfilesResult.count || registeredProfiles.length || 0;
-                setRegisteredCount(registeredApplicantCount);
-                renderRegisteredChart(registeredApplicantCount, submittedApplicantCount);
-                noFormRows = registeredProfiles
-                    .filter(function (profile) {
-                        return !submittedApplicantIds.has(profile.id);
-                    })
-                    .map(function (profile) {
-                        return {
-                            id: profile.id,
-                            applicant_name: buildApplicantName(profile),
-                            barangay: normalizeBarangay(profile.barangay || "") || "No Barangay",
-                            email: profile.email || "",
-                            created_at: profile.created_at || ""
-                        };
-                    });
-                applyNoFormPagination(true);
-            }
-
             queueRows = enriched;
             populateBarangayFilter();
             renderMetrics(queueRows);
-            renderSectorChart(queueRows);
-            renderBarangayChart(queueRows, profileMap);
-            renderCorrectionChart(queueRows, correctionNoticeByApplicationId);
             applyQueuePagination(true);
-            applyCorrectionMonitoringPagination(true);
+            setDashboardLoading(false);
+            ensureQueueVisualsLoaded(loadToken);
+            warmDashboardSecondaryData(context, loadToken);
         } finally {
             setDashboardLoading(false);
         }

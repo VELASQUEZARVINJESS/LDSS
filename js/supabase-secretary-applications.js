@@ -4,13 +4,50 @@
     const DEFAULT_PAGE_SIZE = 10;
     const MAX_PAGE_SIZE = 100;
     const PROFILE_BATCH_SIZE = 120;
+    const SUPABASE_FETCH_LIMIT = 1000;
     const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
+    const DAET_BARANGAYS = [
+        "Alawihao",
+        "Awitan",
+        "Bagasbas",
+        "Barangay I",
+        "Barangay II",
+        "Barangay III",
+        "Barangay IV",
+        "Barangay V",
+        "Barangay VI",
+        "Barangay VII",
+        "Barangay VIII",
+        "Bibirao",
+        "Borabod",
+        "Calasgasan",
+        "Camambugan",
+        "Cobangbang",
+        "Dogongan",
+        "Gahonon",
+        "Gubat",
+        "Lag-on",
+        "Magang",
+        "Mambalite",
+        "Mancruz",
+        "Pamorangon",
+        "San Isidro"
+    ];
+    const DAET_BARANGAY_ALIASES = {
+        "Barangay I": ["BRGY I", "BRGY 1", "BARANGAY 1"],
+        "Barangay II": ["BRGY II", "BRGY 2", "BARANGAY 2"],
+        "Barangay III": ["BRGY III", "BRGY 3", "BARANGAY 3"],
+        "Barangay IV": ["BRGY IV", "BRGY 4", "BARANGAY 4"],
+        "Barangay V": ["BRGY V", "BRGY 5", "BARANGAY 5"],
+        "Barangay VI": ["BRGY VI", "BRGY 6", "BARANGAY 6"],
+        "Barangay VII": ["BRGY VII", "BRGY 7", "BARANGAY 7"],
+        "Barangay VIII": ["BRGY VIII", "BRGY 8", "BARANGAY 8"]
+    };
     let allRows = [];
     let filteredRows = [];
     let currentPage = 1;
     let pageSize = DEFAULT_PAGE_SIZE;
-    let authContext = null;
-    let photoRenderToken = 0;
+    let barangayLookup = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -41,6 +78,47 @@
             .replace(/'/g, "&#039;");
     }
 
+    function cleanupLookupKey(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .toLowerCase();
+    }
+
+    function cleanupBarangayKey(value) {
+        return cleanupLookupKey((value || "")
+            .toString()
+            .replace(/,\s*daet$/i, ""));
+    }
+
+    function getBarangayLookup() {
+        if (barangayLookup) {
+            return barangayLookup;
+        }
+
+        barangayLookup = {};
+        DAET_BARANGAYS.forEach(function (barangay) {
+            const variants = [barangay].concat(DAET_BARANGAY_ALIASES[barangay] || []);
+            if (!/^barangay\s+/i.test(barangay)) {
+                variants.push("Barangay " + barangay);
+            }
+            variants.forEach(function (variant) {
+                barangayLookup[cleanupBarangayKey(variant)] = barangay;
+                barangayLookup[cleanupBarangayKey(variant + ", Daet")] = barangay;
+            });
+        });
+        return barangayLookup;
+    }
+
+    function normalizeBarangay(value) {
+        const key = cleanupBarangayKey(value);
+        if (!key) {
+            return "";
+        }
+        return getBarangayLookup()[key] || "";
+    }
+
     function showStatus(message, type) {
         const alert = byId("secretaryApplicationsStatus");
         if (!alert) {
@@ -53,6 +131,97 @@
         }
         alert.className = "alert " + (type || "alert-info");
         alert.textContent = message;
+    }
+
+    function isCorrectionNotification(row) {
+        const title = (row && row.title ? row.title : "").toString().trim().toLowerCase();
+        const message = (row && row.message ? row.message : "").toString().trim().toLowerCase();
+        return title.indexOf("returned for correction") !== -1 ||
+            title.indexOf("compliance notice") !== -1 ||
+            title.indexOf("photo needs change") !== -1 ||
+            message.indexOf("returned for correction") !== -1 ||
+            message.indexOf("need to comply") !== -1 ||
+            message.indexOf("replace your applicant 1x1 photo") !== -1;
+    }
+
+    function correctionNoticeLabel(notice, row) {
+        const title = (notice && notice.title ? notice.title : "").toString().trim().toLowerCase();
+        const status = normalizeStatus(row && row.status);
+
+        if (title.indexOf("photo needs change") !== -1) {
+            return "Photo Change";
+        }
+        if (title.indexOf("compliance notice") !== -1) {
+            return "Compliance Notice";
+        }
+        if (title.indexOf("returned for correction") !== -1 || status === "returned_for_correction") {
+            return "Returned for Correction";
+        }
+        return "Correction Notice";
+    }
+
+    async function loadLatestCorrectionNoticesByApplicationIds(context, applicationIds) {
+        const noticeMap = {};
+        let lastErrorMessage = "";
+
+        for (let start = 0; start < applicationIds.length; start += PROFILE_BATCH_SIZE) {
+            const batchIds = applicationIds.slice(start, start + PROFILE_BATCH_SIZE);
+            if (!batchIds.length) {
+                continue;
+            }
+
+            const result = await context.client
+                .from("notifications")
+                .select("related_application_id, notification_type, title, message, created_at")
+                .in("related_application_id", batchIds)
+                .in("notification_type", ["application", "reminder"])
+                .order("created_at", { ascending: false });
+
+            if (result.error) {
+                lastErrorMessage = result.error.message || "";
+                continue;
+            }
+
+            (result.data || []).forEach(function (row) {
+                const applicationId = (row.related_application_id || "").toString().trim();
+                if (!applicationId || !isCorrectionNotification(row)) {
+                    return;
+                }
+
+                const existing = noticeMap[applicationId];
+                const currentTime = row.created_at ? new Date(row.created_at).getTime() : 0;
+                const existingTime = existing && existing.created_at ? new Date(existing.created_at).getTime() : 0;
+                if (!existing || currentTime > existingTime) {
+                    noticeMap[applicationId] = row;
+                }
+            });
+        }
+
+        return {
+            noticeMap: noticeMap,
+            errorMessage: lastErrorMessage
+        };
+    }
+
+    function hasApplicationUpdatedSinceNotice(application, notice) {
+        const status = normalizeStatus(application && application.status);
+        const noticeAt = new Date(notice && notice.created_at ? notice.created_at : 0).getTime();
+        const applicationUpdatedAt = new Date(
+            (application && (application.updated_at || application.created_at)) || 0
+        ).getTime();
+
+        return !!(
+            notice &&
+            noticeAt &&
+            applicationUpdatedAt &&
+            applicationUpdatedAt > noticeAt &&
+            status !== "returned_for_correction"
+        );
+    }
+
+    function isResubmittedForCheck(application, notice) {
+        return normalizeStatus(application && application.status) === "submitted" &&
+            hasApplicationUpdatedSinceNotice(application, notice);
     }
 
     function storeVerificationQueue(rows) {
@@ -84,12 +253,6 @@
         });
     }
 
-    function safeDomId(value) {
-        return (value || "")
-            .toString()
-            .replace(/[^a-zA-Z0-9\-_:.]/g, "_");
-    }
-
     function buildApplicantName(profile) {
         const first = (profile && profile.first_name ? profile.first_name : "").trim();
         const middle = (profile && profile.middle_name ? profile.middle_name : "").trim();
@@ -99,31 +262,6 @@
             return joined;
         }
         return "Unknown Applicant";
-    }
-
-    function applicantInitials(name) {
-        const parts = (name || "")
-            .toString()
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean);
-        if (!parts.length) {
-            return "1x1";
-        }
-        return parts.slice(0, 2).map(function (part) {
-            return part.charAt(0).toUpperCase();
-        }).join("");
-    }
-
-    async function createSignedUrl(path) {
-        if (!authContext || !path || !window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
-            return "";
-        }
-        try {
-            return await window.ldssUploads.createObjectUrl(authContext, path);
-        } catch (error) {
-            return "";
-        }
     }
 
     async function loadProfilesByIds(context, applicantIds) {
@@ -139,7 +277,7 @@
 
             const profileResult = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, course_or_strand, applicant_photo_path")
+                .select("id, first_name, middle_name, last_name, barangay")
                 .in("id", batchIds);
 
             if (profileResult.error) {
@@ -160,6 +298,46 @@
         };
     }
 
+    async function fetchAllApplications(context) {
+        const rows = [];
+        let totalCount = 0;
+
+        for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
+            const result = await context.client
+                .from("applications")
+                .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at", {
+                    count: from === 0 ? "exact" : undefined
+                })
+                .neq("status", "draft")
+                .order("updated_at", { ascending: false })
+                .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (result.error) {
+                return {
+                    data: rows,
+                    count: totalCount,
+                    error: result.error
+                };
+            }
+
+            const batch = result.data || [];
+            if (from === 0) {
+                totalCount = result.count || batch.length;
+            }
+
+            rows.push.apply(rows, batch);
+            if (batch.length < SUPABASE_FETCH_LIMIT) {
+                break;
+            }
+        }
+
+        return {
+            data: rows,
+            count: totalCount,
+            error: null
+        };
+    }
+
     function getPageCount(total) {
         if (total <= 0) {
             return 1;
@@ -168,16 +346,32 @@
     }
 
     function fillFilters(rows) {
+        const barangayFilter = byId("secretaryApplicationsBarangayFilter");
         const sectorFilter = byId("secretaryApplicationsSectorFilter");
         const statusFilter = byId("secretaryApplicationsStatusFilter");
         const yearFilter = byId("secretaryApplicationsYearFilter");
-        if (!sectorFilter || !statusFilter || !yearFilter) {
+        if (!barangayFilter || !sectorFilter || !statusFilter || !yearFilter) {
             return;
         }
 
+        const selectedBarangayRaw = barangayFilter.value || "all";
+        const selectedBarangay = selectedBarangayRaw === "all"
+            ? "all"
+            : (normalizeBarangay(selectedBarangayRaw) || "all");
         const selectedSector = sectorFilter.value || "all";
         const selectedStatus = statusFilter.value || "all";
         const selectedYear = yearFilter.value || "all";
+
+        const observedBarangays = new Set(
+            rows
+                .map(function (row) {
+                    return normalizeBarangay(row.barangay || "");
+                })
+                .filter(Boolean)
+        );
+        const barangays = DAET_BARANGAYS.filter(function (barangay) {
+            return observedBarangays.has(barangay);
+        });
 
         const sectors = Array.from(
             new Set(
@@ -211,7 +405,16 @@
             )
         ).sort().reverse();
 
-        sectorFilter.innerHTML = '<option value="all">All</option>';
+        barangayFilter.innerHTML = '<option value="all">ALL BARANGAY</option>';
+        barangays.forEach(function (barangay) {
+            const option = document.createElement("option");
+            option.value = barangay;
+            option.textContent = barangay;
+            barangayFilter.appendChild(option);
+        });
+        barangayFilter.value = barangays.includes(selectedBarangay) ? selectedBarangay : "all";
+
+        sectorFilter.innerHTML = '<option value="all">ALL SECTOR</option>';
         sectors.forEach(function (sector) {
             const option = document.createElement("option");
             option.value = sector;
@@ -220,7 +423,7 @@
         });
         sectorFilter.value = sectors.includes(selectedSector) ? selectedSector : "all";
 
-        statusFilter.innerHTML = '<option value="all">All</option>';
+        statusFilter.innerHTML = '<option value="all">STATUS ALL</option>';
         statuses.forEach(function (status) {
             const option = document.createElement("option");
             option.value = status;
@@ -229,7 +432,7 @@
         });
         statusFilter.value = statuses.includes(selectedStatus) ? selectedStatus : "all";
 
-        yearFilter.innerHTML = '<option value="all">All</option>';
+        yearFilter.innerHTML = '<option value="all">YEAR ALL</option>';
         years.forEach(function (year) {
             const option = document.createElement("option");
             option.value = year;
@@ -281,6 +484,7 @@
     }
 
     function applyFilterRows() {
+        const barangay = byId("secretaryApplicationsBarangayFilter") ? byId("secretaryApplicationsBarangayFilter").value : "all";
         const sector = byId("secretaryApplicationsSectorFilter") ? byId("secretaryApplicationsSectorFilter").value : "all";
         const status = byId("secretaryApplicationsStatusFilter") ? byId("secretaryApplicationsStatusFilter").value : "all";
         const schoolYear = byId("secretaryApplicationsYearFilter") ? byId("secretaryApplicationsYearFilter").value : "all";
@@ -289,6 +493,8 @@
             : "";
 
         return allRows.filter(function (row) {
+            const rowBarangay = normalizeBarangay(row.barangay || "");
+            const matchesBarangay = barangay === "all" || rowBarangay === barangay;
             const rowSector = (row.sector_classification || "").toString().trim();
             const matchesSector = sector === "all" || rowSector === sector;
             const normalized = normalizeStatus(row.status);
@@ -296,7 +502,7 @@
             const matchesYear = schoolYear === "all" || row.school_year === schoolYear;
             const applicantName = (row.applicant_name || "").toLowerCase();
             const matchesSearch = !searchQuery || applicantName.indexOf(searchQuery) !== -1;
-            return matchesSector && matchesStatus && matchesYear && matchesSearch;
+            return matchesBarangay && matchesSector && matchesStatus && matchesYear && matchesSearch;
         });
     }
 
@@ -365,7 +571,7 @@
             return;
         }
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No application records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No application records found.</td></tr>';
             return;
         }
         tbody.innerHTML = rows.map(function (row) {
@@ -373,26 +579,23 @@
             const meta = statusMeta(normalized);
             const submitted = row.submitted_at || row.created_at;
             const action = actionForStatus(normalized, row.id);
-            const photoDomId = "secretaryApplicantPhoto-" + safeDomId(row.id);
-            const placeholderDomId = "secretaryApplicantPhotoPlaceholder-" + safeDomId(row.id);
             const applicantName = row.applicant_name || "Unknown";
-            const degreeCourse = row.degree_course || row.scholarship_type || "-";
             const sectorClassification = row.sector_classification || "-";
+            const resubmittedMarkup = row.resubmitted_for_check
+                ? '<div class="ldss-queue-applicant-flags"><span class="ldss-chip ldss-chip-accent">Resubmitted</span></div>' +
+                    '<span class="ldss-queue-applicant-note">After ' + escapeHtml(row.resubmitted_notice_label || "Correction Notice") + "</span>"
+                : "";
             return (
-                "<tr>" +
+                '<tr class="ldss-secretary-app-row" tabindex="0">' +
                 '<td data-label="Applicant">' +
                 '<div class="ldss-queue-applicant">' +
-                '<div class="ldss-queue-applicant-photo">' +
-                '<img class="d-none" id="' + escapeHtml(photoDomId) + '" alt="Applicant 1x1 photo" loading="lazy" decoding="async" />' +
-                '<div class="ldss-queue-applicant-photo-placeholder" id="' + escapeHtml(placeholderDomId) + '">' + escapeHtml(applicantInitials(applicantName)) + "</div>" +
-                "</div>" +
                 '<div class="ldss-queue-applicant-body">' +
                 '<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + "</span>" +
+                resubmittedMarkup +
                 "</div>" +
                 "</div>" +
                 "</td>" +
                 '<td data-label="Application ID">' + escapeHtml(row.application_no || "-") + "</td>" +
-                '<td data-label="Degree Course"><div class="ldss-queue-degree ldss-table-ellipsis" title="' + escapeHtml(degreeCourse) + '">' + escapeHtml(degreeCourse) + "</div></td>" +
                 '<td data-label="Sector Classification"><span class="ldss-table-ellipsis" title="' + escapeHtml(sectorClassification) + '">' + escapeHtml(sectorClassification) + "</span></td>" +
                 '<td data-label="Submitted">' + escapeHtml(formatDate(submitted)) + "</td>" +
                 '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
@@ -400,47 +603,6 @@
                 "</tr>"
             );
         }).join("");
-        photoRenderToken += 1;
-        void renderApplicantPhotos(rows, photoRenderToken);
-    }
-    async function renderApplicantPhotos(rows, token) {
-        const photoTasks = rows.map(async function (row) {
-            const photoPath = (row && row.applicant_photo_path ? row.applicant_photo_path : "").toString().trim();
-            if (!photoPath) {
-                return null;
-            }
-
-            const photoDomId = "secretaryApplicantPhoto-" + safeDomId(row.id);
-            const placeholderDomId = "secretaryApplicantPhotoPlaceholder-" + safeDomId(row.id);
-            const photoUrl = await createSignedUrl(photoPath);
-
-            return {
-                photoDomId: photoDomId,
-                placeholderDomId: placeholderDomId,
-                photoUrl: photoUrl
-            };
-        });
-
-        const photoResults = await Promise.all(photoTasks);
-        if (token !== photoRenderToken) {
-            return;
-        }
-
-        photoResults.forEach(function (result) {
-            if (!result || !result.photoUrl) {
-                return;
-            }
-
-            const image = byId(result.photoDomId);
-            const placeholder = byId(result.placeholderDomId);
-            if (!image || !placeholder) {
-                return;
-            }
-
-            image.src = result.photoUrl;
-            image.classList.remove("d-none");
-            placeholder.classList.add("d-none");
-        });
     }
     function applyFiltersAndRender(resetPage) {
         if (resetPage) {
@@ -469,11 +631,7 @@
     async function loadApplications(context) {
         showStatus("");
 
-        const appResult = await context.client
-            .from("applications")
-            .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at")
-            .neq("status", "draft")
-            .order("updated_at", { ascending: false });
+        const appResult = await fetchAllApplications(context);
 
         if (appResult.error) {
             showStatus("Failed to load application queue: " + appResult.error.message, "alert-danger");
@@ -484,19 +642,29 @@
         const applicantIds = Array.from(new Set(rows.map(function (row) {
             return row.applicant_id;
         }).filter(Boolean)));
+        const applicationIds = Array.from(new Set(rows.map(function (row) {
+            return row.id;
+        }).filter(Boolean)));
 
         const profileLoad = applicantIds.length > 0
             ? await loadProfilesByIds(context, applicantIds)
             : { profileMap: {}, failedBatchCount: 0, lastErrorMessage: "" };
         const profileMap = profileLoad.profileMap;
+        const correctionNoticeLoad = applicationIds.length > 0
+            ? await loadLatestCorrectionNoticesByApplicationIds(context, applicationIds)
+            : { noticeMap: {}, errorMessage: "" };
+        const correctionNoticeMap = correctionNoticeLoad.noticeMap || {};
 
         allRows = rows.map(function (row) {
             const profile = profileMap[row.applicant_id] || null;
+            const latestCorrectionNotice = correctionNoticeMap[row.id] || null;
             return Object.assign({}, row, {
                 applicant_name: buildApplicantName(profile),
-                degree_course: (profile && profile.course_or_strand ? profile.course_or_strand : "") || row.scholarship_type || "",
+                barangay: profile && profile.barangay ? profile.barangay : "",
                 sector_classification: row.sector_classification || "",
-                applicant_photo_path: profile && profile.applicant_photo_path ? profile.applicant_photo_path : ""
+                latest_correction_notice: latestCorrectionNotice,
+                resubmitted_for_check: isResubmittedForCheck(row, latestCorrectionNotice),
+                resubmitted_notice_label: latestCorrectionNotice ? correctionNoticeLabel(latestCorrectionNotice, row) : ""
             });
         });
 
@@ -504,6 +672,13 @@
             showStatus(
                 "Loaded application queue, but some applicant profiles could not be loaded. " +
                 (profileLoad.lastErrorMessage ? ("Last error: " + profileLoad.lastErrorMessage) : "Please refresh and try again."),
+                "alert-warning"
+            );
+        }
+        if (correctionNoticeLoad.errorMessage) {
+            showStatus(
+                "Application queue loaded, but some correction history markers could not be loaded. " +
+                "Showing available queue data only.",
                 "alert-warning"
             );
         }
@@ -516,6 +691,7 @@
     function bindEvents() {
         const applyBtn = byId("secretaryApplicationsApplyFilterBtn");
         const searchInput = byId("secretaryApplicationsSearchInput");
+        const barangayFilter = byId("secretaryApplicationsBarangayFilter");
         const sectorFilter = byId("secretaryApplicationsSectorFilter");
         const statusFilter = byId("secretaryApplicationsStatusFilter");
         const yearFilter = byId("secretaryApplicationsYearFilter");
@@ -537,6 +713,12 @@
                     return;
                 }
                 event.preventDefault();
+                applyFiltersAndRender(true);
+            });
+        }
+
+        if (barangayFilter) {
+            barangayFilter.addEventListener("change", function () {
                 applyFiltersAndRender(true);
             });
         }
@@ -595,8 +777,6 @@
         if (!context || !context.client || !context.user) {
             return;
         }
-
-        authContext = context;
 
         bindEvents();
         await loadApplications(context);

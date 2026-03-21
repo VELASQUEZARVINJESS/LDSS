@@ -101,9 +101,14 @@
                 setStatus(error.message || "Password update failed.", "alert-danger");
                 return;
             }
+            try {
+                await client.auth.signOut();
+            } catch (signOutError) {
+                // Ignore post-reset sign-out failure and continue to login.
+            }
             setStatus("Password updated successfully. Redirecting to login...", "alert-success");
             setTimeout(function () {
-                window.location.href = "login.html";
+                window.location.replace("login.html");
             }, 1300);
         } catch (err) {
             setStatus("Unexpected password update error. Please retry.", "alert-danger");

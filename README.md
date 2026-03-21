@@ -28,6 +28,9 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Security role hardening hotfix is in `supabase/security_hotfix_2026_03_10.sql`.
 - LDSP branding hotfix (application number prefix) is in `supabase/branding_hotfix_ldsp_2026_03_10.sql`.
 - User management hotfix (secure super-admin delete user RPC) is in `supabase/user_management_hotfix_2026_03_10.sql`.
+- Reminder email log hotfix is in `supabase/reminder_email_logs_hotfix_2026_03_17.sql`.
+- Reminder campaign queue hotfix is in `supabase/reminder_campaign_jobs_hotfix_2026_03_19.sql`.
+- Intake date-time enforcement hotfix is in `supabase/application_intake_datetime_hotfix_2026_03_19.sql`.
 - Applicant Phase 1.1 live integrations now in:
   - `js/supabase-applicant-guard.js`
   - `js/supabase-applicant-profile.js`
@@ -53,7 +56,22 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Extended application-only fields such as religion, family background, spouse details, awards, and similar non-core inputs now have a shared table path via `application_aux_data` so applicant and secretary corrections can persist across devices.
 - Applicant legacy barangay cleanup now uses the dedicated `profiles.barangay` field, a dashboard reminder modal, and a direct `My Profile` barangay update path for older accounts with existing applications.
 - Applicant application form now skips the auto-open Data Privacy Notice modal when reopening an already submitted application; the notice is still enforced on submit when needed.
-- Secretary verification supports document status updates, interview scheduling, hard-copy verification state, verified photo upload, recommend-to-admin, and applicant notifications.
+- Applicant mobile handling now keeps the sidenav temporary-only on phones and tightens the top bar, page headers, action rows, cards, and pagination for smaller screens.
+- Applicant dashboard now keeps a simpler top summary layout without the `Recent Activity`, `Requirement Summary`, and `Application Timeline` section row.
+- Applicant dashboard quick actions now show only the `New Application` button in the overview bar.
+- Applicant `My Applications` now removes the extra `Continue Draft` header button to keep the page less confusing.
+- Applicant/application workflow chips now show `Submitted` in blue for clearer visual status distinction.
+- Applicant submitted status guidance now says to wait for secretary checking for correction, screening, and exam scheduling.
+- Applicant profile address display now deduplicates repeated `Barangay` segments so messy saved address text renders as one clean Daet address.
+- Applicant `My Profile` now uses a more mobile-first summary layout with a stronger profile hero, scholarship summary, document status chips, a simplified applicant account menu, the summary row hidden on phones for later redesign, and the detailed personal/contact/education/family cards removed from the main view to reduce applicant confusion.
+- Secretary verification supports document status updates, interview scheduling, hard-copy verification state, verified photo upload, return-for-correction/compliance flows, and applicant notifications.
+- Secretary and applicant printable application forms now share the same official print-sheet layout, and the secretary print output no longer includes the requirement section so both versions match more closely.
+- Secretary dashboard chart row now replaces the old Return / Resubmission graph with a reminder follow-up chart for draft/no-form users, while Sector Classification was moved into the earlier chart slot.
+- Secretary Reports is now a cleared reconstruction shell; the old report cards, filters, and summary details were removed from the page so the secretary printing/reporting flow can be rebuilt cleanly.
+- Secretary reminder campaigns now support queued background sending in timed batches through the Node server so large filtered reminder groups do not need to be sent all at once.
+- Secretary general information report printouts now include the LGU Daet, system icon, and Maogma logos in the report header.
+- System Administrator scholarship settings now support application open/close time controls, and applicant submission cutoff follows the configured date and time.
+- Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
 - Admin approval queue supports ranking view, special endorsement action, approve/reject/waitlist decisions, and batch decision handling.
 - Scholarship workflow status model:
@@ -96,7 +114,8 @@ Important:
 4. Node hosting is optional unless you still rely on older hosted file paths that start with `uploads/`.
 
 Login behavior now:
-- Uses Supabase `signInWithPassword` (email or mobile/phone).
+- Uses Supabase `signInWithPassword`.
+- The login form currently accepts email or mobile input, but the active registration flow creates email/password auth accounts and stores mobile numbers in profile data for contact details.
 - Fetches `profiles.role`.
 - Redirects automatically:
   - `applicant` -> `APPLICANT/`
@@ -122,6 +141,14 @@ Required Supabase Auth settings:
 2. Add redirect URL:
    - `https://daet-scholarship.gt.tc/reset-password.html`
 3. Keep Email provider enabled for recovery links.
+
+## Developer Checks
+- Run `npm run check:syntax` after low-risk JS changes to catch parse errors before uploading files to hosting.
+- `npm test` is still a placeholder and does not run application tests yet.
+
+## Placeholder Shells
+- Some pages intentionally remain static shells so role-based navigation works without breaking entry points.
+- Current shell examples include Applicant Help, Admin Notifications, and the System Administrator dashboard overview.
 
 ## Security Headers
 - Apache/static hosting baseline headers are defined in `.htaccess`.

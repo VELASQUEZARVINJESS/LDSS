@@ -93,7 +93,7 @@
                                             <div class="page-header-icon"><i data-feather="sliders"></i></div>
                                             Scholarship Settings
                                         </h1>
-                                        <div class="small ldss-muted">Configure quota, passing score, ranking basis, and approval control settings.</div>
+                                        <div class="small ldss-muted">Configure scholarship duration, quota, passing score, ranking basis, and approval control settings.</div>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3">
                                         <button class="btn btn-outline-dark btn-sm me-2" id="superSettingsLoadBtn" type="button">Load Active</button>
@@ -134,7 +134,38 @@
                         <div class="row g-4">
                             <div class="col-xl-6">
                                 <div class="card h-100">
-                                    <div class="card-header">Quota and Cycle Controls</div>
+                                    <div class="card-header">Scholarship Duration</div>
+                                    <div class="card-body">
+                                        <div class="row g-3">
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsCycleOpen">Start Date</label>
+                                                <input class="form-control" id="superSettingsCycleOpen" type="date" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsCycleOpenTime">Start Time</label>
+                                                <input class="form-control" id="superSettingsCycleOpenTime" type="time" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsCycleClose">End Date</label>
+                                                <input class="form-control" id="superSettingsCycleClose" type="date" />
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="small mb-1" for="superSettingsCycleCloseTime">End Time</label>
+                                                <input class="form-control" id="superSettingsCycleCloseTime" type="time" />
+                                            </div>
+                                            <div class="col-12">
+                                                <div class="alert alert-warning mb-0 small" role="alert">
+                                                    This is the official scholarship application cutoff schedule in Asia/Manila time. After the end date and time, applicants can no longer submit new applications.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-xl-6">
+                                <div class="card h-100">
+                                    <div class="card-header">Quota Controls</div>
                                     <div class="card-body">
                                         <div class="row g-3">
                                             <div class="col-md-6">
@@ -153,19 +184,16 @@
                                                 <label class="small mb-1" for="superSettingsExamItems">Exam Total Items</label>
                                                 <input class="form-control" id="superSettingsExamItems" type="number" min="1" step="1" placeholder="100" />
                                             </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="superSettingsCycleOpen">Application Open</label>
-                                                <input class="form-control" id="superSettingsCycleOpen" type="date" />
-                                            </div>
-                                            <div class="col-md-6">
-                                                <label class="small mb-1" for="superSettingsCycleClose">Application Close</label>
-                                                <input class="form-control" id="superSettingsCycleClose" type="date" />
+                                            <div class="col-12">
+                                                <div class="small text-muted">Quota and exam totals apply to the active school year configuration.</div>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                        </div>
 
+                        <div class="row g-4 mt-1">
                             <div class="col-xl-6">
                                 <div class="card h-100">
                                     <div class="card-header">Passing Score and Ranking Basis</div>
@@ -262,7 +290,7 @@
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260314-3"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260319-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

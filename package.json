@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "host": "node server.js",
+    "check:syntax": "node --check server.js && node --check js/supabase-forgot-password.js && node --check js/toasts.js && node --check js/markdown.js",
     "test": "echo \"No tests configured\""
   },
   "repository": {
