@@ -51,6 +51,7 @@ const ROOT_STATIC_FILES = [
     "index.html",
     "login.html",
     "register.html",
+    "verify-account.html",
     "forgot-password.html",
     "reset-password.html",
     "logout.html",
@@ -232,6 +233,10 @@ function normalizeMimeType(mimeType) {
 function nullIfBlank(value) {
     const text = (value || "").toString().trim();
     return text || null;
+}
+
+function isUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test((value || "").toString().trim());
 }
 
 function normalizePhoneNumber(value) {
@@ -565,6 +570,75 @@ function formatReminderScheduleDate(value) {
         month: "long",
         day: "numeric"
     });
+}
+
+function isMissingRelationMessage(message) {
+    const text = (message || "").toString().toLowerCase();
+    return text.includes("does not exist") || text.includes("relation") && text.includes("audit_logs");
+}
+
+async function writeAuditLogEntry(client, entry) {
+    if (!client || !entry || !entry.action || !entry.summary) {
+        return;
+    }
+
+    const payload = {
+        module: nullIfBlank(entry.module) || "system_admin",
+        action: entry.action,
+        actor_id: nullIfBlank(entry.actor_id),
+        actor_role: entry.actor_role || "super_admin",
+        target_user_id: nullIfBlank(entry.target_user_id),
+        target_role: nullIfBlank(entry.target_role),
+        target_email: nullIfBlank(entry.target_email),
+        target_label: nullIfBlank(entry.target_label),
+        record_type: nullIfBlank(entry.record_type) || "system",
+        record_id: nullIfBlank(entry.record_id),
+        summary: entry.summary,
+        details: entry.details && typeof entry.details === "object" ? entry.details : {}
+    };
+
+    try {
+        const result = await client.from("audit_logs").insert(payload);
+        if (result.error && !isMissingRelationMessage(result.error.message)) {
+            console.error("Audit log insert failed:", result.error.message || result.error);
+        }
+    } catch (error) {
+        if (!isMissingRelationMessage(error && error.message)) {
+            console.error("Audit log insert failed:", error && error.message ? error.message : error);
+        }
+    }
+}
+
+async function listAllAuthUsers(adminClient) {
+    const users = [];
+    let page = 1;
+    const perPage = 1000;
+
+    while (true) {
+        const result = await adminClient.auth.admin.listUsers({
+            page: page,
+            perPage: perPage
+        });
+        const batch = result && result.data
+            ? (
+                Array.isArray(result.data.users)
+                    ? result.data.users
+                    : (Array.isArray(result.data) ? result.data : [])
+            )
+            : [];
+
+        if (result.error) {
+            throw new Error(result.error.message || "Failed to list auth users.");
+        }
+
+        users.push.apply(users, batch);
+        if (batch.length < perPage) {
+            break;
+        }
+        page += 1;
+    }
+
+    return users;
 }
 
 function formatReminderDeadlineLabel(dateValue, timeValue) {
@@ -1819,12 +1893,194 @@ app.post("/api/super-admin/secretaries", authenticate, async function (request, 
             return;
         }
 
+        await writeAuditLogEntry(adminClient, {
+            module: "user_management",
+            action: "create_secretary_account",
+            actor_id: request.auth.user.id,
+            actor_role: request.auth.role,
+            target_user_id: profileResult.data.id,
+            target_role: profileResult.data.role,
+            target_email: profileResult.data.email,
+            target_label: [firstName, middleName || "", lastName].join(" ").replace(/\s+/g, " ").trim(),
+            record_type: "user",
+            record_id: profileResult.data.id,
+            summary: "Created secretary account for " + (profileResult.data.email || "new staff user") + ".",
+            details: {
+                first_name: firstName,
+                middle_name: middleName || "",
+                last_name: lastName,
+                mobile_number: mobileNumber
+            }
+        });
+
         response.status(201).json({
             ok: true,
             user: profileResult.data
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Secretary account creation failed.");
+    }
+});
+
+app.get("/api/super-admin/users/verification-status", authenticate, async function (request, response) {
+    try {
+        if (request.auth.role !== "super_admin") {
+            writeJsonError(response, 403, "Only System Administrator can view verification status.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const rawIds = ((request.query && request.query.ids) || "").toString();
+        const userIds = rawIds
+            .split(",")
+            .map(function (value) { return value.trim(); })
+            .filter(function (value, index, array) {
+                return isUuid(value) && array.indexOf(value) === index;
+            });
+
+        if (userIds.length === 0) {
+            response.status(200).json({ ok: true, statuses: {} });
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const authUsers = await listAllAuthUsers(adminClient);
+        const requestedLookup = {};
+        const statuses = {};
+
+        userIds.forEach(function (userId) {
+            requestedLookup[userId] = true;
+        });
+
+        authUsers.forEach(function (user) {
+            if (!user || !requestedLookup[user.id]) {
+                return;
+            }
+
+            const confirmedAt = user.email_confirmed_at || user.confirmed_at || null;
+            const email = (user.email || "").toString();
+            statuses[user.id] = {
+                user_id: user.id,
+                email: email,
+                email_confirmed_at: confirmedAt,
+                status: email
+                    ? (confirmedAt ? "verified" : "pending")
+                    : "no_email"
+            };
+        });
+
+        userIds.forEach(function (userId) {
+            if (!statuses[userId]) {
+                statuses[userId] = {
+                    user_id: userId,
+                    email: "",
+                    email_confirmed_at: null,
+                    status: "unknown"
+                };
+            }
+        });
+
+        response.status(200).json({
+            ok: true,
+            statuses: statuses
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Failed to load verification status.");
+    }
+});
+
+app.post("/api/super-admin/users/:userId/confirm-email", authenticate, async function (request, response) {
+    try {
+        if (request.auth.role !== "super_admin") {
+            writeJsonError(response, 403, "Only System Administrator can manually confirm user email access.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const userId = nullIfBlank(request.params && request.params.userId);
+        if (!userId || !isUuid(userId)) {
+            writeJsonError(response, 400, "A valid user ID is required.");
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email, first_name, last_name")
+            .eq("id", userId)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            writeJsonError(response, 400, profileResult.error.message || "Failed to load the selected user profile.");
+            return;
+        }
+        if (!profileResult.data) {
+            writeJsonError(response, 404, "Selected user was not found.");
+            return;
+        }
+
+        const updateResult = await adminClient.auth.admin.updateUserById(userId, {
+            email_confirm: true
+        });
+        const updatedUser = updateResult && updateResult.data
+            ? (updateResult.data.user || updateResult.data)
+            : null;
+
+        if (updateResult.error || !updatedUser) {
+            writeJsonError(
+                response,
+                400,
+                (updateResult.error && updateResult.error.message) || "Manual email confirmation failed."
+            );
+            return;
+        }
+
+        await writeAuditLogEntry(adminClient, {
+            module: "user_management",
+            action: "confirm_email_login",
+            actor_id: request.auth.user.id,
+            actor_role: request.auth.role,
+            target_user_id: profileResult.data.id,
+            target_role: profileResult.data.role,
+            target_email: updatedUser.email || profileResult.data.email || "",
+            target_label: [profileResult.data.first_name || "", profileResult.data.last_name || ""].join(" ").replace(/\s+/g, " ").trim(),
+            record_type: "user",
+            record_id: profileResult.data.id,
+            summary: "Manually confirmed email login for " + ((updatedUser.email || profileResult.data.email || "selected account").toString()) + ".",
+            details: {
+                email_confirmed_at: updatedUser.email_confirmed_at || updatedUser.confirmed_at || null
+            }
+        });
+
+        response.status(200).json({
+            ok: true,
+            user: {
+                id: profileResult.data.id,
+                role: profileResult.data.role,
+                email: updatedUser.email || profileResult.data.email || "",
+                first_name: profileResult.data.first_name || "",
+                last_name: profileResult.data.last_name || "",
+                email_confirmed_at: updatedUser.email_confirmed_at || updatedUser.confirmed_at || null
+            }
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Manual email confirmation failed.");
     }
 });
 

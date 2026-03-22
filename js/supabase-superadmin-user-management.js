@@ -2,6 +2,11 @@
     "use strict";
 
     const SECRETARY_CREATE_API_PATH = "/api/super-admin/secretaries";
+    const USER_CONFIRM_EMAIL_API_BASE = "/api/super-admin/users";
+    const USER_VERIFICATION_STATUS_API_PATH = "/api/super-admin/users/verification-status";
+    const SUPABASE_FETCH_LIMIT = 1000;
+    const USER_VERIFICATION_STATUS_BATCH_SIZE = 150;
+    const USER_APPLICATION_LOOKUP_BATCH_SIZE = 200;
     const MIN_PASSWORD_LENGTH = 12;
     const APPLICATION_STATUS_META = {
         draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
@@ -27,6 +32,16 @@
 
     let userRows = [];
     let authContext = null;
+    let currentPage = 1;
+    let pageSize = 10;
+
+    function authEmailHelper() {
+        return window.LDSSAuthEmailHelper || null;
+    }
+
+    function auditHelper() {
+        return window.LDSSSuperAdminAudit || null;
+    }
 
     function byId(id) {
         return document.getElementById(id);
@@ -124,6 +139,8 @@
     async function requestJson(path, options) {
         const token = await getAccessToken();
         const fetchOptions = Object.assign({ method: "GET" }, options || {});
+        const notFoundMessage = fetchOptions.notFoundMessage || "Required System Administrator API route was not found. Open the site through the Node server.";
+        delete fetchOptions.notFoundMessage;
         const headers = new Headers(fetchOptions.headers || {});
         headers.set("Authorization", "Bearer " + token);
         fetchOptions.headers = headers;
@@ -141,9 +158,7 @@
         }
 
         if (!response.ok) {
-            const fallbackMessage = response.status === 404
-                ? "Secretary account API route was not found. Open the site through the Node server."
-                : "Request failed.";
+            const fallbackMessage = response.status === 404 ? notFoundMessage : "Request failed.";
             throw new Error(payload && payload.error ? payload.error : fallbackMessage);
         }
 
@@ -162,6 +177,23 @@
             year: "numeric",
             month: "short",
             day: "numeric"
+        });
+    }
+
+    function formatDateTime(value) {
+        if (!value) {
+            return "-";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "-";
+        }
+        return date.toLocaleString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
         });
     }
 
@@ -203,11 +235,85 @@
         return "-";
     }
 
+    function displayTarget(row) {
+        const name = fullName(row);
+        if (row && row.email) {
+            return name !== "-" ? name + " (" + row.email + ")" : row.email;
+        }
+        return name;
+    }
+
+    function userNameMarkup(row) {
+        const fullNameText = fullName(row);
+        const nameText = escapeHtml(fullNameText);
+        const emailText = row && row.email
+            ? escapeHtml(row.email)
+            : '<span class="fst-italic">No email on file</span>';
+
+        return (
+            '<span class="ldss-user-name" title="' + escapeHtml(fullNameText) + '">' + nameText + "</span>" +
+            '<span class="small text-muted d-block mt-1 text-break">' + emailText + "</span>"
+        );
+    }
+
     function statusChip(row) {
         if (row.is_active === false) {
             return '<span class="ldss-chip ldss-chip-danger">Suspended</span>';
         }
         return '<span class="ldss-chip ldss-chip-success">Active</span>';
+    }
+
+    function verificationStateForRow(row) {
+        if (!row || !row.email) {
+            return "no_email";
+        }
+        const state = (row.email_verification_state || "").toString().trim().toLowerCase();
+        if (state === "verified" || state === "pending" || state === "unknown") {
+            return state;
+        }
+        return "unknown";
+    }
+
+    function verificationMeta(row) {
+        const state = verificationStateForRow(row);
+        if (state === "verified") {
+            return {
+                state: state,
+                label: "Verified",
+                chipClass: "ldss-chip-success",
+                text: row.email_confirmed_at ? ("Confirmed " + formatDateTime(row.email_confirmed_at)) : "Email confirmation completed."
+            };
+        }
+        if (state === "pending") {
+            return {
+                state: state,
+                label: "Pending",
+                chipClass: "ldss-chip-accent",
+                text: "Awaiting OTP email confirmation."
+            };
+        }
+        if (state === "no_email") {
+            return {
+                state: state,
+                label: "No Email",
+                chipClass: "ldss-chip-neutral",
+                text: "This account does not have an email on file."
+            };
+        }
+        return {
+            state: "unknown",
+            label: "Unavailable",
+            chipClass: "ldss-chip-neutral",
+            text: "Verification status could not be loaded from the Node server."
+        };
+    }
+
+    function verificationMarkup(row) {
+        const meta = verificationMeta(row);
+        return (
+            '<div><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></div>" +
+            '<div class="small text-muted mt-1">' + escapeHtml(meta.text) + "</div>"
+        );
     }
 
     function latestApplicationByApplicant(rows) {
@@ -292,6 +398,7 @@
             return true;
         }
         const submission = submissionMeta(row);
+        const verification = verificationMeta(row);
         const latestApplication = row && row.latest_application ? row.latest_application : null;
         const latestStatus = latestApplication ? applicationStatusMeta(latestApplication.status).label : "";
         const haystack = [
@@ -299,6 +406,7 @@
             row.email || "",
             row.mobile_number || "",
             roleLabel(row.role),
+            verification.label,
             submission.label,
             latestApplication && latestApplication.application_no ? latestApplication.application_no : "",
             latestStatus
@@ -311,6 +419,7 @@
         const search = (byId("userMgmtSearch") ? byId("userMgmtSearch").value : "").trim().toLowerCase();
         const roleFilter = (byId("userMgmtRoleFilter") ? byId("userMgmtRoleFilter").value : "all").trim();
         const statusFilter = (byId("userMgmtStatusFilter") ? byId("userMgmtStatusFilter").value : "all").trim();
+        const verificationFilter = (byId("userMgmtVerificationFilter") ? byId("userMgmtVerificationFilter").value : "all").trim();
         const submissionFilter = (byId("userMgmtSubmissionFilter") ? byId("userMgmtSubmissionFilter").value : "all").trim();
 
         return userRows.filter(function (row) {
@@ -321,6 +430,9 @@
                 return false;
             }
             if (statusFilter === "suspended" && row.is_active !== false) {
+                return false;
+            }
+            if (verificationFilter !== "all" && verificationStateForRow(row) !== verificationFilter) {
                 return false;
             }
             if (submissionFilter !== "all") {
@@ -336,74 +448,200 @@
         });
     }
 
-    function rowActionsMarkup(row) {
-        const isCurrentUser = authContext && authContext.user && authContext.user.id === row.id;
-        if (isCurrentUser) {
-            return '<span class="small text-muted">Current Account</span>';
+    async function fetchAllProfiles() {
+        const rows = [];
+
+        for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
+            const result = await authContext.client
+                .from("profiles")
+                .select("id, role, email, mobile_number, first_name, middle_name, last_name, is_active, created_at")
+                .order("created_at", { ascending: false })
+                .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (result.error) {
+                return {
+                    data: rows,
+                    error: result.error
+                };
+            }
+
+            const batch = result.data || [];
+            rows.push.apply(rows, batch);
+            if (batch.length < SUPABASE_FETCH_LIMIT) {
+                break;
+            }
         }
 
-        const suspendOrActivateLabel = row.is_active === false ? "Activate" : "Suspend";
-        const suspendOrActivateAction = row.is_active === false ? "activate" : "suspend";
+        return {
+            data: rows,
+            error: null
+        };
+    }
 
+    async function fetchLatestApplicationsByApplicantIds(applicantIds) {
+        const latestByApplicant = {};
+        const uniqueIds = Array.isArray(applicantIds)
+            ? applicantIds.filter(function (value, index, array) {
+                return value && array.indexOf(value) === index;
+            })
+            : [];
+
+        for (let chunkStart = 0; chunkStart < uniqueIds.length; chunkStart += USER_APPLICATION_LOOKUP_BATCH_SIZE) {
+            const chunk = uniqueIds.slice(chunkStart, chunkStart + USER_APPLICATION_LOOKUP_BATCH_SIZE);
+
+            for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
+                const result = await authContext.client
+                    .from("applications")
+                    .select("id, applicant_id, application_no, status, submitted_at, created_at, updated_at")
+                    .in("applicant_id", chunk)
+                    .order("updated_at", { ascending: false })
+                    .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+                if (result.error) {
+                    return {
+                        data: latestByApplicant,
+                        error: result.error
+                    };
+                }
+
+                const batch = result.data || [];
+                const latestBatch = latestApplicationByApplicant(batch);
+                Object.keys(latestBatch).forEach(function (applicantId) {
+                    const current = latestBatch[applicantId];
+                    const existing = latestByApplicant[applicantId];
+
+                    if (!existing) {
+                        latestByApplicant[applicantId] = current;
+                        return;
+                    }
+
+                    const existingTs = new Date(existing.updated_at || existing.created_at || 0).getTime();
+                    const currentTs = new Date(current.updated_at || current.created_at || 0).getTime();
+                    if (currentTs > existingTs) {
+                        latestByApplicant[applicantId] = current;
+                    }
+                });
+
+                if (batch.length < SUPABASE_FETCH_LIMIT) {
+                    break;
+                }
+            }
+        }
+
+        return {
+            data: latestByApplicant,
+            error: null
+        };
+    }
+
+    function getPageCount(totalRows) {
+        return Math.max(1, Math.ceil((totalRows || 0) / pageSize));
+    }
+
+    function pageItemMarkup(label, targetPage, disabled, active, ariaLabel) {
+        const itemClass = "page-item" + (disabled ? " disabled" : "") + (active ? " active" : "");
         return (
-            '<div class="dropdown">' +
-            '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
-            '<ul class="dropdown-menu dropdown-menu-end">' +
-            '<li><button class="dropdown-item" type="button" data-action="' + suspendOrActivateAction + '" data-id="' + escapeHtml(row.id) + '">' + suspendOrActivateLabel + '</button></li>' +
-            '<li><hr class="dropdown-divider"></li>' +
-            '<li><button class="dropdown-item text-danger" type="button" data-action="delete" data-id="' + escapeHtml(row.id) + '">Delete</button></li>' +
-            "</ul>" +
-            "</div>"
+            '<li class="' + itemClass + '">' +
+            '<button class="page-link" type="button" data-page="' + targetPage + '" aria-label="' + escapeHtml(ariaLabel || label) + '">' + escapeHtml(label) + "</button>" +
+            "</li>"
         );
     }
 
-    function renderRows() {
-        const tbody = byId("userMgmtTableBody");
-        const summary = byId("userMgmtSummary");
-        if (!tbody) {
+    function renderPaginationInfo(totalRows) {
+        const info = byId("userMgmtPaginationInfo");
+        if (!info) {
+            return;
+        }
+        if (totalRows <= 0) {
+            info.textContent = "Showing 0 of 0 records";
+            return;
+        }
+        const start = (currentPage - 1) * pageSize + 1;
+        const end = Math.min(currentPage * pageSize, totalRows);
+        info.textContent = "Showing " + start + "-" + end + " of " + totalRows + " records";
+    }
+
+    function renderPagination(totalRows) {
+        const pagination = byId("userMgmtPagination");
+        if (!pagination) {
+            return;
+        }
+        if (totalRows <= 0) {
+            pagination.innerHTML = "";
             return;
         }
 
-        const rows = filteredRows();
-        if (summary) {
-            summary.textContent = rows.length + " user" + (rows.length === 1 ? "" : "s");
+        const pageCount = getPageCount(totalRows);
+        const items = [];
+        items.push(pageItemMarkup("Previous", currentPage - 1, currentPage <= 1, false, "Previous page"));
+
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(pageCount, startPage + 4);
+        if (endPage - startPage < 4) {
+            startPage = Math.max(1, endPage - 4);
         }
 
-        if (!rows.length) {
-            tbody.innerHTML = '<tr><td class="text-center py-4 text-muted" colspan="7">No users found for current filters.</td></tr>';
-            return;
+        for (let page = startPage; page <= endPage; page += 1) {
+            items.push(pageItemMarkup(String(page), page, false, page === currentPage, "Page " + page));
         }
 
-        tbody.innerHTML = rows.map(function (row) {
-            const submission = submissionMeta(row);
+        items.push(pageItemMarkup("Next", currentPage + 1, currentPage >= pageCount, false, "Next page"));
+        pagination.innerHTML = items.join("");
+    }
 
-            return (
-                "<tr>" +
-                '<td class="ldss-user-col-name"><span class="ldss-user-name">' + escapeHtml(fullName(row)) + "</span></td>" +
-                '<td class="ldss-user-col-role">' + escapeHtml(roleLabel(row.role)) + "</td>" +
-                '<td class="ldss-user-col-form"><span class="ldss-chip ' + submission.chipClass + '">' + escapeHtml(submission.label) + "</span></td>" +
-                '<td class="ldss-user-col-application">' + latestApplicationMarkup(row) + "</td>" +
-                '<td class="ldss-user-col-status">' + statusChip(row) + "</td>" +
-                '<td class="ldss-user-col-created d-none d-lg-table-cell">' + escapeHtml(formatDate(row.created_at)) + "</td>" +
-                '<td class="ldss-user-col-actions text-nowrap">' + rowActionsMarkup(row) + "</td>" +
-                "</tr>"
-            );
-        }).join("");
+    async function loadVerificationStatusByUserIds(userIds) {
+        const ids = Array.isArray(userIds)
+            ? userIds.filter(function (value, index, array) {
+                return value && array.indexOf(value) === index;
+            })
+            : [];
+
+        if (!ids.length) {
+            return {
+                statusMap: {},
+                errorMessage: ""
+            };
+        }
+
+        const statusMap = {};
+        let lastErrorMessage = "";
+
+        try {
+            for (let start = 0; start < ids.length; start += USER_VERIFICATION_STATUS_BATCH_SIZE) {
+                const batchIds = ids.slice(start, start + USER_VERIFICATION_STATUS_BATCH_SIZE);
+                const payload = await requestJson(
+                    USER_VERIFICATION_STATUS_API_PATH + "?ids=" + encodeURIComponent(batchIds.join(",")),
+                    {
+                        method: "GET",
+                        notFoundMessage: "Verification status API route was not found. Open the site through the Node server."
+                    }
+                );
+                Object.assign(statusMap, payload && payload.statuses ? payload.statuses : {});
+            }
+
+            return {
+                statusMap: statusMap,
+                errorMessage: ""
+            };
+        } catch (error) {
+            lastErrorMessage = error && error.message ? error.message : "Verification status could not be loaded.";
+            return {
+                statusMap: statusMap,
+                errorMessage: lastErrorMessage
+            };
+        }
     }
 
     async function loadUsers() {
         showStatus("");
-        const result = await authContext.client
-            .from("profiles")
-            .select("id, role, email, mobile_number, first_name, middle_name, last_name, is_active, created_at")
-            .order("created_at", { ascending: false });
+        const profileResult = await fetchAllProfiles();
 
-        if (result.error) {
-            showStatus("Failed to load users: " + result.error.message, "alert-danger");
+        if (profileResult.error) {
+            showStatus("Failed to load users: " + profileResult.error.message, "alert-danger");
             return;
         }
 
-        const profiles = result.data || [];
+        const profiles = profileResult.data || [];
         const applicantIds = profiles
             .filter(function (row) { return row.role === "applicant"; })
             .map(function (row) { return row.id; })
@@ -411,25 +649,38 @@
 
         let latestByApplicant = {};
         if (applicantIds.length > 0) {
-            const appResult = await authContext.client
-                .from("applications")
-                .select("id, applicant_id, application_no, status, submitted_at, created_at, updated_at")
-                .in("applicant_id", applicantIds)
-                .order("updated_at", { ascending: false });
+            const appResult = await fetchLatestApplicationsByApplicantIds(applicantIds);
 
             if (appResult.error) {
                 showStatus("Users loaded, but application submission data could not be loaded: " + appResult.error.message, "alert-warning");
             } else {
-                latestByApplicant = latestApplicationByApplicant(appResult.data || []);
+                latestByApplicant = appResult.data || {};
             }
         }
 
+        const verificationLoad = await loadVerificationStatusByUserIds(
+            profiles.map(function (row) { return row.id; })
+        );
+        if (verificationLoad.errorMessage) {
+            showStatus(
+                "Users loaded, but email verification status could not be loaded: " + verificationLoad.errorMessage,
+                "alert-warning"
+            );
+        }
+
         userRows = profiles.map(function (row) {
+            const verificationStatus = verificationLoad.statusMap[row.id] || null;
             return Object.assign({}, row, {
-                latest_application: latestByApplicant[row.id] || null
+                latest_application: latestByApplicant[row.id] || null,
+                email_verification_state: verificationStatus && verificationStatus.status
+                    ? verificationStatus.status
+                    : (row.email ? "unknown" : "no_email"),
+                email_confirmed_at: verificationStatus && verificationStatus.email_confirmed_at
+                    ? verificationStatus.email_confirmed_at
+                    : null
             });
         });
-        renderRows();
+        renderRows(true);
     }
 
     function setRefreshLoading(isLoading) {
@@ -439,6 +690,105 @@
         }
         btn.disabled = isLoading;
         btn.textContent = isLoading ? "Refreshing..." : "Refresh";
+    }
+
+    async function writeAuditEntry(entry) {
+        const helper = auditHelper();
+        if (!helper || !authContext) {
+            return { ok: false, skipped: "missing_helper" };
+        }
+
+        try {
+            return await helper.logEvent(authContext, entry);
+        } catch (_error) {
+            return { ok: false, skipped: "write_failed" };
+        }
+    }
+
+    function rowActionsMarkup(row) {
+        const isCurrentUser = authContext && authContext.user && authContext.user.id === row.id;
+        if (isCurrentUser) {
+            return '<span class="small text-muted">Current Account</span>';
+        }
+
+        const suspendOrActivateLabel = row.is_active === false ? "Activate" : "Suspend";
+        const suspendOrActivateAction = row.is_active === false ? "activate" : "suspend";
+        const verificationState = verificationStateForRow(row);
+        const verificationActions = [];
+
+        if (row.email && verificationState !== "verified") {
+            verificationActions.push('<li><button class="dropdown-item" type="button" data-action="resend-verification" data-id="' + escapeHtml(row.id) + '">Resend Verification Email</button></li>');
+            verificationActions.push('<li><button class="dropdown-item" type="button" data-action="confirm-email" data-id="' + escapeHtml(row.id) + '">Confirm Email Login</button></li>');
+        }
+        const verificationDivider = verificationActions.length ? '<li><hr class="dropdown-divider"></li>' : "";
+
+        return (
+            '<div class="ldss-row-actions">' +
+            '<div class="dropdown w-100">' +
+            '<button class="btn btn-outline-dark btn-sm dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
+            '<ul class="dropdown-menu dropdown-menu-end">' +
+            verificationActions.join("") +
+            verificationDivider +
+            '<li><button class="dropdown-item" type="button" data-action="' + suspendOrActivateAction + '" data-id="' + escapeHtml(row.id) + '">' + suspendOrActivateLabel + '</button></li>' +
+            '<li><hr class="dropdown-divider"></li>' +
+            '<li><button class="dropdown-item text-danger" type="button" data-action="delete" data-id="' + escapeHtml(row.id) + '">Delete</button></li>' +
+            "</ul>" +
+            "</div>" +
+            "</div>"
+        );
+    }
+
+    function renderRows(resetPage) {
+        const tbody = byId("userMgmtTableBody");
+        const summary = byId("userMgmtSummary");
+        if (!tbody) {
+            return;
+        }
+
+        const rows = filteredRows();
+        if (resetPage) {
+            currentPage = 1;
+        }
+        if (summary) {
+            summary.textContent = rows.length + " user" + (rows.length === 1 ? "" : "s");
+        }
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td class="text-center py-4 text-muted" colspan="8">No users found for current filters.</td></tr>';
+            renderPaginationInfo(0);
+            renderPagination(0);
+            return;
+        }
+
+        const pageCount = getPageCount(rows.length);
+        if (currentPage > pageCount) {
+            currentPage = pageCount;
+        }
+        if (currentPage < 1) {
+            currentPage = 1;
+        }
+
+        const start = (currentPage - 1) * pageSize;
+        const pageRows = rows.slice(start, start + pageSize);
+
+        tbody.innerHTML = pageRows.map(function (row) {
+            const submission = submissionMeta(row);
+
+            return (
+                '<tr class="ldss-secretary-app-row" tabindex="0">' +
+                '<td class="ldss-user-col-name" data-label="Name">' + userNameMarkup(row) + "</td>" +
+                '<td class="ldss-user-col-role" data-label="Role">' + escapeHtml(roleLabel(row.role)) + "</td>" +
+                '<td class="ldss-user-col-verification" data-label="Email Verification">' + verificationMarkup(row) + "</td>" +
+                '<td class="ldss-user-col-form" data-label="Form Status"><span class="ldss-chip ' + submission.chipClass + '">' + escapeHtml(submission.label) + "</span></td>" +
+                '<td class="ldss-user-col-application" data-label="Latest Application">' + latestApplicationMarkup(row) + "</td>" +
+                '<td class="ldss-user-col-status" data-label="Status">' + statusChip(row) + "</td>" +
+                '<td class="ldss-user-col-created" data-label="Created">' + escapeHtml(formatDate(row.created_at)) + "</td>" +
+                '<td class="ldss-user-col-actions ldss-actions-cell" data-label="Actions">' + rowActionsMarkup(row) + "</td>" +
+                "</tr>"
+            );
+        }).join("");
+        renderPaginationInfo(rows.length);
+        renderPagination(rows.length);
     }
 
     function resetCreateSecretaryForm() {
@@ -514,6 +864,9 @@
     }
 
     async function updateUserActiveState(userId, shouldBeActive) {
+        const row = userRows.find(function (item) {
+            return item && item.id === userId;
+        }) || null;
         const actionLabel = shouldBeActive ? "activate" : "suspend";
         const confirmed = window.confirm(
             (shouldBeActive ? "Activate" : "Suspend") + " this user account?"
@@ -534,10 +887,106 @@
         }
 
         showStatus("User account updated successfully.", "alert-success");
+        await writeAuditEntry({
+            module: "user_management",
+            action: shouldBeActive ? "activate_user_account" : "suspend_user_account",
+            targetUserId: row && row.id ? row.id : userId,
+            targetRole: row && row.role ? row.role : "",
+            targetEmail: row && row.email ? row.email : "",
+            targetLabel: row ? displayTarget(row) : "",
+            recordType: "user",
+            recordId: userId,
+            summary: (shouldBeActive ? "Activated user account for " : "Suspended user account for ") + (row ? displayTarget(row) : userId) + ".",
+            details: {
+                is_active: shouldBeActive
+            }
+        });
+        await loadUsers();
+    }
+
+    async function resendVerificationEmail(userId) {
+        const row = userRows.find(function (item) {
+            return item && item.id === userId;
+        }) || null;
+        const helper = authEmailHelper();
+
+        if (!row || !row.email) {
+            showStatus("Selected user does not have an email address on file.", "alert-warning");
+            return;
+        }
+
+        const confirmed = window.confirm(
+            "Send a new verification email to this user?\n\nTarget: " + displayTarget(row)
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        const resendResult = await authContext.client.auth.resend({
+            type: "signup",
+            email: row.email,
+            options: {
+                emailRedirectTo: helper && typeof helper.resolveEmailConfirmRedirectUrl === "function"
+                    ? helper.resolveEmailConfirmRedirectUrl()
+                    : undefined
+            }
+        });
+
+        if (resendResult.error) {
+            throw new Error(
+                helper && typeof helper.getErrorMessage === "function"
+                    ? helper.getErrorMessage(resendResult.error, "Failed to resend verification email.")
+                    : (resendResult.error.message || "Failed to resend verification email.")
+            );
+        }
+
+        showStatus("Verification email resent successfully to " + row.email + ".", "alert-success");
+        await writeAuditEntry({
+            module: "user_management",
+            action: "resend_verification_email",
+            targetUserId: row.id,
+            targetRole: row.role,
+            targetEmail: row.email,
+            targetLabel: displayTarget(row),
+            recordType: "user",
+            recordId: row.id,
+            summary: "Resent verification email to " + row.email + ".",
+            details: {
+                email_verification_state: verificationStateForRow(row)
+            }
+        });
+    }
+
+    async function confirmUserEmailLogin(userId) {
+        const row = userRows.find(function (item) {
+            return item && item.id === userId;
+        }) || null;
+        const targetLabel = displayTarget(row);
+        const confirmed = window.confirm(
+            "Manually confirm this account for email login?\n\nUse this only when the user cannot complete the verification email step.\n\nTarget: " + targetLabel
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        showStatus("");
+        const payload = await requestJson(USER_CONFIRM_EMAIL_API_BASE + "/" + encodeURIComponent(userId) + "/confirm-email", {
+            method: "POST",
+            notFoundMessage: "Manual email confirmation API route was not found. Open the site through the Node server."
+        });
+
+        const confirmedEmail = payload && payload.user && payload.user.email
+            ? payload.user.email
+            : (row && row.email ? row.email : targetLabel);
+
+        showStatus("Email login confirmed successfully for " + confirmedEmail + ".", "alert-success");
         await loadUsers();
     }
 
     async function deleteUser(userId) {
+        const row = userRows.find(function (item) {
+            return item && item.id === userId;
+        }) || null;
         const confirmed = window.confirm(
             "Delete this user account permanently? This removes login access and related profile data."
         );
@@ -559,11 +1008,39 @@
             }
 
             showStatus("Profile deleted. Auth user may still exist until delete RPC is deployed.", "alert-warning");
+            await writeAuditEntry({
+                module: "user_management",
+                action: "delete_user_account",
+                targetUserId: "",
+                targetRole: row && row.role ? row.role : "",
+                targetEmail: row && row.email ? row.email : "",
+                targetLabel: row ? displayTarget(row) : "",
+                recordType: "user",
+                recordId: userId,
+                summary: "Deleted profile for " + (row ? displayTarget(row) : userId) + ".",
+                details: {
+                    fallback_profile_delete_only: true
+                }
+            });
             await loadUsers();
             return;
         }
 
         showStatus("User deleted successfully.", "alert-success");
+        await writeAuditEntry({
+            module: "user_management",
+            action: "delete_user_account",
+            targetUserId: "",
+            targetRole: row && row.role ? row.role : "",
+            targetEmail: row && row.email ? row.email : "",
+            targetLabel: row ? displayTarget(row) : "",
+            recordType: "user",
+            recordId: userId,
+            summary: "Deleted user account for " + (row ? displayTarget(row) : userId) + ".",
+            details: {
+                auth_delete_completed: true
+            }
+        });
         await loadUsers();
     }
 
@@ -581,7 +1058,11 @@
 
         trigger.disabled = true;
         try {
-            if (action === "suspend") {
+            if (action === "confirm-email") {
+                await confirmUserEmailLogin(userId);
+            } else if (action === "resend-verification") {
+                await resendVerificationEmail(userId);
+            } else if (action === "suspend") {
                 await updateUserActiveState(userId, false);
             } else if (action === "activate") {
                 await updateUserActiveState(userId, true);
@@ -596,16 +1077,29 @@
     function bindEvents() {
         const table = byId("userMgmtTableBody");
         const refreshBtn = byId("userMgmtRefreshBtn");
+        const applyBtn = byId("userMgmtApplyFilterBtn");
         const createForm = byId("secretaryCreateForm");
+        const pageSizeInput = byId("userMgmtPageSize");
+        const pagination = byId("userMgmtPagination");
 
-        ["userMgmtSearch", "userMgmtRoleFilter", "userMgmtStatusFilter", "userMgmtSubmissionFilter"].forEach(function (id) {
+        ["userMgmtSearch", "userMgmtRoleFilter", "userMgmtStatusFilter", "userMgmtVerificationFilter", "userMgmtSubmissionFilter"].forEach(function (id) {
             const input = byId(id);
             if (!input) {
                 return;
             }
-            input.addEventListener("input", renderRows);
-            input.addEventListener("change", renderRows);
+            input.addEventListener("input", function () {
+                renderRows(true);
+            });
+            input.addEventListener("change", function () {
+                renderRows(true);
+            });
         });
+
+        if (applyBtn) {
+            applyBtn.addEventListener("click", function () {
+                renderRows(true);
+            });
+        }
 
         if (refreshBtn) {
             refreshBtn.addEventListener("click", async function () {
@@ -615,6 +1109,32 @@
                 } finally {
                     setRefreshLoading(false);
                 }
+            });
+        }
+
+        if (pageSizeInput) {
+            pageSizeInput.addEventListener("change", function () {
+                const nextSize = Number(pageSizeInput.value || 10);
+                pageSize = Number.isNaN(nextSize) || nextSize <= 0 ? 10 : nextSize;
+                renderRows(true);
+            });
+        }
+
+        if (pagination) {
+            pagination.addEventListener("click", function (event) {
+                const button = event.target.closest("button[data-page]");
+                if (!button) {
+                    return;
+                }
+
+                const nextPage = Number(button.getAttribute("data-page") || 0);
+                const pageCount = getPageCount(filteredRows().length);
+                if (Number.isNaN(nextPage) || nextPage < 1 || nextPage > pageCount || nextPage === currentPage) {
+                    return;
+                }
+
+                currentPage = nextPage;
+                renderRows(false);
             });
         }
 

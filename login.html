@@ -23,13 +23,10 @@
                         <p class="small text-muted mt-2 mb-0">Note: This is the official LGU Daet Scholarship Portal.</p>
                     </div>
                     <div class="alert alert-danger d-none" id="loginStatus" role="alert"></div>
-                    <div class="d-none mb-3" id="loginResendWrap">
-                        <button class="btn btn-outline-dark btn-sm w-100" id="loginResendBtn" type="button">Resend Verification Email</button>
-                    </div>
                     <form id="loginForm">
                         <div class="mb-3">
-                            <label class="small mb-1" for="loginIdentifier">Email or Mobile Number</label>
-                            <input class="form-control" id="loginIdentifier" type="text" placeholder="email@example.com or 09XXXXXXXXX" />
+                            <label class="small mb-1" for="loginIdentifier">Email Address</label>
+                            <input class="form-control" id="loginIdentifier" type="email" placeholder="email@example.com" />
                         </div>
                         <div class="mb-3">
                             <label class="small mb-1" for="loginPassword">Password</label>
@@ -50,6 +47,10 @@
                         <button class="btn btn-dark w-100" id="loginSubmitBtn" type="submit">Sign In</button>
                     </form>
                     <div class="text-center mt-4">
+                        <p class="small mb-2">
+                            Need to verify your account?
+                            <a class="text-decoration-none" href="verify-account.html">Enter OTP code</a>
+                        </p>
                         <p class="small text-muted mb-2">Need an account to apply for scholarship?</p>
                         <a class="btn btn-outline-dark w-100" href="register.html">Register as Scholarship Applicant</a>
                     </div>
@@ -60,7 +61,7 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="js/supabase-config.js"></script>
         <script src="js/supabase-auth-email-helper.js"></script>
-        <script src="js/supabase-login.js"></script>
+        <script src="js/supabase-login.js?v=20260322-3"></script>
         <script src="js/scripts.js"></script>
     </body>
 </html>

@@ -166,6 +166,7 @@
 
         if (latestBlockingApplication) {
             btn.classList.add("ldss-btn-disabled-hint");
+            btn.textContent = "Application Locked";
             btn.setAttribute("href", "javascript:void(0);");
             btn.setAttribute("aria-disabled", "true");
             btn.setAttribute("title", "Only 1 submitted application is allowed per user. Update your existing application instead.");
@@ -174,6 +175,7 @@
 
         if (policy && policy.isOpen) {
             btn.classList.remove("ldss-btn-disabled-hint");
+            btn.textContent = "New Application";
             btn.setAttribute("href", openHref);
             btn.removeAttribute("aria-disabled");
             btn.removeAttribute("title");
@@ -182,6 +184,7 @@
 
         const message = intakeClosedMessage(policy);
         btn.classList.add("ldss-btn-disabled-hint");
+        btn.textContent = "Application Closed";
         btn.setAttribute("href", "javascript:void(0);");
         btn.setAttribute("aria-disabled", "true");
         btn.setAttribute("title", message);

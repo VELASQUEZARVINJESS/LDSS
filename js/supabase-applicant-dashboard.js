@@ -449,6 +449,86 @@
         });
     }
 
+    function toIsoDateOnly(value) {
+        if (!value) {
+            return "";
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+        return date.toISOString().slice(0, 10);
+    }
+
+    function normalizeTimeValue(value) {
+        const raw = (value || "").toString().trim();
+        const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+        return match ? (match[1] + ":" + match[2]) : "";
+    }
+
+    function formatTimeValue(value) {
+        const normalized = normalizeTimeValue(value);
+        if (!normalized) {
+            return "";
+        }
+        const parts = normalized.split(":");
+        const hours = Number(parts[0]);
+        const minutes = parts[1];
+        const suffix = hours >= 12 ? "PM" : "AM";
+        const hour12 = hours % 12 || 12;
+        return hour12 + ":" + minutes + " " + suffix;
+    }
+
+    function formatScheduleLabel(dateValue, timeValue) {
+        if (!dateValue) {
+            return "-";
+        }
+        const dateLabel = formatDateOnly(dateValue);
+        const timeLabel = formatTimeValue(timeValue);
+        return timeLabel ? (dateLabel + " at " + timeLabel) : dateLabel;
+    }
+
+    async function loadIntakePolicy(context) {
+        const fallback = {
+            isOpen: true,
+            reason: "open",
+            openDate: "",
+            closeDate: "",
+            openTime: "",
+            closeTime: ""
+        };
+
+        const result = await context.client.rpc("application_intake_is_open");
+        if (result.error || !result.data || typeof result.data !== "object") {
+            return fallback;
+        }
+
+        return {
+            isOpen: result.data.is_open !== false,
+            reason: (result.data.reason || "open").toString(),
+            openDate: toIsoDateOnly(result.data.open_date || ""),
+            closeDate: toIsoDateOnly(result.data.close_date || ""),
+            openTime: normalizeTimeValue(result.data.open_time || ""),
+            closeTime: normalizeTimeValue(result.data.close_time || "")
+        };
+    }
+
+    function intakeClosedMessage(policy) {
+        if (!policy) {
+            return "New application filing is currently closed by System Administrator.";
+        }
+        if (policy.reason === "before_open_date" && policy.openDate) {
+            return "New application filing opens on " + formatScheduleLabel(policy.openDate, policy.openTime) + ".";
+        }
+        if (policy.reason === "after_close_date" && policy.closeDate) {
+            return "New application filing closed on " + formatScheduleLabel(policy.closeDate, policy.closeTime) + ".";
+        }
+        if (policy.reason === "closed_by_admin") {
+            return "New application filing is currently turned OFF by System Administrator.";
+        }
+        return "New application filing is currently closed by System Administrator.";
+    }
+
     function formatDateTime(value) {
         if (!value) {
             return "-";
@@ -728,10 +808,15 @@
         }).join("");
     }
 
-    function renderCards(application, examRecord, interviewRecord, approvalRecord) {
+    function renderCards(application, examRecord, interviewRecord, approvalRecord, intakePolicy) {
         if (!application) {
+            const intakeClosed = !!(intakePolicy && !intakePolicy.isOpen);
             setText("dashboardCurrentApplicationValue", "No Application");
-            setChip("dashboardCurrentApplicationChip", "Start New Application", "ldss-chip-neutral");
+            setChip(
+                "dashboardCurrentApplicationChip",
+                intakeClosed ? "Filing Closed" : "Start New Application",
+                intakeClosed ? "ldss-chip-danger" : "ldss-chip-neutral"
+            );
 
             setText("dashboardExamValue", "No Exam Record");
             setChip("dashboardExamChip", "Pending", "ldss-chip-neutral");
@@ -739,8 +824,8 @@
             setText("dashboardInterviewValue", "Not Scheduled");
             setChip("dashboardInterviewChip", "Pending", "ldss-chip-neutral");
 
-            setText("dashboardNextStepValue", "Create Application");
-            setChip("dashboardNextStepChip", "Draft", "ldss-chip-neutral");
+            setText("dashboardNextStepValue", intakeClosed ? "Wait for filing to reopen" : "Create Application");
+            setChip("dashboardNextStepChip", intakeClosed ? "Closed" : "Draft", intakeClosed ? "ldss-chip-danger" : "ldss-chip-neutral");
             return;
         }
 
@@ -1070,15 +1155,18 @@
         return fallback.data || null;
     }
 
-    function renderQuickActions(latestApplication, latestDraft, latestBlockingApplication) {
+    function renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy) {
+        const intakeIsClosed = !!(intakePolicy && !intakePolicy.isOpen);
+        const intakeHint = intakeClosedMessage(intakePolicy);
+
         setActionLink(
             "dashboardNewApplicationBtn",
             "applicant-application-form.html",
-            "New Application",
-            !!latestBlockingApplication,
+            intakeIsClosed ? "Application Closed" : "New Application",
+            !!latestBlockingApplication || intakeIsClosed,
             latestBlockingApplication
                 ? "Only 1 submitted application is allowed per user. Update your existing application instead."
-                : ""
+                : (intakeIsClosed ? intakeHint : "")
         );
 
         if (latestApplication && latestApplication.id) {
@@ -1086,7 +1174,13 @@
             setActionLink("dashboardHeaderViewApplicationBtn", detailUrl, "View My Application", false);
             setActionLink("dashboardQuickViewApplicationBtn", detailUrl, "View My Application", false);
         } else {
-            setActionLink("dashboardHeaderViewApplicationBtn", "applicant-application-form.html", "Start Application", false);
+            setActionLink(
+                "dashboardHeaderViewApplicationBtn",
+                "applicant-application-form.html",
+                intakeIsClosed ? "Application Closed" : "Start Application",
+                intakeIsClosed,
+                intakeIsClosed ? intakeHint : ""
+            );
             setActionLink("dashboardQuickViewApplicationBtn", "javascript:void(0);", "No Application Yet", true);
         }
 
@@ -1177,7 +1271,8 @@
                 loadLatestApplication(context),
                 loadLatestEditableDraft(context),
                 loadNotifications(context),
-                loadLatestBlockingApplication(context)
+                loadLatestBlockingApplication(context),
+                loadIntakePolicy(context)
             ]);
 
             const profileSummary = headResults[0];
@@ -1185,13 +1280,14 @@
             const latestDraft = headResults[2];
             const notificationPayload = headResults[3];
             const latestBlockingApplication = headResults[4];
+            const intakePolicy = headResults[5];
             const latestApplicationAuxMeta = latestApplication
                 ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
                 : { available: false, payload: null };
             const completionReminder = buildCompletionReminder(profileSummary, latestApplication, latestApplicationAuxMeta);
 
             renderProfileHeader(profileSummary, context.user.email);
-            renderQuickActions(latestApplication, latestDraft, latestBlockingApplication);
+            renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy);
             renderNotificationDropdown(notificationPayload.rows, notificationPayload.unreadCount);
             showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
             if (completionReminder) {
@@ -1203,7 +1299,7 @@
             }
 
             if (!latestApplication) {
-                renderCards(null, null, null, null);
+                renderCards(null, null, null, null, intakePolicy);
                 renderRequirementSummary([]);
                 const eventsWithoutApp = buildDashboardEvents(null, null, null, null, notificationPayload.rows);
                 renderRecentActivity(eventsWithoutApp);
@@ -1227,7 +1323,7 @@
             const docsResult = detailResults[3];
             const documents = docsResult && !docsResult.error && docsResult.data ? docsResult.data : [];
 
-            renderCards(latestApplication, examRecord, interviewRecord, approvalRecord);
+            renderCards(latestApplication, examRecord, interviewRecord, approvalRecord, intakePolicy);
             renderRequirementSummary(documents);
 
             const events = buildDashboardEvents(latestApplication, examRecord, interviewRecord, approvalRecord, notificationPayload.rows);

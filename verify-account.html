@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSP account verification page" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSP | Verify Account</title>
+        <link href="css/styles.css" rel="stylesheet" />
+        <link href="css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+    </head>
+    <body class="ldss-auth">
+        <div class="ldss-auth-wrap">
+            <div class="card ldss-auth-card">
+                <div class="card-body p-4 p-md-5">
+                    <div class="text-center mb-4">
+                        <img class="ldss-auth-logo mb-2" src="img/daet-lgu.png" alt="LGU Daet Logo" />
+                        <h1 class="h4 ldss-auth-title">Verify Account</h1>
+                        <p class="ldss-auth-subtitle mb-1">Confirm your email using the OTP code</p>
+                        <p class="small text-muted mb-0">Enter the 6-digit code sent to your email address.</p>
+                    </div>
+                    <div class="alert alert-danger d-none" id="verifyStatus" role="alert"></div>
+                    <form id="verifyForm" novalidate>
+                        <div class="mb-3">
+                            <label class="small mb-1" for="verifyEmail">Email Address</label>
+                            <input class="form-control" id="verifyEmail" type="email" placeholder="name@example.com" autocomplete="email" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="small mb-1" for="verifyOtpCode">OTP Code</label>
+                            <input class="form-control" id="verifyOtpCode" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit code" autocomplete="one-time-code" />
+                        </div>
+                        <div class="small text-muted mb-3" id="verifyHelperText">Check your spam or junk folder if the code does not arrive right away.</div>
+                        <button class="btn btn-primary w-100 py-2" id="verifySubmitBtn" type="submit">Verify Account</button>
+                    </form>
+                    <div class="mt-3" id="verifyResendWrap">
+                        <button class="btn btn-outline-dark w-100 py-2" id="verifyResendBtn" type="button">Resend OTP</button>
+                    </div>
+                    <div class="text-center mt-4">
+                        <a class="small text-decoration-none" id="verifyBackToLoginLink" href="login.html">Back to login</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="js/supabase-config.js"></script>
+        <script src="js/supabase-auth-email-helper.js"></script>
+        <script src="js/supabase-verify-account.js?v=20260322-1"></script>
+        <script src="js/scripts.js"></script>
+    </body>
+</html>

@@ -11,7 +11,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - `https://daet-scholarship.gt.tc/SUPERADMIN/` -> Redirects to System Administrator
 
 ## Folder Map
-- `login.html`, `register.html`, `forgot-password.html`, `reset-password.html`, `logout.html`, `index.html`
+- `login.html`, `register.html`, `verify-account.html`, `forgot-password.html`, `reset-password.html`, `logout.html`, `index.html`
 - `APPLICANT/` (applicant pages)
 - `SECRETARY/` (secretary pages)
 - `ADMIN/` (admin pages)
@@ -31,6 +31,8 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Reminder email log hotfix is in `supabase/reminder_email_logs_hotfix_2026_03_17.sql`.
 - Reminder campaign queue hotfix is in `supabase/reminder_campaign_jobs_hotfix_2026_03_19.sql`.
 - Intake date-time enforcement hotfix is in `supabase/application_intake_datetime_hotfix_2026_03_19.sql`.
+- Intake manual receive override hotfix is in `supabase/application_receive_override_hotfix_2026_03_22.sql`.
+- System Administrator audit logs hotfix is in `supabase/audit_logs_hotfix_2026_03_22.sql`.
 - Applicant Phase 1.1 live integrations now in:
   - `js/supabase-applicant-guard.js`
   - `js/supabase-applicant-profile.js`
@@ -52,6 +54,11 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Super Admin settings integration shell:
   - `js/supabase-superadmin-scholarship-settings.js`
   - `js/supabase-superadmin-user-management.js`
+- System Administrator User Management now includes a manual `Confirm Email Login` action for accounts that cannot complete the Supabase email verification step; this fallback uses the Node server plus the Supabase service-role key and should be used only by the System Administrator when needed.
+- Scholarship Settings now includes a `Require applicant 1x1 photo before submission` toggle so the System Administrator can temporarily allow applicant form submission without the photo while identity is checked later during examination/interview.
+- System Administrator User Directory now shows each account's email address directly under the user's name for faster support and account lookup, and the directory now follows the same hoverable responsive queue-table pattern used by the secretary application list.
+- System Administrator User Management now includes live email verification status chips, filtering, resend verification support, and audited access actions for account activation, suspension, deletion, and manual verification support; the verification status lookup uses the protected Node server route so staff can read Supabase Auth confirmation state safely.
+- System Administrator User Management now hides the secretary-account creation block, uses a compact secretary-style filter bar, fetches the full user directory in batches beyond the old 1000-row limit, paginates at 10 rows by default for lighter page loads, and groups filters plus directory into one cleaner workspace card.
 - Applicant notifications page supports live list, filter, pagination, mark read/unread, and mark all read.
 - Extended application-only fields such as religion, family background, spouse details, awards, and similar non-core inputs now have a shared table path via `application_aux_data` so applicant and secretary corrections can persist across devices.
 - Applicant legacy barangay cleanup now uses the dedicated `profiles.barangay` field, a dashboard reminder modal, and a direct `My Profile` barangay update path for older accounts with existing applications.
@@ -71,7 +78,11 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary reminder campaigns now support queued background sending in timed batches through the Node server so large filtered reminder groups do not need to be sent all at once.
 - Secretary general information report printouts now include the LGU Daet, system icon, and Maogma logos in the report header.
 - System Administrator scholarship settings now support application open/close time controls, and applicant submission cutoff follows the configured date and time.
+- System Administrator scholarship settings now use one responsive workspace card for the full policy form, and include a prominent `ENABLE RECEIVE` / `DISABLE RECEIVE` control in Scholarship Duration so the office can manually lock or reopen applicant filing, including emergency reopening after the scheduled cutoff once the new Supabase hotfix is applied.
+- System Administrator Scholarship Settings now has a cleaner responsive workspace layout with refined KPI cards, grouped policy sections, and responsive switch-style System Control Flags for faster office use on desktop and mobile.
+- System Administrator Audit Logs now provide a live critical-action history for user management verification actions and scholarship settings changes once the audit log hotfix is applied.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
+- Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
 - Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
 - Admin approval queue supports ranking view, special endorsement action, approve/reject/waitlist decisions, and batch decision handling.
 - Scholarship workflow status model:
@@ -115,7 +126,7 @@ Important:
 
 Login behavior now:
 - Uses Supabase `signInWithPassword`.
-- The login form currently accepts email or mobile input, but the active registration flow creates email/password auth accounts and stores mobile numbers in profile data for contact details.
+- The login form now uses email/password only.
 - Fetches `profiles.role`.
 - Redirects automatically:
   - `applicant` -> `APPLICANT/`
@@ -131,16 +142,21 @@ Session/logout behavior:
 
 ## Live Register + Password Recovery
 - `register.html` now uses Supabase `auth.signUp` for applicant registration.
+- `verify-account.html` now handles applicant OTP email confirmation through `supabase.auth.verifyOtp(...)`.
 - `forgot-password.html` now uses Supabase `auth.resetPasswordForEmail`.
 - `reset-password.html` now updates password from recovery session link.
 - Password recovery is email-based by default (mobile recovery needs a separate OTP flow).
 - Frontend enforces strong password policy: minimum 12 chars + uppercase + lowercase + number + symbol.
+- Registration now redirects applicants into the OTP verification page, and login redirects unverified email users into the same OTP flow.
+- If an applicant cannot complete the email verification step, the System Administrator can now manually confirm that account from `SYSTEMADMINISTRATOR/super-admin-user-management.html` when the Node server is available.
 
 Required Supabase Auth settings:
 1. Set Site URL to your production domain (example: `https://daet-scholarship.gt.tc`).
 2. Add redirect URL:
    - `https://daet-scholarship.gt.tc/reset-password.html`
 3. Keep Email provider enabled for recovery links.
+4. In the `Confirm signup` email template, use `{{ .Token }}` for the OTP code instead of only `{{ .ConfirmationURL }}`.
+5. Custom SMTP is strongly recommended for production so OTP emails arrive reliably.
 
 ## Developer Checks
 - Run `npm run check:syntax` after low-risk JS changes to catch parse errors before uploading files to hosting.

@@ -9,7 +9,6 @@
     };
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
-    let resendController = null;
 
     function authHelper() {
         return window.LDSSAuthEmailHelper || null;
@@ -71,6 +70,42 @@
         });
     }
 
+    function buildVerifyAccountUrl(email) {
+        const helper = authHelper();
+        if (helper && typeof helper.buildVerifyAccountUrl === "function") {
+            return helper.buildVerifyAccountUrl(email, "login");
+        }
+        return "verify-account.html";
+    }
+
+    function applyInitialQueryState() {
+        const helper = authHelper();
+        const params = new URLSearchParams(window.location.search || "");
+        const loginIdentifier = document.getElementById("loginIdentifier");
+        const queryEmail = helper && typeof helper.normalizeEmailAddress === "function"
+            ? helper.normalizeEmailAddress(params.get("email") || "")
+            : (params.get("email") || "").toString().trim().toLowerCase();
+        const pendingEmail = helper && typeof helper.readPendingVerificationEmail === "function"
+            ? helper.readPendingVerificationEmail()
+            : "";
+
+        if (loginIdentifier && !loginIdentifier.value) {
+            if (helper && helper.isValidEmail(queryEmail)) {
+                loginIdentifier.value = queryEmail;
+            } else if (helper && helper.isValidEmail(pendingEmail)) {
+                loginIdentifier.value = pendingEmail;
+            }
+        }
+
+        if (params.get("verified") === "1") {
+            setStatus("Account verified successfully. Sign in to continue.", "alert-success");
+            return;
+        }
+        if (params.get("registered") === "1") {
+            setStatus("Registration successful. Sign in with your email and password.", "alert-success");
+        }
+    }
+
     async function fetchRoleAndRedirect(client, userId) {
         const { data, error } = await client
             .from("profiles")
@@ -96,6 +131,10 @@
             setStatus("Login failed: account role is not recognized.", "alert-danger");
             return;
         }
+        const helper = authHelper();
+        if (helper && typeof helper.clearPendingVerificationEmail === "function") {
+            helper.clearPendingVerificationEmail();
+        }
         window.location.replace(route);
     }
 
@@ -110,36 +149,21 @@
         const helper = authHelper();
 
         if (!identifier || !password) {
-            setStatus("Please enter your email/mobile and password.", "alert-danger");
+            setStatus("Please enter your email and password.", "alert-danger");
             return;
         }
 
-        const isEmail = helper && typeof helper.looksLikeEmail === "function"
-            ? helper.looksLikeEmail(identifier)
-            : identifier.includes("@");
-        let payload;
-        if (isEmail) {
-            const normalizedEmail = helper && typeof helper.normalizeEmailAddress === "function"
-                ? helper.normalizeEmailAddress(identifier)
-                : identifier.toLowerCase();
-            const isValidEmail = helper && typeof helper.isValidEmail === "function"
-                ? helper.isValidEmail(normalizedEmail)
-                : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
-            if (!isValidEmail) {
-                setStatus("Please enter a valid email address.", "alert-danger");
-                return;
-            }
-            payload = { email: normalizedEmail, password: password };
-        } else {
-            const normalizedPhone = helper && typeof helper.normalizePhoneNumber === "function"
-                ? helper.normalizePhoneNumber(identifier)
-                : identifier;
-            if (!normalizedPhone) {
-                setStatus("Please enter a valid email address or mobile number.", "alert-danger");
-                return;
-            }
-            payload = { phone: normalizedPhone, password: password };
+        const normalizedEmail = helper && typeof helper.normalizeEmailAddress === "function"
+            ? helper.normalizeEmailAddress(identifier)
+            : identifier.toLowerCase();
+        const isValidEmail = helper && typeof helper.isValidEmail === "function"
+            ? helper.isValidEmail(normalizedEmail)
+            : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+        if (!isValidEmail) {
+            setStatus("Please enter a valid email address.", "alert-danger");
+            return;
         }
+        const payload = { email: normalizedEmail, password: password };
 
         setSubmitLoading(true);
         try {
@@ -151,42 +175,21 @@
                     typeof helper.isEmailNotConfirmedError === "function" &&
                     helper.isEmailNotConfirmedError(error)
                 ) {
-                    await resendController.request(client, payload.email, {
-                        automatic: true,
-                        fallbackErrorMessage: "Failed to resend confirmation email.",
-                        onCooldown: function (waitSeconds) {
-                            setStatus(
-                                "Your account is not verified yet. A confirmation email was already requested. Check your inbox or wait " + waitSeconds + " seconds before requesting again.",
-                                "alert-warning"
-                            );
-                        },
-                        onError: function (message) {
-                            setStatus("Your account is not verified yet. " + message, "alert-warning");
-                        },
-                        onSuccess: function (context) {
-                            setStatus(
-                                context.automatic
-                                    ? "Your account is not verified yet. A new confirmation email has been sent automatically. Check your inbox or spam folder, then confirm before signing in."
-                                    : "A new confirmation email has been sent. Check your inbox or spam folder, then confirm before signing in.",
-                                "alert-warning"
-                            );
-                        }
-                    });
+                    if (typeof helper.rememberPendingVerificationEmail === "function") {
+                        helper.rememberPendingVerificationEmail(payload.email);
+                    }
+                    window.location.replace(buildVerifyAccountUrl(payload.email));
                     return;
                 }
-                resendController.hide();
                 setStatus(helper.getErrorMessage(error, "Invalid login credentials."), "alert-danger");
                 return;
             }
             if (!data || !data.user) {
-                resendController.hide();
                 setStatus("Login failed: user session not returned.", "alert-danger");
                 return;
             }
-            resendController.hide();
             await fetchRoleAndRedirect(client, data.user.id);
         } catch (err) {
-            resendController.hide();
             setStatus(helper.getErrorMessage(err, "Unexpected login error. Please try again."), "alert-danger");
         } finally {
             setSubmitLoading(false);
@@ -199,6 +202,7 @@
             return;
         }
         bindPasswordToggle("loginPassword", "loginPasswordToggle");
+        applyInitialQueryState();
 
         const url = window.LDSS_SUPABASE_URL || "";
         const anonKey = window.LDSS_SUPABASE_ANON_KEY || "";
@@ -210,7 +214,7 @@
             setStatus("Supabase library failed to load. Check internet/CDN access.", "alert-danger");
             return;
         }
-        if (!window.LDSSAuthEmailHelper || !window.LDSSAuthEmailHelper.createResendController) {
+        if (!window.LDSSAuthEmailHelper) {
             setStatus("Auth email helper failed to load. Check js/supabase-auth-email-helper.js.", "alert-danger");
             return;
         }
@@ -220,40 +224,6 @@
         }
 
         const client = window.supabase.createClient(url, anonKey);
-        resendController = window.LDSSAuthEmailHelper.createResendController({
-            wrapId: "loginResendWrap",
-            buttonId: "loginResendBtn",
-            storagePrefix: "ldss-login-resend",
-            idleLabel: "Resend Verification Email",
-            loadingLabel: "Sending Confirmation...",
-            setStatus: setStatus
-        });
-        const resendBtn = resendController.button();
-        if (resendBtn) {
-            resendBtn.addEventListener("click", function () {
-                const email = (resendBtn.dataset.email || "").trim().toLowerCase();
-                if (!email) {
-                    setStatus("Enter your email first, then try signing in again.", "alert-warning");
-                    return;
-                }
-                resendController.request(client, email, {
-                    automatic: false,
-                    fallbackErrorMessage: "Failed to resend confirmation email.",
-                    onCooldown: function (waitSeconds) {
-                        setStatus(
-                            "Your account is not verified yet. A confirmation email was already requested. Check your inbox or wait " + waitSeconds + " seconds before requesting again.",
-                            "alert-warning"
-                        );
-                    },
-                    onError: function (message) {
-                        setStatus("Your account is not verified yet. " + message, "alert-warning");
-                    },
-                    onSuccess: function () {
-                        setStatus("A new confirmation email has been sent. Check your inbox or spam folder, then confirm before signing in.", "alert-warning");
-                    }
-                });
-            });
-        }
 
         try {
             const { data } = await client.auth.getSession();

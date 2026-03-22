@@ -3,8 +3,10 @@
 
     const DEFAULT_PRODUCTION_LOGIN_URL = "https://daet-scholarship.gt.tc/login.html";
     const DEFAULT_PRODUCTION_RESET_URL = "https://daet-scholarship.gt.tc/reset-password.html";
+    const DEFAULT_PRODUCTION_VERIFY_URL = "https://daet-scholarship.gt.tc/verify-account.html";
     const DEFAULT_COOLDOWN_MS = 60 * 1000;
     const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const PENDING_VERIFICATION_EMAIL_STORAGE_KEY = "ldss-pending-verification-email";
 
     function getErrorMessage(error, fallbackMessage) {
         if (!error) {
@@ -77,6 +79,14 @@
         return resolveOriginPath("/reset-password.html", defaultUrl || DEFAULT_PRODUCTION_RESET_URL);
     }
 
+    function resolveVerifyAccountUrl(defaultUrl) {
+        const configured = (window.LDSS_VERIFY_ACCOUNT_URL || "").toString().trim();
+        if (configured) {
+            return configured;
+        }
+        return resolveOriginPath("/verify-account.html", defaultUrl || DEFAULT_PRODUCTION_VERIFY_URL);
+    }
+
     function normalizeEmailAddress(value) {
         return (value || "").toString().trim().toLowerCase();
     }
@@ -107,6 +117,46 @@
             return cleaned;
         }
         return null;
+    }
+
+    function rememberPendingVerificationEmail(email) {
+        if (!window.sessionStorage) {
+            return;
+        }
+        const normalizedEmail = normalizeEmailAddress(email);
+        if (!normalizedEmail) {
+            window.sessionStorage.removeItem(PENDING_VERIFICATION_EMAIL_STORAGE_KEY);
+            return;
+        }
+        window.sessionStorage.setItem(PENDING_VERIFICATION_EMAIL_STORAGE_KEY, normalizedEmail);
+    }
+
+    function readPendingVerificationEmail() {
+        if (!window.sessionStorage) {
+            return "";
+        }
+        return normalizeEmailAddress(window.sessionStorage.getItem(PENDING_VERIFICATION_EMAIL_STORAGE_KEY) || "");
+    }
+
+    function clearPendingVerificationEmail() {
+        if (!window.sessionStorage) {
+            return;
+        }
+        window.sessionStorage.removeItem(PENDING_VERIFICATION_EMAIL_STORAGE_KEY);
+    }
+
+    function buildVerifyAccountUrl(email, source) {
+        const target = new URL(resolveVerifyAccountUrl(DEFAULT_PRODUCTION_VERIFY_URL), window.location.href);
+        const normalizedEmail = normalizeEmailAddress(email);
+        const normalizedSource = (source || "").toString().trim();
+
+        if (normalizedEmail) {
+            target.searchParams.set("email", normalizedEmail);
+        }
+        if (normalizedSource) {
+            target.searchParams.set("source", normalizedSource);
+        }
+        return target.toString();
     }
 
     function isEmailNotConfirmedError(error) {
@@ -308,13 +358,18 @@
 
     window.LDSSAuthEmailHelper = {
         createResendController: createResendController,
+        buildVerifyAccountUrl: buildVerifyAccountUrl,
+        clearPendingVerificationEmail: clearPendingVerificationEmail,
         getErrorMessage: getErrorMessage,
         isEmailNotConfirmedError: isEmailNotConfirmedError,
         isValidEmail: isValidEmail,
         looksLikeEmail: looksLikeEmail,
         normalizeEmailAddress: normalizeEmailAddress,
         normalizePhoneNumber: normalizePhoneNumber,
+        readPendingVerificationEmail: readPendingVerificationEmail,
+        rememberPendingVerificationEmail: rememberPendingVerificationEmail,
         resolveEmailConfirmRedirectUrl: resolveEmailConfirmRedirectUrl,
+        resolveVerifyAccountUrl: resolveVerifyAccountUrl,
         resolvePasswordResetRedirectUrl: resolvePasswordResetRedirectUrl
     };
 })();

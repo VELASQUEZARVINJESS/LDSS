@@ -3,7 +3,6 @@
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
     const MIN_PASSWORD_LENGTH = 12;
-    let resendController = null;
 
     function authHelper() {
         return window.LDSSAuthEmailHelper || null;
@@ -87,6 +86,30 @@
         return "";
     }
 
+    function buildVerifyAccountUrl(email) {
+        const helper = authHelper();
+        if (helper && typeof helper.buildVerifyAccountUrl === "function") {
+            return helper.buildVerifyAccountUrl(email, "register");
+        }
+        return "verify-account.html";
+    }
+
+    function buildLoginUrl(email, registered) {
+        const target = new URL("login.html", window.location.href);
+        const helper = authHelper();
+        const normalizedEmail = helper && typeof helper.normalizeEmailAddress === "function"
+            ? helper.normalizeEmailAddress(email)
+            : (email || "").toString().trim().toLowerCase();
+
+        if (normalizedEmail) {
+            target.searchParams.set("email", normalizedEmail);
+        }
+        if (registered) {
+            target.searchParams.set("registered", "1");
+        }
+        return target.toString();
+    }
+
     async function onRegisterSubmit(client, event) {
         event.preventDefault();
         setStatus("");
@@ -147,7 +170,6 @@
             });
 
             if (error) {
-                resendController.hide();
                 setStatus(window.LDSSAuthEmailHelper.getErrorMessage(error, "Registration failed. Please try again."), "alert-danger");
                 return;
             }
@@ -165,12 +187,21 @@
                     { onConflict: "id" }
                 );
                 await client.auth.signOut();
+                setStatus("Registration successful. Redirecting to login...", "alert-success");
+                window.setTimeout(function () {
+                    window.location.replace(buildLoginUrl(email, true));
+                }, 500);
+                return;
             }
 
-            resendController.show(email);
-            setStatus("Registration successful. Check your email for confirmation. If you do not receive it, use the resend button below.", "alert-success");
+            if (helper && typeof helper.rememberPendingVerificationEmail === "function") {
+                helper.rememberPendingVerificationEmail(email);
+            }
+            setStatus("Registration successful. Redirecting to account verification...", "alert-success");
+            window.setTimeout(function () {
+                window.location.replace(buildVerifyAccountUrl(email));
+            }, 500);
         } catch (err) {
-            resendController.hide();
             setStatus(window.LDSSAuthEmailHelper.getErrorMessage(err, "Unexpected registration error. Please try again."), "alert-danger");
         } finally {
             setSubmitLoading(false);
@@ -195,7 +226,7 @@
             setStatus("Supabase library failed to load. Check internet/CDN access.", "alert-danger");
             return;
         }
-        if (!window.LDSSAuthEmailHelper || !window.LDSSAuthEmailHelper.createResendController) {
+        if (!window.LDSSAuthEmailHelper) {
             setStatus("Auth email helper failed to load. Check js/supabase-auth-email-helper.js.", "alert-danger");
             return;
         }
@@ -205,38 +236,6 @@
         }
 
         const client = window.supabase.createClient(url, anonKey);
-        resendController = window.LDSSAuthEmailHelper.createResendController({
-            wrapId: "registerResendWrap",
-            buttonId: "registerResendBtn",
-            storagePrefix: "ldss-register-resend",
-            idleLabel: "Resend Confirmation Email",
-            loadingLabel: "Sending Confirmation...",
-            setStatus: setStatus
-        });
-        const resendBtn = resendController.button();
-        if (resendBtn) {
-            resendBtn.addEventListener("click", function () {
-                const email = (resendBtn.dataset.email || document.getElementById("email")?.value || "").trim().toLowerCase();
-                resendController.request(client, email, {
-                    fallbackErrorMessage: "Failed to resend confirmation email.",
-                    onMissingEmail: function () {
-                        setStatus("Enter your email address first.", "alert-warning");
-                    },
-                    onCooldown: function (waitSeconds) {
-                        setStatus(
-                            "A confirmation email was already requested. Check your inbox or wait " + waitSeconds + " seconds before requesting again.",
-                            "alert-warning"
-                        );
-                    },
-                    onError: function (message) {
-                        setStatus(message, "alert-warning");
-                    },
-                    onSuccess: function () {
-                        setStatus("A new confirmation email has been sent. Check your inbox or spam folder, then sign in after confirmation.", "alert-success");
-                    }
-                });
-            });
-        }
         form.addEventListener("submit", function (event) {
             onRegisterSubmit(client, event);
         });

@@ -12,52 +12,259 @@
         <link rel="icon" type="image/png" href="../img/icon.png" />
         <style>
             .ldss-user-directory-table {
-                table-layout: fixed;
+                width: 100%;
+                min-width: 1120px;
+                table-layout: auto;
+                font-size: 0.8rem;
             }
 
-            .ldss-user-col-name {
-                width: 36%;
+            .ldss-user-directory-table th,
+            .ldss-user-directory-table td {
+                white-space: nowrap;
+                padding-top: 0.52rem;
+                padding-bottom: 0.52rem;
+                vertical-align: middle;
             }
 
-            .ldss-user-col-role {
-                width: 10%;
+            .ldss-user-directory-table th:nth-child(1),
+            .ldss-user-directory-table td:nth-child(1) {
+                width: 25%;
             }
 
-            .ldss-user-col-form {
-                width: 11%;
-            }
-
-            .ldss-user-col-application {
-                width: 16%;
-            }
-
-            .ldss-user-col-status {
-                width: 8%;
-            }
-
-            .ldss-user-col-created {
-                width: 10%;
-            }
-
-            .ldss-user-col-actions {
+            .ldss-user-directory-table th:nth-child(2),
+            .ldss-user-directory-table td:nth-child(2) {
                 width: 9%;
             }
 
-            .ldss-user-name {
-                display: block;
+            .ldss-user-directory-table th:nth-child(3),
+            .ldss-user-directory-table td:nth-child(3) {
+                width: 12%;
+            }
+
+            .ldss-user-directory-table th:nth-child(4),
+            .ldss-user-directory-table td:nth-child(4) {
+                width: 11%;
+            }
+
+            .ldss-user-directory-table th:nth-child(5),
+            .ldss-user-directory-table td:nth-child(5) {
+                width: 17%;
+            }
+
+            .ldss-user-directory-table th:nth-child(6),
+            .ldss-user-directory-table td:nth-child(6) {
+                width: 8%;
+            }
+
+            .ldss-user-directory-table th:nth-child(7),
+            .ldss-user-directory-table td:nth-child(7) {
+                width: 10%;
+            }
+
+            .ldss-user-directory-table th:nth-child(8),
+            .ldss-user-directory-table td:nth-child(8) {
+                width: 8%;
+            }
+
+            .ldss-user-directory-table td:nth-child(1),
+            .ldss-user-directory-table td:nth-child(5) {
                 white-space: normal;
                 word-break: break-word;
             }
 
-            @media (max-width: 991.98px) {
-                .ldss-user-directory-table {
-                    table-layout: auto;
+            .ldss-user-name {
+                display: block;
+                color: #334155;
+                font-weight: 400;
+                word-break: break-word;
+            }
+
+            .ldss-user-directory-table .ldss-chip {
+                font-size: 0.72rem;
+            }
+
+            .ldss-user-directory-table .dropdown-toggle {
+                min-width: 7rem;
+            }
+
+            .ldss-superadmin-user-management-page .ldss-compact-filter-card .card-body {
+                padding: 0.9rem 1rem;
+            }
+
+            .ldss-superadmin-user-management-page .ldss-compact-filter-card .row {
+                --bs-gutter-x: 0.75rem;
+                --bs-gutter-y: 0.45rem;
+            }
+
+            .ldss-superadmin-user-management-page .ldss-compact-filter-card .form-control,
+            .ldss-superadmin-user-management-page .ldss-compact-filter-card .form-select {
+                min-height: calc(1.5em + 0.55rem + 2px);
+                padding-top: 0.28rem;
+                padding-bottom: 0.28rem;
+                font-size: 0.84rem;
+            }
+
+            .ldss-superadmin-user-management-page .ldss-compact-filter-card .btn {
+                padding-top: 0.38rem;
+                padding-bottom: 0.38rem;
+            }
+
+            .ldss-user-management-shell {
+                border: 1px solid var(--ldss-border);
+                border-radius: 1rem;
+                overflow: hidden;
+                box-shadow: 0 1rem 2.75rem rgba(15, 23, 42, 0.05);
+            }
+
+            .ldss-user-management-shell .card-header {
+                padding: 1.35rem 1.5rem;
+                background: linear-gradient(135deg, #fbfcfe 0%, #f3f5f8 100%);
+                border-bottom: 1px solid var(--ldss-border);
+            }
+
+            .ldss-user-management-shell .card-body {
+                padding: 1.5rem;
+                background: #fff;
+            }
+
+            .ldss-user-management-header {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 1rem;
+            }
+
+            .ldss-user-management-header-title {
+                font-size: 1rem;
+                font-weight: 700;
+                color: var(--ldss-text);
+            }
+
+            .ldss-user-management-header-copy {
+                max-width: 44rem;
+                color: var(--ldss-muted);
+                font-size: 0.88rem;
+                line-height: 1.55;
+            }
+
+            .ldss-user-management-header-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                padding: 0.45rem 0.75rem;
+                border-radius: 999px;
+                border: 1px solid #e3e7ed;
+                background: rgba(255, 255, 255, 0.92);
+                color: #4b5563;
+                font-size: 0.76rem;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+
+            .ldss-user-management-header-badge svg {
+                width: 0.9rem;
+                height: 0.9rem;
+            }
+
+            .ldss-user-management-section + .ldss-user-management-section {
+                margin-top: 1.5rem;
+                padding-top: 1.5rem;
+                border-top: 1px solid #edf0f4;
+            }
+
+            .ldss-user-management-section-head {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 0.9rem;
+                margin-bottom: 1rem;
+            }
+
+            .ldss-user-management-section-title {
+                font-size: 0.79rem;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: var(--ldss-muted);
+                font-weight: 700;
+                margin-bottom: 0.3rem;
+            }
+
+            .ldss-user-management-section-copy {
+                font-size: 0.84rem;
+                color: var(--ldss-muted);
+                line-height: 1.55;
+                margin-bottom: 0;
+            }
+
+            .ldss-user-management-section-icon {
+                width: 2.2rem;
+                height: 2.2rem;
+                flex: 0 0 2.2rem;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 0.75rem;
+                background: #f8fafc;
+                border: 1px solid #e7ebf1;
+                color: #4b5563;
+            }
+
+            .ldss-user-management-section-icon svg {
+                width: 0.92rem;
+                height: 0.92rem;
+            }
+
+            .ldss-user-management-table-shell {
+                border: 1px solid #e7ebf1;
+                border-radius: 0.95rem;
+                overflow: hidden;
+                background: #fff;
+                box-shadow: 0 0.35rem 1.15rem rgba(15, 23, 42, 0.03);
+            }
+
+            .ldss-user-management-table-head {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.75rem;
+                padding: 0.95rem 1rem;
+                border-bottom: 1px solid #edf0f4;
+                background: #fbfcfd;
+            }
+
+            .ldss-user-directory-footer .pagination {
+                gap: 0.18rem;
+            }
+
+            .ldss-user-directory-footer .page-link {
+                padding: 0.26rem 0.58rem;
+                min-width: 3rem;
+                text-align: center;
+                font-size: 0.76rem;
+                color: var(--ldss-muted);
+                background: #f8fafc;
+            }
+
+            @media (max-width: 767.98px) {
+                .ldss-user-management-shell .card-header,
+                .ldss-user-management-shell .card-body {
+                    padding: 1rem;
+                }
+
+                .ldss-user-management-header {
+                    flex-direction: column;
+                }
+
+                .ldss-user-management-section-head {
+                    align-items: center;
                 }
             }
         </style>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
     </head>
-    <body class="nav-fixed">
+    <body class="nav-fixed ldss-superadmin-user-management-page">
         <nav class="topnav navbar navbar-expand shadow justify-content-between navbar-light bg-white" id="sidenavAccordion">
             <button class="btn btn-icon btn-transparent-dark me-2" id="sidebarToggle"><i data-feather="menu"></i></button>
             <a class="navbar-brand d-flex align-items-center" href="super-admin-dashboard.html">
@@ -138,10 +345,11 @@
                                             <div class="page-header-icon"><i data-feather="layers"></i></div>
                                             System Administrator User Management
                                         </h1>
-                                        <div class="small ldss-muted">Secretary account creation and overall user access administration.</div>
+                                        <div class="small ldss-muted">Manual email confirmation fallback, user status filtering, and overall access administration.</div>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3">
                                         <a class="btn btn-dark btn-sm me-2" href="super-admin-system-settings.html">Open System Settings</a>
+                                        <a class="btn btn-outline-dark btn-sm me-2" href="super-admin-audit-logs.html">Open Audit Logs</a>
                                         <a class="btn btn-outline-dark btn-sm" href="super-admin-dashboard.html">Back to Dashboard</a>
                                     </div>
                                 </div>
@@ -150,116 +358,125 @@
                     </header>
                     <div class="container-xl px-4 mt-4">
                         <div class="alert d-none" id="userManagementStatus" role="alert"></div>
-                        <div class="card mb-4">
-                            <div class="card-header">Create Secretary Account</div>
-                            <div class="card-body">
-                                <div class="small text-muted mb-3">Only the System Administrator can create secretary login access. New accounts created here are always assigned the <strong>Secretary</strong> role.</div>
-                                <form id="secretaryCreateForm" novalidate>
-                                    <div class="row g-3">
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreateFirstName">First Name</label>
-                                            <input class="form-control" id="secretaryCreateFirstName" type="text" maxlength="80" required />
-                                        </div>
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreateMiddleName">Middle Name</label>
-                                            <input class="form-control" id="secretaryCreateMiddleName" type="text" maxlength="80" />
-                                        </div>
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreateLastName">Last Name</label>
-                                            <input class="form-control" id="secretaryCreateLastName" type="text" maxlength="80" required />
-                                        </div>
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreateEmail">Email Address</label>
-                                            <input class="form-control" id="secretaryCreateEmail" type="email" maxlength="160" autocomplete="off" required />
-                                        </div>
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreateMobile">Mobile Number</label>
-                                            <input class="form-control" id="secretaryCreateMobile" type="tel" maxlength="20" placeholder="09XXXXXXXXX" autocomplete="off" required />
-                                        </div>
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreatePassword">Temporary Password</label>
-                                            <input class="form-control" id="secretaryCreatePassword" type="password" maxlength="160" autocomplete="new-password" required />
-                                        </div>
-                                        <div class="col-12 col-lg-4">
-                                            <label class="small mb-1" for="secretaryCreateConfirmPassword">Confirm Password</label>
-                                            <input class="form-control" id="secretaryCreateConfirmPassword" type="password" maxlength="160" autocomplete="new-password" required />
-                                        </div>
-                                        <div class="col-12 col-lg-8 d-flex align-items-end">
-                                            <div class="small text-muted">Password must be at least 12 characters and include uppercase, lowercase, number, and symbol.</div>
-                                        </div>
-                                        <div class="col-12 d-flex justify-content-end">
-                                            <button class="btn btn-dark" id="secretaryCreateSubmitBtn" type="submit">Create Secretary Account</button>
-                                        </div>
+                        <div class="card mb-4 ldss-user-management-shell">
+                            <div class="card-header">
+                                <div class="ldss-user-management-header">
+                                    <div>
+                                        <div class="ldss-user-management-header-title">User Management Workspace</div>
+                                        <div class="ldss-user-management-header-copy mt-1">Monitor account status, applicant form progress, and verification issues from one cleaner System Administrator workspace.</div>
                                     </div>
-                                </form>
-                            </div>
-                        </div>
-                        <div class="card mb-4">
-                            <div class="card-header">User Access Controls</div>
-                            <div class="card-body">
-                                <div class="row g-2">
-                                    <div class="col-12 col-lg-4">
-                                        <label class="small mb-1" for="userMgmtSearch">Search</label>
-                                        <input class="form-control" id="userMgmtSearch" type="text" placeholder="Name, email, or mobile" />
-                                    </div>
-                                    <div class="col-6 col-lg-2">
-                                        <label class="small mb-1" for="userMgmtRoleFilter">Role</label>
-                                        <select class="form-select" id="userMgmtRoleFilter">
-                                            <option value="all">All roles</option>
-                                            <option value="applicant">Applicant</option>
-                                            <option value="secretary">Secretary</option>
-                                            <option value="admin">Admin</option>
-                                            <option value="super_admin">Super Admin</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-6 col-lg-2">
-                                        <label class="small mb-1" for="userMgmtStatusFilter">Account Status</label>
-                                        <select class="form-select" id="userMgmtStatusFilter">
-                                            <option value="all">All</option>
-                                            <option value="active">Active</option>
-                                            <option value="suspended">Suspended</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-6 col-lg-2">
-                                        <label class="small mb-1" for="userMgmtSubmissionFilter">Form Status</label>
-                                        <select class="form-select" id="userMgmtSubmissionFilter">
-                                            <option value="all">All</option>
-                                            <option value="submitted">Submitted</option>
-                                            <option value="not_submitted">Not Submitted</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-6 col-lg-2 d-flex align-items-end">
-                                        <button class="btn btn-dark w-100" id="userMgmtRefreshBtn" type="button">Refresh</button>
+                                    <div class="ldss-user-management-header-badge">
+                                        <i data-feather="shield"></i>
+                                        Live Access Directory
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                            <div class="card-body">
+                                <div class="ldss-user-management-section ldss-compact-filter-card">
+                                    <div class="ldss-user-management-section-head">
+                                        <div>
+                                            <div class="ldss-user-management-section-title">User Access Controls</div>
+                                            <p class="ldss-user-management-section-copy">Use the email verification status tools below to monitor applicant confirmation progress, resend verification, or manually confirm login access when the user cannot complete the normal OTP email step.</p>
+                                        </div>
+                                        <div class="ldss-user-management-section-icon"><i data-feather="sliders"></i></div>
+                                    </div>
+                                    <div class="row g-2 align-items-end">
+                                    <div class="col-xl-3 col-lg-4 col-md-6">
+                                        <input class="form-control form-control-sm" id="userMgmtSearch" type="search" placeholder="Search name, email, mobile" aria-label="Search user records" />
+                                    </div>
+                                    <div class="col-xl-2 col-lg-4 col-md-6">
+                                        <select class="form-select form-select-sm" id="userMgmtRoleFilter" aria-label="Filter by role">
+                                            <option value="all">ROLE ALL</option>
+                                            <option value="applicant">APPLICANT</option>
+                                            <option value="secretary">SECRETARY</option>
+                                            <option value="admin">ADMIN</option>
+                                            <option value="super_admin">SUPER ADMIN</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-xl-2 col-lg-4 col-md-6">
+                                        <select class="form-select form-select-sm" id="userMgmtStatusFilter" aria-label="Filter by account status">
+                                            <option value="all">STATUS ALL</option>
+                                            <option value="active">ACTIVE</option>
+                                            <option value="suspended">SUSPENDED</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-xl-2 col-lg-4 col-md-6">
+                                        <select class="form-select form-select-sm" id="userMgmtVerificationFilter" aria-label="Filter by email verification">
+                                            <option value="all">VERIFY ALL</option>
+                                            <option value="verified">VERIFIED</option>
+                                            <option value="pending">PENDING</option>
+                                            <option value="no_email">NO EMAIL</option>
+                                            <option value="unknown">UNAVAILABLE</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-xl-2 col-lg-4 col-md-6">
+                                        <select class="form-select form-select-sm" id="userMgmtSubmissionFilter" aria-label="Filter by form status">
+                                            <option value="all">FORM ALL</option>
+                                            <option value="submitted">SUBMITTED</option>
+                                            <option value="not_submitted">NOT SUBMITTED</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-xl-1 col-lg-2 col-md-3">
+                                        <button class="btn btn-outline-dark btn-sm w-100" id="userMgmtApplyFilterBtn" type="button">Apply</button>
+                                    </div>
+                                    <div class="col-xl-1 col-lg-2 col-md-3">
+                                        <button class="btn btn-dark btn-sm w-100" id="userMgmtRefreshBtn" type="button">Refresh</button>
+                                    </div>
+                                </div>
+                                </div>
 
-                        <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <span>User Directory</span>
-                                <span class="small text-muted" id="userMgmtSummary">0 users</span>
-                            </div>
-                            <div class="card-body p-0">
-                                <div class="table-responsive">
-                                    <table class="table table-sm align-middle mb-0 ldss-user-directory-table">
-                                        <thead class="bg-light">
-                                            <tr>
-                                                <th class="ldss-user-col-name">Name</th>
-                                                <th class="ldss-user-col-role">Role</th>
-                                                <th class="ldss-user-col-form">Form Status</th>
-                                                <th class="ldss-user-col-application">Latest Application</th>
-                                                <th class="ldss-user-col-status">Status</th>
-                                                <th class="ldss-user-col-created d-none d-lg-table-cell">Created</th>
-                                                <th class="ldss-user-col-actions">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="userMgmtTableBody">
-                                            <tr>
-                                                <td class="text-center py-4 text-muted" colspan="7">Loading users...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+                                <div class="ldss-user-management-section">
+                                    <div class="ldss-user-management-section-head">
+                                        <div>
+                                            <div class="ldss-user-management-section-title">User Directory</div>
+                                            <p class="ldss-user-management-section-copy">Browse the current applicant and staff directory with lighter 10-row pagination for smoother loading.</p>
+                                        </div>
+                                        <div class="ldss-user-management-section-icon"><i data-feather="users"></i></div>
+                                    </div>
+                                    <div class="ldss-user-management-table-shell">
+                                        <div class="ldss-user-management-table-head">
+                                            <span class="fw-600">Account Directory</span>
+                                            <span class="small text-muted" id="userMgmtSummary">0 users</span>
+                                        </div>
+                                        <div class="table-responsive ldss-applications-table-wrap">
+                                            <table class="table table-sm mb-0 ldss-applications-table ldss-uniform-data-table ldss-user-directory-table">
+                                                <thead class="bg-light">
+                                                    <tr>
+                                                        <th class="ldss-user-col-name">Name</th>
+                                                        <th class="ldss-user-col-role">Role</th>
+                                                        <th class="ldss-user-col-verification">Email Verification</th>
+                                                        <th class="ldss-user-col-form">Form Status</th>
+                                                        <th class="ldss-user-col-application">Latest Application</th>
+                                                        <th class="ldss-user-col-status">Status</th>
+                                                        <th class="ldss-user-col-created d-none d-lg-table-cell">Created</th>
+                                                        <th class="ldss-user-col-actions">Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="userMgmtTableBody">
+                                                    <tr>
+                                                        <td class="text-center py-4 text-muted" colspan="8">Loading users...</td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-3 border-top ldss-user-directory-footer">
+                                            <div class="d-flex flex-column flex-md-row align-items-md-center gap-2">
+                                                <div class="d-flex align-items-center gap-2">
+                                                    <label class="small text-muted mb-0" for="userMgmtPageSize">Rows</label>
+                                                    <select class="form-select form-select-sm w-auto" id="userMgmtPageSize">
+                                                        <option value="10" selected>10</option>
+                                                        <option value="25">25</option>
+                                                        <option value="50">50</option>
+                                                        <option value="100">100</option>
+                                                    </select>
+                                                </div>
+                                                <div class="small text-muted" id="userMgmtPaginationInfo">Showing 0 of 0 records</div>
+                                            </div>
+                                            <nav aria-label="System Administrator user directory pagination">
+                                                <ul class="pagination pagination-sm mb-0" id="userMgmtPagination"></ul>
+                                            </nav>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -278,9 +495,11 @@
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
                 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
+        <script src="../js/supabase-auth-email-helper.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/supabase-superadmin-user-management.js"></script>
+        <script src="../js/supabase-superadmin-audit-helper.js"></script>
+        <script src="../js/supabase-superadmin-user-management.js?v=20260322-5"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

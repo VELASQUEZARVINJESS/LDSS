@@ -64,7 +64,7 @@
                                             <div class="page-header-icon"><i data-feather="edit"></i></div>
                                             New Scholarship Application
                                         </h1>
-                                        <div class="small ldss-muted">Complete this final application form and upload your 1x1 picture before submission.</div>
+                                        <div class="small ldss-muted" id="applicationFormIntroText">Complete this final application form and upload your 1x1 picture before submission.</div>
                                         <div class="small text-muted mt-1">Document-style layout based on the official application form.</div>
                                         <ol class="ldss-breadcrumb mt-1">
                                             <li><a href="applicant-dashboard.html">Dashboard</a></li>
@@ -89,7 +89,7 @@
                                 <div class="ldss-paper-form"> 
                                     <div class="row g-3 align-items-start mb-3">
                                         <div class="col-12 col-lg-3" id="applicationSectionPhoto">
-                                            <label class="small mb-1 d-block" for="reqApplicantPhoto">Applicant 1x1 Picture</label>
+                                            <label class="small mb-1 d-block" id="reqApplicantPhotoLabel" for="reqApplicantPhoto">Applicant 1x1 Picture</label>
                                             <div class="ldss-applicant-form-photo-stack mb-2">
                                                 <div class="ldss-photo-1x1-wrap">
                                                     <div class="ldss-photo-1x1">
@@ -99,7 +99,7 @@
                                                 </div>
                                             </div>
                                             <input class="form-control" id="reqApplicantPhoto" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" />
-                                            <div class="form-text" id="reqApplicantPhotoFeedback">Use a white background and wear formal attire or your school uniform.</div>
+                                            <div class="form-text" id="reqApplicantPhotoFeedback">Required before submission. Use a white background and wear formal attire or your school uniform.</div>
                                         </div>
                                         <div class="col-12 col-md-4 col-lg-3">
                                             <label class="small mb-1" for="schoolYear">School Year</label>
@@ -562,7 +562,7 @@
         <script src="../js/supabase-config.js?v=20260312-1"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js?v=20260312-1"></script>
-        <script src="../js/supabase-applicant-application-form.js?v=20260319-2"></script>
+        <script src="../js/supabase-applicant-application-form.js?v=20260322-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

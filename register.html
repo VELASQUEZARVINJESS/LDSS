@@ -20,11 +20,9 @@
                         <img class="ldss-auth-logo mb-2" src="img/daet-lgu.png" alt="LGU Daet Logo" />
                         <h1 class="h4 ldss-auth-title">Applicant Registration</h1>
                         <p class="ldss-auth-subtitle mb-0">Create your LDSP account</p>
+                        <p class="small text-muted mt-2 mb-0">A 6-digit OTP code will be sent to your email after registration.</p>
                     </div>
                     <div class="alert alert-danger d-none" id="registerStatus" role="alert"></div>
-                    <div class="d-none mb-3" id="registerResendWrap">
-                        <button class="btn btn-outline-dark btn-sm w-100" id="registerResendBtn" type="button">Resend Confirmation Email</button>
-                    </div>
                     <form id="registerForm">
                         <div class="row gx-2">
                             <div class="col-sm-6 mb-3">
@@ -84,7 +82,7 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="js/supabase-config.js"></script>
         <script src="js/supabase-auth-email-helper.js"></script>
-        <script src="js/supabase-register.js"></script>
+        <script src="js/supabase-register.js?v=20260322-2"></script>
         <script src="js/scripts.js"></script>
     </body>
 </html>

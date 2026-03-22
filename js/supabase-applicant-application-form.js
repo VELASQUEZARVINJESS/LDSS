@@ -6,6 +6,9 @@
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+    const DEFAULT_WORKFLOW_CONTROLS = {
+        require_applicant_photo_on_submit: true
+    };
     const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
     const MAX_AWARDS = 5;
     const DAET_MUNICIPALITY = "DAET";
@@ -126,6 +129,7 @@
     let legacyBarangayPendingAllowed = false;
     let initialPrivacyModalQueued = false;
     let formActionsBound = false;
+    let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
 
     function byId(id) {
         return document.getElementById(id);
@@ -153,6 +157,61 @@
 
     function escapeRegExp(value) {
         return (value || "").toString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function isApplicantPhotoRequiredOnSubmit() {
+        return workflowControls.require_applicant_photo_on_submit !== false;
+    }
+
+    function defaultFileHelperMessage(inputId) {
+        if (inputId === "reqApplicantPhoto") {
+            return isApplicantPhotoRequiredOnSubmit()
+                ? "Required before submission. Use a white background and wear formal attire or your school uniform."
+                : "Temporarily optional for submission. If available, upload a clear 1x1 photo. Identity may be confirmed during examination or interview.";
+        }
+        return FILE_HELPER_MESSAGES[inputId] || "";
+    }
+
+    function renderApplicantPhotoPolicy() {
+        const intro = byId("applicationFormIntroText");
+        const label = byId("reqApplicantPhotoLabel");
+        const feedback = byId("reqApplicantPhotoFeedback");
+        const placeholder = byId("reqApplicantPhotoPlaceholder");
+        const required = isApplicantPhotoRequiredOnSubmit();
+
+        if (intro) {
+            intro.textContent = required
+                ? "Complete this final application form and upload your 1x1 picture before submission."
+                : "Complete this final application form. Applicant photo is temporarily optional for submission.";
+        }
+        if (label) {
+            label.textContent = required
+                ? "Applicant 1x1 Picture"
+                : "Applicant 1x1 Picture (Temporarily Optional)";
+        }
+        if (feedback) {
+            feedback.textContent = defaultFileHelperMessage("reqApplicantPhoto");
+            feedback.className = "form-text " + (required ? "text-muted" : "text-warning");
+        }
+        if (placeholder && !placeholder.classList.contains("d-none")) {
+            placeholder.textContent = required ? "1x1 Photo" : "1x1 Photo Optional";
+        }
+    }
+
+    async function loadWorkflowControls(context) {
+        workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+
+        try {
+            const result = await context.client.rpc("active_workflow_controls");
+            if (!result.error && result.data && typeof result.data === "object") {
+                workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS, result.data);
+            }
+        } catch (_error) {
+            workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+        }
+
+        renderApplicantPhotoPolicy();
+        return workflowControls;
     }
 
     function cleanupAddressText(value) {
@@ -1772,8 +1831,12 @@
         if (!feedback) {
             return;
         }
-        feedback.textContent = message || FILE_HELPER_MESSAGES[inputId] || "";
-        feedback.className = "form-text " + (isError ? "text-danger" : "text-muted");
+        feedback.textContent = message || defaultFileHelperMessage(inputId);
+        feedback.className = "form-text " + (
+            isError
+                ? "text-danger"
+                : (inputId === "reqApplicantPhoto" && !message && !isApplicantPhotoRequiredOnSubmit() ? "text-warning" : "text-muted")
+        );
     }
 
     function clearFileFeedback() {
@@ -2873,6 +2936,9 @@
                 if (doc.requiredOnSubmit === false) {
                     return false;
                 }
+                if (doc.docType === "applicant_photo" && !isApplicantPhotoRequiredOnSubmit()) {
+                    return false;
+                }
                 return !present.has(doc.docType);
             })
             .map(function (doc) {
@@ -3338,8 +3404,10 @@
         bindFormActions(context);
         applyActionLabels();
         populatePermanentAddressFields();
+        renderApplicantPhotoPolicy();
 
         try {
+            await loadWorkflowControls(context);
             const profile = await loadProfile(context);
             applyProfileToForm(profile);
             if (profile && profile.applicant_photo_path) {
