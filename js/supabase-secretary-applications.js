@@ -5,7 +5,17 @@
     const MAX_PAGE_SIZE = 100;
     const PROFILE_BATCH_SIZE = 120;
     const SUPABASE_FETCH_LIMIT = 1000;
+    const SECONDARY_LOAD_DELAY_MS = 80;
+    const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
+    const WALK_IN_API_PATH = "/api/secretary/walk-in-intake";
+    const NO_BARANGAY_FILTER_VALUE = "__no_barangay__";
+    const NO_BARANGAY_FILTER_LABEL = "No Barangay";
+    const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
+    const DEFAULT_WORKFLOW_CONTROLS = {
+        allow_secretary_draft_completion: false,
+        allow_secretary_walk_in_intake: false
+    };
     const DAET_BARANGAYS = [
         "Alawihao",
         "Awitan",
@@ -48,6 +58,11 @@
     let currentPage = 1;
     let pageSize = DEFAULT_PAGE_SIZE;
     let barangayLookup = null;
+    let authContext = null;
+    let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+    let walkInModalInstance = null;
+    let walkInSubmitting = false;
+    let applicationsLoadToken = 0;
 
     function byId(id) {
         return document.getElementById(id);
@@ -131,6 +146,315 @@
         }
         alert.className = "alert " + (type || "alert-info");
         alert.textContent = message;
+    }
+
+    function delay(ms) {
+        return new Promise(function (resolve) {
+            window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+        });
+    }
+
+    function getStoredRankingSettings() {
+        try {
+            const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+            if (!raw) {
+                return null;
+            }
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === "object" ? parsed : null;
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function readFallbackWorkflowControls() {
+        const settings = getStoredRankingSettings();
+        const controls = settings && settings.ranking_basis && settings.ranking_basis.controls
+            ? settings.ranking_basis.controls
+            : {};
+        return Object.assign({}, DEFAULT_WORKFLOW_CONTROLS, controls);
+    }
+
+    function readFallbackSchoolYear() {
+        const settings = getStoredRankingSettings();
+        return settings && settings.school_year
+            ? (settings.school_year || "").toString().trim()
+            : "";
+    }
+
+    async function loadWorkflowControls(context) {
+        const fallback = readFallbackWorkflowControls();
+        const rpcResult = await context.client.rpc("active_workflow_controls");
+        if (!rpcResult.error && rpcResult.data && typeof rpcResult.data === "object") {
+            workflowControls = Object.assign({}, fallback, rpcResult.data);
+            return workflowControls;
+        }
+
+        if (rpcResult.error && !/does not exist|function|permission/i.test(rpcResult.error.message || "")) {
+            throw new Error("Failed to load workflow controls: " + rpcResult.error.message);
+        }
+
+        workflowControls = fallback;
+        return workflowControls;
+    }
+
+    async function getAccessToken() {
+        if (!authContext || !authContext.client || !authContext.client.auth || typeof authContext.client.auth.getSession !== "function") {
+            throw new Error("Supabase session is not available.");
+        }
+
+        const result = await authContext.client.auth.getSession();
+        const session = result && result.data ? result.data.session : null;
+        const token = session && session.access_token ? session.access_token : "";
+        if (!token) {
+            throw new Error("No active access token found. Please sign in again.");
+        }
+        return token;
+    }
+
+    async function requestJson(path, options) {
+        const token = await getAccessToken();
+        const fetchOptions = Object.assign({ method: "GET" }, options || {});
+        const headers = new Headers(fetchOptions.headers || {});
+        headers.set("Authorization", "Bearer " + token);
+        fetchOptions.headers = headers;
+
+        const response = await fetch(path, fetchOptions);
+        const responseText = await response.text();
+        let payload = null;
+
+        if (responseText) {
+            try {
+                payload = JSON.parse(responseText);
+            } catch (_error) {
+                payload = null;
+            }
+        }
+
+        if (!response.ok) {
+            const fallbackMessage = response.status === 404
+                ? "Walk-in intake API route was not found. Open the site through the Node server."
+                : "Request failed.";
+            throw new Error(payload && payload.error ? payload.error : fallbackMessage);
+        }
+
+        return payload || {};
+    }
+
+    function getWalkInModal() {
+        if (!walkInModalInstance) {
+            const modalEl = byId("secretaryWalkInModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                walkInModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return walkInModalInstance;
+    }
+
+    function buildPersonName(person) {
+        const first = (person && person.first_name ? person.first_name : person && person.firstName ? person.firstName : "").trim();
+        const middle = (person && person.middle_name ? person.middle_name : person && person.middleName ? person.middleName : "").trim();
+        const last = (person && person.last_name ? person.last_name : person && person.lastName ? person.lastName : "").trim();
+        return [first, middle, last].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    }
+
+    function setWalkInStatus(message, type) {
+        const box = byId("secretaryWalkInStatus");
+        if (!box) {
+            return;
+        }
+        if (!message) {
+            box.className = "alert d-none";
+            box.textContent = "";
+            return;
+        }
+        box.className = "alert " + (type || "alert-info");
+        box.textContent = message;
+    }
+
+    function setWalkInResultMarkup(markup) {
+        const box = byId("secretaryWalkInResult");
+        if (!box) {
+            return;
+        }
+        if (!markup) {
+            box.className = "d-none";
+            box.innerHTML = "";
+            return;
+        }
+        box.className = "border rounded-3 p-3 bg-light";
+        box.innerHTML = markup;
+    }
+
+    function syncWalkInAction() {
+        const actionButton = byId("secretaryWalkInBtn");
+        const actionLead = byId("secretaryWalkInLead");
+        const isEnabled = workflowControls.allow_secretary_walk_in_intake === true;
+
+        if (actionButton) {
+            actionButton.classList.toggle("d-none", !isEnabled);
+            actionButton.disabled = !isEnabled || walkInSubmitting;
+        }
+        if (actionLead) {
+            actionLead.classList.toggle("d-none", !isEnabled);
+        }
+    }
+
+    function applyWalkInDefaults() {
+        const schoolYearInput = byId("secretaryWalkInSchoolYear");
+        const scholarshipInput = byId("secretaryWalkInScholarshipType");
+        const sectorSelect = byId("secretaryWalkInSectorClassification");
+
+        if (schoolYearInput && !schoolYearInput.value.trim()) {
+            schoolYearInput.value = readFallbackSchoolYear();
+        }
+        if (scholarshipInput && !scholarshipInput.value.trim()) {
+            scholarshipInput.value = DEFAULT_WALK_IN_SCHOLARSHIP_TYPE;
+        }
+        if (sectorSelect && !sectorSelect.value) {
+            sectorSelect.value = "";
+        }
+    }
+
+    function setWalkInBusy(isBusy) {
+        const form = byId("secretaryWalkInForm");
+        const submitButton = byId("secretaryWalkInSubmitBtn");
+        walkInSubmitting = Boolean(isBusy);
+
+        if (form) {
+            Array.from(form.querySelectorAll("input, select, textarea")).forEach(function (control) {
+                control.disabled = walkInSubmitting;
+            });
+        }
+        if (submitButton) {
+            submitButton.disabled = walkInSubmitting;
+            submitButton.textContent = walkInSubmitting ? "Creating Walk-In Record..." : "Create Walk-In Record";
+        }
+
+        syncWalkInAction();
+    }
+
+    function resetWalkInForm() {
+        const form = byId("secretaryWalkInForm");
+        if (form) {
+            form.reset();
+        }
+        setWalkInBusy(false);
+        setWalkInStatus("");
+        setWalkInResultMarkup("");
+        applyWalkInDefaults();
+    }
+
+    function collectWalkInPayload() {
+        const payload = {
+            firstName: (byId("secretaryWalkInFirstName") && byId("secretaryWalkInFirstName").value || "").trim(),
+            middleName: (byId("secretaryWalkInMiddleName") && byId("secretaryWalkInMiddleName").value || "").trim(),
+            lastName: (byId("secretaryWalkInLastName") && byId("secretaryWalkInLastName").value || "").trim(),
+            email: (byId("secretaryWalkInEmail") && byId("secretaryWalkInEmail").value || "").trim().toLowerCase(),
+            mobileNumber: (byId("secretaryWalkInMobile") && byId("secretaryWalkInMobile").value || "").trim(),
+            schoolYear: (byId("secretaryWalkInSchoolYear") && byId("secretaryWalkInSchoolYear").value || "").trim(),
+            scholarshipType: (byId("secretaryWalkInScholarshipType") && byId("secretaryWalkInScholarshipType").value || "").trim(),
+            sectorClassification: (byId("secretaryWalkInSectorClassification") && byId("secretaryWalkInSectorClassification").value || "").trim(),
+            officeNote: (byId("secretaryWalkInOfficeNote") && byId("secretaryWalkInOfficeNote").value || "").trim()
+        };
+
+        if (!payload.firstName || !payload.lastName || !payload.email || !payload.mobileNumber) {
+            throw new Error("First name, last name, email, and mobile number are required.");
+        }
+        if (payload.schoolYear && !/^\d{4}-\d{4}$/.test(payload.schoolYear)) {
+            throw new Error("School year must follow YYYY-YYYY format.");
+        }
+        if (payload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) {
+            throw new Error("Enter a valid email address.");
+        }
+
+        payload.scholarshipType = payload.scholarshipType || DEFAULT_WALK_IN_SCHOLARSHIP_TYPE;
+        return payload;
+    }
+
+    function renderWalkInResult(payload) {
+        const response = payload && typeof payload === "object" ? payload : {};
+        const applicant = response.applicant && typeof response.applicant === "object" ? response.applicant : {};
+        const application = response.application && typeof response.application === "object" ? response.application : {};
+        const applicantName = buildPersonName(applicant) || "Applicant";
+        const actionLabel = response.user_created ? "New applicant account created" : "Existing applicant account reused";
+        const temporaryPassword = (response.temporary_password || "").toString().trim();
+        const verificationHref = application.id
+            ? ("secretary-interview-verification.html?id=" + encodeURIComponent(application.id))
+            : "";
+        const temporaryPasswordMarkup = temporaryPassword
+            ? (
+                '<div class="border rounded-3 bg-white p-3 mt-3">' +
+                '<div class="small text-muted">Temporary Password</div>' +
+                '<div class="fw-semibold font-monospace mt-1">' + escapeHtml(temporaryPassword) + "</div>" +
+                '<div class="small text-muted mt-2">Share this securely with the applicant so they can sign in later and change the password.</div>' +
+                "</div>"
+            )
+            : '<div class="small text-muted mt-3">No temporary password was generated because this walk-in used an existing applicant account.</div>';
+
+        setWalkInResultMarkup(
+            '<div class="d-flex flex-column flex-lg-row align-items-lg-start justify-content-between gap-3">' +
+                '<div>' +
+                    '<div class="small text-uppercase text-muted fw-semibold">' + escapeHtml(actionLabel) + "</div>" +
+                    '<div class="h5 mb-1">' + escapeHtml(applicantName) + "</div>" +
+                    '<div class="small text-muted">Application No.: ' + escapeHtml(application.application_no || "-") + "</div>" +
+                    '<div class="small text-muted">School Year: ' + escapeHtml(application.school_year || "-") + "</div>" +
+                    '<div class="small text-muted">Email: ' + escapeHtml(applicant.email || "-") + "</div>" +
+                    '<div class="small text-muted">Mobile: ' + escapeHtml(applicant.mobile_number || "-") + "</div>" +
+                "</div>" +
+                (verificationHref
+                    ? ('<a class="btn btn-dark btn-sm" href="' + escapeHtml(verificationHref) + '">Open Verification Record</a>')
+                    : "") +
+            "</div>" +
+            temporaryPasswordMarkup
+        );
+    }
+
+    function handleOpenWalkInModal() {
+        if (workflowControls.allow_secretary_walk_in_intake !== true) {
+            showStatus("Walk-in intake is currently disabled by Scholarship Settings.", "alert-warning");
+            return;
+        }
+
+        resetWalkInForm();
+        const modal = getWalkInModal();
+        if (!modal) {
+            showStatus("Walk-in intake modal could not be opened on this page.", "alert-danger");
+            return;
+        }
+        modal.show();
+    }
+
+    async function handleWalkInSubmit(event) {
+        event.preventDefault();
+        if (walkInSubmitting) {
+            return;
+        }
+
+        try {
+            const payload = collectWalkInPayload();
+            setWalkInStatus("");
+            setWalkInResultMarkup("");
+            setWalkInBusy(true);
+
+            const result = await requestJson(WALK_IN_API_PATH, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            renderWalkInResult(result);
+            setWalkInStatus("Walk-in application created. Save any login details below before closing this window.", "alert-success");
+
+            await loadApplications(authContext);
+            showStatus("Walk-in application created for " + (buildPersonName(result.applicant || payload) || "the applicant") + ".", "alert-success");
+        } catch (error) {
+            setWalkInStatus(error && error.message ? error.message : "Walk-in intake failed.", "alert-danger");
+        } finally {
+            setWalkInBusy(false);
+        }
     }
 
     function isCorrectionNotification(row) {
@@ -300,31 +624,29 @@
 
     async function fetchAllApplications(context) {
         const rows = [];
-        let totalCount = 0;
+        const includeDrafts = workflowControls.allow_secretary_draft_completion === true;
 
         for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
-            const result = await context.client
+            let query = context.client
                 .from("applications")
-                .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at", {
-                    count: from === 0 ? "exact" : undefined
-                })
-                .neq("status", "draft")
+                .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at")
                 .order("updated_at", { ascending: false })
                 .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (!includeDrafts) {
+                query = query.neq("status", "draft");
+            }
+
+            const result = await query;
 
             if (result.error) {
                 return {
                     data: rows,
-                    count: totalCount,
                     error: result.error
                 };
             }
 
             const batch = result.data || [];
-            if (from === 0) {
-                totalCount = result.count || batch.length;
-            }
-
             rows.push.apply(rows, batch);
             if (batch.length < SUPABASE_FETCH_LIMIT) {
                 break;
@@ -333,9 +655,26 @@
 
         return {
             data: rows,
-            count: totalCount,
             error: null
         };
+    }
+
+    function buildQueueRows(rawRows, profileMap, correctionNoticeMap) {
+        const safeProfileMap = profileMap || {};
+        const safeNoticeMap = correctionNoticeMap || {};
+
+        return (rawRows || []).map(function (row) {
+            const profile = safeProfileMap[row.applicant_id] || null;
+            const latestCorrectionNotice = safeNoticeMap[row.id] || null;
+            return Object.assign({}, row, {
+                applicant_name: buildApplicantName(profile),
+                barangay: profile && profile.barangay ? profile.barangay : "",
+                sector_classification: row.sector_classification || "",
+                latest_correction_notice: latestCorrectionNotice,
+                resubmitted_for_check: isResubmittedForCheck(row, latestCorrectionNotice),
+                resubmitted_notice_label: latestCorrectionNotice ? correctionNoticeLabel(latestCorrectionNotice, row) : ""
+            });
+        });
     }
 
     function getPageCount(total) {
@@ -357,9 +696,11 @@
         const selectedBarangayRaw = barangayFilter.value || "all";
         const selectedBarangay = selectedBarangayRaw === "all"
             ? "all"
-            : (normalizeBarangay(selectedBarangayRaw) || "all");
+            : (selectedBarangayRaw === NO_BARANGAY_FILTER_VALUE
+                ? NO_BARANGAY_FILTER_VALUE
+                : (normalizeBarangay(selectedBarangayRaw) || "all"));
         const selectedSector = sectorFilter.value || "all";
-        const selectedStatus = statusFilter.value || "all";
+        const selectedStatus = statusFilter.value || "submitted";
         const selectedYear = yearFilter.value || "all";
 
         const observedBarangays = new Set(
@@ -371,6 +712,9 @@
         );
         const barangays = DAET_BARANGAYS.filter(function (barangay) {
             return observedBarangays.has(barangay);
+        });
+        const hasRowsWithoutBarangay = rows.some(function (row) {
+            return !normalizeBarangay(row.barangay || "");
         });
 
         const sectors = Array.from(
@@ -385,15 +729,24 @@
             return left.localeCompare(right);
         });
 
-        const statuses = Array.from(
-            new Set(
-                rows
-                    .map(function (row) {
-                        return normalizeStatus(row.status || "");
-                    })
-                    .filter(Boolean)
-            )
-        );
+        const observedStatuses = rows
+            .map(function (row) {
+                return normalizeStatus(row.status || "");
+            })
+            .filter(Boolean);
+        const statusSet = new Set(observedStatuses);
+        if (workflowControls.allow_secretary_draft_completion === true) {
+            statusSet.add("draft");
+        }
+        const statuses = Array.from(statusSet).sort(function (left, right) {
+            if (left === "draft" && right !== "draft") {
+                return -1;
+            }
+            if (right === "draft" && left !== "draft") {
+                return 1;
+            }
+            return statusMeta(left).label.localeCompare(statusMeta(right).label);
+        });
 
         const years = Array.from(
             new Set(
@@ -406,13 +759,21 @@
         ).sort().reverse();
 
         barangayFilter.innerHTML = '<option value="all">ALL BARANGAY</option>';
+        if (hasRowsWithoutBarangay) {
+            const noBarangayOption = document.createElement("option");
+            noBarangayOption.value = NO_BARANGAY_FILTER_VALUE;
+            noBarangayOption.textContent = NO_BARANGAY_FILTER_LABEL;
+            barangayFilter.appendChild(noBarangayOption);
+        }
         barangays.forEach(function (barangay) {
             const option = document.createElement("option");
             option.value = barangay;
             option.textContent = barangay;
             barangayFilter.appendChild(option);
         });
-        barangayFilter.value = barangays.includes(selectedBarangay) ? selectedBarangay : "all";
+        barangayFilter.value = selectedBarangay === NO_BARANGAY_FILTER_VALUE && hasRowsWithoutBarangay
+            ? NO_BARANGAY_FILTER_VALUE
+            : (barangays.includes(selectedBarangay) ? selectedBarangay : "all");
 
         sectorFilter.innerHTML = '<option value="all">ALL SECTOR</option>';
         sectors.forEach(function (sector) {
@@ -494,7 +855,10 @@
 
         return allRows.filter(function (row) {
             const rowBarangay = normalizeBarangay(row.barangay || "");
-            const matchesBarangay = barangay === "all" || rowBarangay === barangay;
+            const matchesBarangay = barangay === "all"
+                || (barangay === NO_BARANGAY_FILTER_VALUE
+                    ? !rowBarangay
+                    : rowBarangay === barangay);
             const rowSector = (row.sector_classification || "").toString().trim();
             const matchesSector = sector === "all" || rowSector === sector;
             const normalized = normalizeStatus(row.status);
@@ -559,10 +923,39 @@
     }
 
     function actionForStatus(_status, appId) {
+        const href = "secretary-interview-verification.html?id=" + encodeURIComponent(appId);
+        if (normalizeStatus(_status) === "draft") {
+            return {
+                type: "draft",
+                viewHref: href + "&draft_mode=view",
+                finishHref: href
+            };
+        }
         return {
+            type: "default",
             label: "View Data",
-            href: "secretary-interview-verification.html?id=" + encodeURIComponent(appId)
+            href: href
         };
+    }
+
+    function renderActionMarkup(action, appId) {
+        if (!action || action.type !== "draft") {
+            return '<a class="btn btn-outline-dark btn-sm" href="' + escapeHtml((action && action.href) || "#") + '">' + escapeHtml((action && action.label) || "View Data") + "</a>";
+        }
+
+        const buttonId = "secretaryDraftActionBtn-" + String(appId || "")
+            .replace(/[^a-z0-9_-]/gi, "")
+            .toLowerCase();
+
+        return (
+            '<div class="dropdown">' +
+            '<button class="btn btn-outline-dark btn-sm dropdown-toggle" id="' + escapeHtml(buttonId) + '" type="button" data-bs-toggle="dropdown" aria-expanded="false">Draft Action</button>' +
+            '<div class="dropdown-menu dropdown-menu-end" aria-labelledby="' + escapeHtml(buttonId) + '">' +
+            '<a class="dropdown-item" href="' + escapeHtml(action.viewHref) + '">View Draft</a>' +
+            '<a class="dropdown-item" href="' + escapeHtml(action.finishHref) + '">Finish Draft</a>' +
+            "</div>" +
+            "</div>"
+        );
     }
 
     function renderTable(rows) {
@@ -599,7 +992,7 @@
                 '<td data-label="Sector Classification"><span class="ldss-table-ellipsis" title="' + escapeHtml(sectorClassification) + '">' + escapeHtml(sectorClassification) + "</span></td>" +
                 '<td data-label="Submitted">' + escapeHtml(formatDate(submitted)) + "</td>" +
                 '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
-                '<td data-label="View Data"><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(action.href) + '">' + escapeHtml(action.label) + "</a></td>" +
+                '<td data-label="Action">' + renderActionMarkup(action, row.id) + "</td>" +
                 "</tr>"
             );
         }).join("");
@@ -629,6 +1022,8 @@
     }
 
     async function loadApplications(context) {
+        const loadToken = applicationsLoadToken + 1;
+        applicationsLoadToken = loadToken;
         showStatus("");
 
         const appResult = await fetchAllApplications(context);
@@ -646,27 +1041,20 @@
             return row.id;
         }).filter(Boolean)));
 
-        const profileLoad = applicantIds.length > 0
-            ? await loadProfilesByIds(context, applicantIds)
-            : { profileMap: {}, failedBatchCount: 0, lastErrorMessage: "" };
-        const profileMap = profileLoad.profileMap;
-        const correctionNoticeLoad = applicationIds.length > 0
-            ? await loadLatestCorrectionNoticesByApplicationIds(context, applicationIds)
-            : { noticeMap: {}, errorMessage: "" };
-        const correctionNoticeMap = correctionNoticeLoad.noticeMap || {};
+        const profileLoadPromise = applicantIds.length > 0
+            ? loadProfilesByIds(context, applicantIds)
+            : Promise.resolve({ profileMap: {}, failedBatchCount: 0, lastErrorMessage: "" });
+        const correctionNoticeLoadPromise = applicationIds.length > 0
+            ? loadLatestCorrectionNoticesByApplicationIds(context, applicationIds)
+            : Promise.resolve({ noticeMap: {}, errorMessage: "" });
 
-        allRows = rows.map(function (row) {
-            const profile = profileMap[row.applicant_id] || null;
-            const latestCorrectionNotice = correctionNoticeMap[row.id] || null;
-            return Object.assign({}, row, {
-                applicant_name: buildApplicantName(profile),
-                barangay: profile && profile.barangay ? profile.barangay : "",
-                sector_classification: row.sector_classification || "",
-                latest_correction_notice: latestCorrectionNotice,
-                resubmitted_for_check: isResubmittedForCheck(row, latestCorrectionNotice),
-                resubmitted_notice_label: latestCorrectionNotice ? correctionNoticeLabel(latestCorrectionNotice, row) : ""
-            });
-        });
+        const profileLoad = await profileLoadPromise;
+        if (loadToken !== applicationsLoadToken) {
+            return;
+        }
+
+        const profileMap = profileLoad.profileMap;
+        allRows = buildQueueRows(rows, profileMap, {});
 
         if (profileLoad.failedBatchCount > 0) {
             showStatus(
@@ -675,16 +1063,33 @@
                 "alert-warning"
             );
         }
+
+        updateKpis(allRows);
+        fillFilters(allRows);
+        applyFiltersAndRender(false);
+
+        if (applicationIds.length) {
+            await delay(SECONDARY_LOAD_DELAY_MS);
+        }
+        if (loadToken !== applicationsLoadToken) {
+            return;
+        }
+
+        const correctionNoticeLoad = await correctionNoticeLoadPromise;
+        if (loadToken !== applicationsLoadToken) {
+            return;
+        }
+
         if (correctionNoticeLoad.errorMessage) {
             showStatus(
                 "Application queue loaded, but some correction history markers could not be loaded. " +
                 "Showing available queue data only.",
                 "alert-warning"
             );
+            return;
         }
 
-        updateKpis(allRows);
-        fillFilters(allRows);
+        allRows = buildQueueRows(rows, profileMap, correctionNoticeLoad.noticeMap || {});
         applyFiltersAndRender(false);
     }
 
@@ -697,6 +1102,9 @@
         const yearFilter = byId("secretaryApplicationsYearFilter");
         const pagination = byId("secretaryApplicationsPagination");
         const pageSizeSelect = byId("secretaryApplicationsPageSize");
+        const walkInBtn = byId("secretaryWalkInBtn");
+        const walkInForm = byId("secretaryWalkInForm");
+        const walkInModalEl = byId("secretaryWalkInModal");
 
         if (applyBtn) {
             applyBtn.addEventListener("click", function () {
@@ -770,6 +1178,20 @@
                 applyFiltersAndRender(false);
             });
         }
+
+        if (walkInBtn) {
+            walkInBtn.addEventListener("click", handleOpenWalkInModal);
+        }
+
+        if (walkInForm) {
+            walkInForm.addEventListener("submit", handleWalkInSubmit);
+        }
+
+        if (walkInModalEl) {
+            walkInModalEl.addEventListener("hidden.bs.modal", function () {
+                resetWalkInForm();
+            });
+        }
     }
 
     async function init() {
@@ -778,7 +1200,17 @@
             return;
         }
 
+        authContext = context;
+        try {
+            await loadWorkflowControls(context);
+        } catch (error) {
+            workflowControls = readFallbackWorkflowControls();
+            showStatus(error && error.message ? error.message : "Failed to load workflow controls.", "alert-warning");
+        }
+
         bindEvents();
+        applyWalkInDefaults();
+        syncWalkInAction();
         await loadApplications(context);
     }
 

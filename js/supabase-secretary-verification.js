@@ -36,7 +36,9 @@
     ];
     const DEFAULT_WORKFLOW_CONTROLS = {
         allow_special_endorsement: true,
-        allow_secretary_applicant_edits: false
+        allow_secretary_applicant_edits: false,
+        allow_secretary_draft_completion: false,
+        require_applicant_photo_on_submit: true
     };
 
     const APPLICATION_STATUS_META = {
@@ -113,14 +115,20 @@
     let selectedCounselor = "";
     let cameraStream = null;
     let localPreviewObjectUrl = "";
+    let draftApplicantPhotoPreviewObjectUrl = "";
     let isProcessing = false;
     let profilesSupportsPlaceOfBirth = true;
     let applicationAuxDataAvailable = true;
     let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
     let latestCorrectionNotice = null;
+    let pageLoadToken = 0;
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function isActivePageLoad(loadToken) {
+        return loadToken === pageLoadToken;
     }
 
     function escapeRegExp(value) {
@@ -479,8 +487,38 @@
             .toLowerCase() === "draft";
     }
 
+    function isSecretaryDraftCompletionEnabled() {
+        return workflowControls.allow_secretary_draft_completion === true;
+    }
+
+    function isDraftViewOnlyRequest() {
+        return queryDraftMode() === "view";
+    }
+
+    function isDraftCompletionMode() {
+        return isDraftApplication(currentApplication)
+            && isSecretaryDraftCompletionEnabled()
+            && !isDraftViewOnlyRequest();
+    }
+
     function isDraftReadOnlyMode() {
-        return isDraftApplication(currentApplication);
+        return isDraftApplication(currentApplication)
+            && (!isSecretaryDraftCompletionEnabled() || isDraftViewOnlyRequest());
+    }
+
+    function isApplicantPhotoRequiredOnSubmit() {
+        return workflowControls.require_applicant_photo_on_submit !== false;
+    }
+
+    function currentApplicantPhotoPath() {
+        return (currentProfile && currentProfile.applicant_photo_path)
+            || (latestDocumentByType.applicant_photo && latestDocumentByType.applicant_photo.storage_path)
+            || "";
+    }
+
+    function selectedDraftApplicantPhotoFile() {
+        const input = byId("verificationDraftApplicantPhotoFile");
+        return input && input.files && input.files[0] ? input.files[0] : null;
     }
 
     function buildVerificationUrl(applicationId) {
@@ -699,7 +737,6 @@
     }
 
     function hasApplicationUpdatedSinceNotice(application, notice) {
-        const status = normalizeStatus(application && application.status);
         const noticeAt = new Date(notice && notice.created_at ? notice.created_at : 0).getTime();
         const applicationUpdatedAt = new Date(
             (application && (application.updated_at || application.created_at)) || 0
@@ -709,9 +746,17 @@
             notice &&
             noticeAt &&
             applicationUpdatedAt &&
-            applicationUpdatedAt > noticeAt &&
-            status !== "returned_for_correction"
+            applicationUpdatedAt > noticeAt
         );
+    }
+
+    function hasApplicationReturnedRecordBeenUpdated(application, notice) {
+        const status = normalizeStatus(application && application.status);
+        return hasApplicationUpdatedSinceNotice(application, notice) && status !== "returned_for_correction";
+    }
+
+    function hasApplicantUpdatedReturnedApplication(application, notice) {
+        return hasApplicationUpdatedSinceNotice(application, notice);
     }
 
     function renderCorrectionHistoryNotice() {
@@ -728,7 +773,7 @@
 
         const label = correctionNoticeLabel(latestCorrectionNotice, currentApplication);
         const sentAt = formatDateTime(latestCorrectionNotice.created_at);
-        const hasUpdated = hasApplicationUpdatedSinceNotice(currentApplication, latestCorrectionNotice);
+        const hasUpdated = hasApplicationReturnedRecordBeenUpdated(currentApplication, latestCorrectionNotice);
 
         if (hasUpdated) {
             box.className = "alert alert-info";
@@ -744,8 +789,12 @@
         const prevBtn = byId("verificationPrevBtn");
         const nextBtn = byId("verificationNextBtn");
         const forExamBtn = byId("verificationForExamBtn");
+        const notQualifiedBtn = byId("verificationNotQualifiedBtn");
         const hasPrevious = currentNavigationIndex > 0;
         const hasNext = currentNavigationIndex > -1 && currentNavigationIndex < applicationNavigationIds.length - 1;
+        const canDecideQualification = !!currentApplication &&
+            !isDraftApplication(currentApplication) &&
+            isSecretaryCheckingStage(normalizedApplicationStatus());
 
         if (prevBtn) {
             prevBtn.disabled = isProcessing || !hasPrevious;
@@ -754,13 +803,64 @@
             nextBtn.disabled = isProcessing || !hasNext;
         }
         if (forExamBtn) {
-            forExamBtn.disabled = isProcessing || !currentApplication || isDraftReadOnlyMode();
+            forExamBtn.disabled = isProcessing || !canDecideQualification;
+        }
+        if (notQualifiedBtn) {
+            notQualifiedBtn.disabled = isProcessing || !canDecideQualification;
         }
         syncDraftReadOnlyState();
     }
 
+    function saveActionLabel() {
+        return isDraftCompletionMode() ? "Finish Draft" : "Save Checking";
+    }
+
+    function syncVerificationActionLabels() {
+        const saveBtn = byId("verificationSaveBtn");
+        if (saveBtn && !isProcessing) {
+            saveBtn.textContent = saveActionLabel();
+        }
+    }
+
+    function clearDraftApplicantPhotoPreviewObjectUrl() {
+        if (!draftApplicantPhotoPreviewObjectUrl) {
+            return;
+        }
+        URL.revokeObjectURL(draftApplicantPhotoPreviewObjectUrl);
+        draftApplicantPhotoPreviewObjectUrl = "";
+    }
+
+    function syncDraftApplicantPhotoUploadState() {
+        const wrap = byId("verificationDraftApplicantPhotoWrap");
+        const input = byId("verificationDraftApplicantPhotoFile");
+        const help = byId("verificationDraftApplicantPhotoHelp");
+        const draftCompletionMode = isDraftCompletionMode();
+        const hasStoredPhoto = Boolean(currentApplicantPhotoPath());
+
+        if (wrap) {
+            wrap.classList.toggle("d-none", !draftCompletionMode);
+        }
+        if (input) {
+            input.disabled = !draftCompletionMode || isProcessing;
+        }
+        if (help) {
+            if (!draftCompletionMode) {
+                help.textContent = "Use this only when System Administrator enables draft completion for Secretary.";
+            } else if (hasStoredPhoto) {
+                help.textContent = "Optional replacement. If you choose a new JPG or PNG here, it uploads when you click Finish Draft.";
+            } else if (isApplicantPhotoRequiredOnSubmit()) {
+                help.textContent = "Applicant 1x1 photo is required before finishing this draft. Choose a JPG or PNG, then click Finish Draft.";
+            } else {
+                help.textContent = "Applicant photo is temporarily optional for submission. If available, attach it here before finishing the draft.";
+            }
+        }
+    }
+
+
     function syncDraftReadOnlyState() {
-        const draftMode = isDraftReadOnlyMode();
+        const draftReadOnly = isDraftReadOnlyMode();
+        const draftApplication = isDraftApplication(currentApplication);
+        const draftCompletionMode = isDraftCompletionMode();
         const notice = byId("verificationDraftReadOnlyNotice");
         const remarks = byId("verificationRemarks");
         const interviewDateTime = byId("verificationInterviewDateTime");
@@ -778,12 +878,21 @@
         const photoActionBtn = byId("verificationPhotoActionBtn");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
         const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
+        const notQualifiedBtn = byId("verificationNotQualifiedBtn");
+        const canDecideQualification = !!currentApplication &&
+            !draftApplication &&
+            isSecretaryCheckingStage(normalizedApplicationStatus());
         const editApplicantSaveBtn = byId("verificationApplicantEditSaveBtn");
 
         if (notice) {
-            if (draftMode) {
+            if (draftReadOnly) {
                 notice.className = "alert alert-info";
-                notice.textContent = "Draft preview only. Secretary checking, correction routing, photo actions, and workflow updates stay disabled until the applicant submits the application.";
+                notice.textContent = isDraftViewOnlyRequest()
+                    ? "Draft view only. Use Finish Draft from the application queue when the office is ready to complete this record."
+                    : "Draft preview only. Secretary checking, correction routing, photo actions, and workflow updates stay disabled until the applicant submits the application.";
+            } else if (draftCompletionMode) {
+                notice.className = "alert alert-warning";
+                notice.textContent = "Draft completion mode is enabled by System Administrator. Secretary can complete applicant details here, attach the applicant 1x1 photo if needed, then click Finish Draft. Checking, correction routing, and interview actions stay disabled until the draft is completed.";
             } else {
                 notice.className = "alert alert-info d-none";
                 notice.textContent = "";
@@ -791,60 +900,66 @@
         }
 
         if (remarks) {
-            remarks.readOnly = draftMode;
+            remarks.readOnly = draftReadOnly;
         }
         if (interviewDateTime) {
-            interviewDateTime.disabled = draftMode;
+            interviewDateTime.disabled = draftApplication;
         }
         if (interviewVenue) {
-            interviewVenue.disabled = draftMode;
+            interviewVenue.disabled = draftApplication;
         }
         if (counselorSelect) {
-            counselorSelect.disabled = draftMode;
+            counselorSelect.disabled = draftApplication;
         }
         if (recommendationSelect) {
-            recommendationSelect.disabled = draftMode;
+            recommendationSelect.disabled = draftApplication;
         }
         if (verifiedPhotoInput) {
-            verifiedPhotoInput.disabled = draftMode;
+            verifiedPhotoInput.disabled = draftApplication;
         }
         if (cameraStartBtn) {
-            cameraStartBtn.disabled = draftMode;
+            cameraStartBtn.disabled = draftApplication;
         }
         if (cameraCaptureBtn) {
-            cameraCaptureBtn.disabled = draftMode;
+            cameraCaptureBtn.disabled = draftApplication;
         }
         if (cameraStopBtn) {
-            cameraStopBtn.disabled = draftMode;
+            cameraStopBtn.disabled = draftApplication;
         }
         if (saveBtn) {
-            saveBtn.disabled = draftMode || isProcessing || !currentApplication;
+            saveBtn.disabled = draftReadOnly || isProcessing || !currentApplication;
         }
         if (complianceBtn) {
-            complianceBtn.disabled = draftMode || isProcessing || !currentApplication;
+            complianceBtn.disabled = draftApplication || isProcessing || !currentApplication;
         }
         if (returnBtn) {
-            returnBtn.disabled = draftMode || isProcessing || !currentApplication;
+            returnBtn.disabled = draftApplication || isProcessing || !currentApplication;
         }
         if (returnConfirmBtn) {
-            returnConfirmBtn.disabled = draftMode || isProcessing;
+            returnConfirmBtn.disabled = draftApplication || isProcessing;
+        }
+        if (notQualifiedBtn) {
+            notQualifiedBtn.disabled = draftApplication || isProcessing || !currentApplication || !canDecideQualification;
         }
         if (photoActionBtn) {
-            photoActionBtn.disabled = draftMode || isProcessing;
+            photoActionBtn.disabled = draftApplication || isProcessing;
         }
         if (approvePhotoBtn) {
-            approvePhotoBtn.disabled = draftMode || isProcessing;
+            approvePhotoBtn.disabled = draftApplication || isProcessing;
         }
         if (photoChangeBtn) {
-            photoChangeBtn.disabled = draftMode || isProcessing;
+            photoChangeBtn.disabled = draftApplication || isProcessing;
         }
         if (editApplicantSaveBtn) {
-            editApplicantSaveBtn.disabled = draftMode || isProcessing;
+            editApplicantSaveBtn.disabled = draftReadOnly || isProcessing;
         }
 
         document.querySelectorAll(".ldss-verification-status-select, [data-doc-note-open='1']").forEach(function (element) {
-            element.disabled = draftMode;
+            element.disabled = draftApplication;
         });
+
+        syncDraftApplicantPhotoUploadState();
+        syncVerificationActionLabels();
     }
 
     function readStoredVerificationQueue() {
@@ -969,7 +1084,7 @@
             })
             .filter(function (segment) {
                 const key = normalizeAddressSegment(segment);
-                if (!key || seen.has(key)) {
+                if (!key || key === "barangay" || key === "brgy" || seen.has(key)) {
                     return false;
                 }
                 seen.add(key);
@@ -1013,8 +1128,21 @@
             .split(",")
             .map(normalizeAddressSegment)
             .filter(Boolean);
-        const barangayKey = normalizeAddressSegment(barangay);
-        if (barangayKey && addressSegments.includes(barangayKey)) {
+        const barangaySegments = cleanupAddressDisplay(barangay)
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const namedBarangayKey = barangaySegments.find(function (segment) {
+            return segment !== "daet" && segment !== "barangay" && segment !== "brgy";
+        });
+
+        if (namedBarangayKey && addressSegments.includes(namedBarangayKey)) {
+            return address;
+        }
+        if (
+            namedBarangayKey &&
+            addressSegments.includes("barangay " + namedBarangayKey)
+        ) {
             return address;
         }
 
@@ -1034,6 +1162,14 @@
     function queryApplicationId() {
         const params = new URLSearchParams(window.location.search);
         return params.get("id");
+    }
+
+    function queryDraftMode() {
+        const params = new URLSearchParams(window.location.search);
+        return (params.get("draft_mode") || "")
+            .toString()
+            .trim()
+            .toLowerCase();
     }
 
     function auxMetaKey(userId, applicationId) {
@@ -1430,6 +1566,160 @@
         localPreviewObjectUrl = "";
     }
 
+    async function saveApplicantPhotoPathForCurrentApplicant(storagePath) {
+        if (!storagePath || !currentApplication || !currentApplication.applicant_id) {
+            return;
+        }
+
+        let result = await authContext.client
+            .from("profiles")
+            .update({ applicant_photo_path: storagePath })
+            .eq("id", currentApplication.applicant_id)
+            .select(profileSelectFields())
+            .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await authContext.client
+                .from("profiles")
+                .update({ applicant_photo_path: storagePath })
+                .eq("id", currentApplication.applicant_id)
+                .select(profileSelectFields())
+                .maybeSingle();
+        }
+
+        if (result.error) {
+            throw new Error("Applicant photo uploaded, but profile sync failed: " + result.error.message);
+        }
+
+        currentProfile = result.data || currentProfile;
+    }
+
+    async function upsertApplicantPhotoDocument(storagePath, file) {
+        const existing = await authContext.client
+            .from("application_documents")
+            .select("id, storage_path, created_at")
+            .eq("application_id", currentApplication.id)
+            .eq("document_type", "applicant_photo")
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+        if (existing.error) {
+            throw new Error("Applicant photo uploaded, but document sync failed: " + existing.error.message);
+        }
+
+        const payload = {
+            application_id: currentApplication.id,
+            document_type: "applicant_photo",
+            storage_path: storagePath,
+            original_filename: file.name,
+            mime_type: file.type || "application/octet-stream",
+            file_size_bytes: file.size,
+            verification_status: "verified",
+            verification_notes: null,
+            uploaded_by: authContext.user.id,
+            verified_by: authContext.user.id
+        };
+
+        if (existing.data && existing.data.length > 0) {
+            const existingRow = existing.data[0];
+            const updateResult = await authContext.client
+                .from("application_documents")
+                .update(payload)
+                .eq("id", existingRow.id)
+                .select("id, application_id, document_type, storage_path, original_filename, mime_type, file_size_bytes, verification_status, verification_notes, created_at")
+                .maybeSingle();
+
+            if (updateResult.error) {
+                throw new Error("Applicant photo uploaded, but document update failed: " + updateResult.error.message);
+            }
+
+            latestDocumentByType.applicant_photo = updateResult.data || Object.assign({}, existingRow, payload);
+
+            const previousPath = (existingRow.storage_path || "").toString().trim();
+            if (
+                previousPath &&
+                previousPath !== storagePath &&
+                window.ldssUploads &&
+                typeof window.ldssUploads.deleteFiles === "function"
+            ) {
+                try {
+                    await window.ldssUploads.deleteFiles(authContext, [previousPath]);
+                } catch (_cleanupError) {
+                    // Best-effort cleanup only.
+                }
+            }
+            return;
+        }
+
+        const insertResult = await authContext.client
+            .from("application_documents")
+            .insert(payload)
+            .select("id, application_id, document_type, storage_path, original_filename, mime_type, file_size_bytes, verification_status, verification_notes, created_at")
+            .maybeSingle();
+
+        if (insertResult.error) {
+            throw new Error("Applicant photo uploaded, but document insert failed: " + insertResult.error.message);
+        }
+
+        latestDocumentByType.applicant_photo = insertResult.data || Object.assign({}, payload);
+    }
+
+    async function maybeUploadDraftApplicantPhoto() {
+        if (!isDraftCompletionMode()) {
+            return currentApplicantPhotoPath();
+        }
+
+        const fileInput = byId("verificationDraftApplicantPhotoFile");
+        const file = selectedDraftApplicantPhotoFile();
+        const existingPath = currentApplicantPhotoPath();
+        if (!file) {
+            if (isApplicantPhotoRequiredOnSubmit() && !existingPath) {
+                throw new Error("Applicant 1x1 photo is required before finishing this draft. Upload the photo here or temporarily turn off the photo requirement in Scholarship Settings.");
+            }
+            return existingPath;
+        }
+
+        const mime = (file.type || "").toLowerCase();
+        if (!mime.startsWith("image/")) {
+            throw new Error("Applicant 1x1 photo must be a JPG or PNG image.");
+        }
+        if (file.size > MAX_IMAGE_SIZE_BYTES) {
+            throw new Error("Applicant 1x1 photo exceeds the 10MB limit.");
+        }
+        if (!window.ldssUploads || typeof window.ldssUploads.uploadFile !== "function") {
+            throw new Error("Applicant photo upload client is not available.");
+        }
+
+        const uploadResult = await window.ldssUploads.uploadFile(authContext, file, {
+            applicationId: currentApplication.id,
+            documentType: "applicant_photo"
+        });
+        const storagePath = uploadResult && uploadResult.path ? uploadResult.path : "";
+        if (!storagePath) {
+            throw new Error("Applicant photo upload failed: upload server did not return a file path.");
+        }
+
+        await upsertApplicantPhotoDocument(storagePath, file);
+        await saveApplicantPhotoPathForCurrentApplicant(storagePath);
+
+        if (fileInput) {
+            fileInput.value = "";
+        }
+
+        clearDraftApplicantPhotoPreviewObjectUrl();
+        const previewUrl = await createSignedUrl(storagePath);
+        setPhotoArea(
+            "verificationApplicantPhotoPreview",
+            "verificationApplicantPhotoPlaceholder",
+            "verificationApplicantPhotoLink",
+            previewUrl || "",
+            "No Photo"
+        );
+        syncDraftApplicantPhotoUploadState();
+        return storagePath;
+    }
+
     function stopCameraStream() {
         if (cameraStream && cameraStream.getTracks) {
             cameraStream.getTracks().forEach(function (track) {
@@ -1602,12 +1892,17 @@
             }
         }
 
-        const fallbackResult = await authContext.client
+        let fallbackQuery = authContext.client
             .from("applications")
             .select(selectFields)
-            .neq("status", "draft")
             .order("updated_at", { ascending: false })
             .limit(1);
+
+        if (!isSecretaryDraftCompletionEnabled()) {
+            fallbackQuery = fallbackQuery.neq("status", "draft");
+        }
+
+        const fallbackResult = await fallbackQuery;
 
         if (fallbackResult.error || !fallbackResult.data || fallbackResult.data.length === 0) {
             return null;
@@ -1734,17 +2029,77 @@
         link.classList.add("d-none");
     }
 
+    function resetVerificationPhotoAreas() {
+        setPhotoArea(
+            "verificationApplicantPhotoPreview",
+            "verificationApplicantPhotoPlaceholder",
+            "verificationApplicantPhotoLink",
+            "",
+            "Loading applicant photo..."
+        );
+        setPhotoArea(
+            "verificationVerifiedPhotoPreview",
+            "verificationVerifiedPhotoPlaceholder",
+            "verificationVerifiedPhotoLink",
+            "",
+            "Loading verified photo..."
+        );
+    }
+
+    async function hydrateVerificationPhotoAreas(loadToken, applicantPhotoPath, verifiedPhotoPath) {
+        const photoUrls = await Promise.all([
+            applicantPhotoPath ? createSignedUrl(applicantPhotoPath) : Promise.resolve(""),
+            verifiedPhotoPath ? createSignedUrl(verifiedPhotoPath) : Promise.resolve("")
+        ]);
+
+        if (!isActivePageLoad(loadToken)) {
+            return;
+        }
+
+        clearLocalPreviewObjectUrl();
+
+        setPhotoArea(
+            "verificationApplicantPhotoPreview",
+            "verificationApplicantPhotoPlaceholder",
+            "verificationApplicantPhotoLink",
+            photoUrls[0],
+            "No Photo"
+        );
+
+        setPhotoArea(
+            "verificationVerifiedPhotoPreview",
+            "verificationVerifiedPhotoPlaceholder",
+            "verificationVerifiedPhotoLink",
+            photoUrls[1],
+            "No verified interview photo uploaded."
+        );
+    }
+
     function renderHeaderAndSummary() {
         const appNo = currentApplication ? currentApplication.application_no : "-";
         const applicantName = buildApplicantName(currentProfile);
         const meta = byId("secretaryVerificationHeaderMeta");
-        const isDraft = isDraftReadOnlyMode();
+        const isDraft = isDraftApplication(currentApplication);
+        const draftLabel = isDraftReadOnlyMode()
+            ? (isDraftViewOnlyRequest() ? "Draft View" : "Draft Preview")
+            : (isDraftCompletionMode() ? "Draft Completion" : "Draft");
 
         if (meta) {
-            meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName + (isDraft ? " | Draft Preview" : "");
+            meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName + (isDraft ? " | " + draftLabel : "");
         }
 
         renderApplicantDetailSheet();
+        syncVerificationActionLabels();
+    }
+
+    function refreshVerificationView() {
+        renderHeaderAndSummary();
+        renderCorrectionHistoryNotice();
+        renderInterviewForm();
+        syncApplicantEditAccess();
+        syncDraftReadOnlyState();
+        markCurrentFormSnapshot();
+        updateVerificationNavigationButtons();
     }
 
     function renderApplicantDetailSheet() {
@@ -1813,17 +2168,22 @@
     function syncApplicantEditAccess() {
         const editBtn = byId("verificationEditApplicantBtn");
         const meta = byId("verificationEditApplicantMeta");
-        const draftMode = isDraftReadOnlyMode();
-        const enabled = workflowControls.allow_secretary_applicant_edits === true && !draftMode;
+        const draftReadOnly = isDraftReadOnlyMode();
+        const draftCompletionMode = isDraftCompletionMode();
+        const enabled = draftCompletionMode || (workflowControls.allow_secretary_applicant_edits === true && !draftReadOnly && !isDraftApplication(currentApplication));
 
         if (editBtn) {
             editBtn.classList.toggle("d-none", !enabled);
             editBtn.disabled = !enabled;
         }
         if (meta) {
-            meta.classList.toggle("d-none", !enabled && !draftMode);
-            meta.textContent = draftMode
-                ? "Draft preview is read-only. Applicant detail editing is unavailable until the applicant submits the form."
+            meta.classList.toggle("d-none", !enabled && !draftReadOnly);
+            meta.textContent = draftReadOnly
+                ? (isDraftViewOnlyRequest()
+                    ? "Draft view is read-only. Use Finish Draft from the application queue to edit and complete this record."
+                    : "Draft preview is read-only. Applicant detail editing is unavailable until the applicant submits the form.")
+                : draftCompletionMode
+                    ? "Draft completion mode is enabled by System Administrator."
                 : enabled
                     ? "Applicant detail editing is enabled by System Administrator."
                     : "Applicant detail editing is off in System Administrator settings.";
@@ -1962,7 +2322,7 @@
         if (!currentApplication || !currentApplication.id || !currentApplication.applicant_id) {
             throw new Error("No application is loaded for correction.");
         }
-        if (workflowControls.allow_secretary_applicant_edits !== true) {
+        if (!isDraftCompletionMode() && workflowControls.allow_secretary_applicant_edits !== true) {
             throw new Error("Applicant detail editing is currently disabled in System Administrator settings.");
         }
 
@@ -2201,6 +2561,7 @@
         const returnBtn = byId("verificationReturnBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const forExamBtn = byId("verificationForExamBtn");
+        const notQualifiedBtn = byId("verificationNotQualifiedBtn");
         const photoActionBtn = byId("verificationPhotoActionBtn");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
         const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
@@ -2219,11 +2580,12 @@
             }
         };
 
-        setState(saveBtn, "Save Checking");
+        setState(saveBtn, saveActionLabel());
         setState(complianceBtn, "Send Compliance Notice");
         setState(returnBtn, "Return for Correction");
         setState(returnConfirmBtn, "Return and Redirect");
         setState(forExamBtn, "Set for Examination");
+        setState(notQualifiedBtn, "Not Qualified");
         if (photoActionBtn) {
             photoActionBtn.disabled = isLoading;
             if (!isLoading) {
@@ -2386,6 +2748,10 @@
             secretary_remarks: remarks || null
         };
 
+        if (isDraftApplication(currentApplication) && targetStatus !== "draft" && !currentApplication.submitted_at) {
+            payload.submitted_at = new Date().toISOString();
+        }
+
         if (typeof lockState === "boolean") {
             payload.is_locked = lockState;
         }
@@ -2393,11 +2759,15 @@
         const result = await authContext.client
             .from("applications")
             .update(payload)
-            .eq("id", currentApplication.id);
+            .eq("id", currentApplication.id)
+            .select("id, application_no, applicant_id, application_type, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at, secretary_remarks, is_locked")
+            .maybeSingle();
 
         if (result.error) {
             throw new Error("Failed to update application status: " + result.error.message);
         }
+
+        currentApplication = result.data || currentApplication;
     }
 
     async function upsertApprovalQueue(formValues) {
@@ -2524,6 +2894,16 @@
             return currentStatus;
         }
 
+        if (currentStatus === "draft") {
+            return isDraftCompletionMode() ? "submitted" : "draft";
+        }
+
+        if (currentStatus === "returned_for_correction") {
+            return hasApplicantUpdatedReturnedApplication(currentApplication, latestCorrectionNotice)
+                ? "submitted"
+                : "returned_for_correction";
+        }
+
         if (isSecretaryCheckingStage(currentStatus)) {
             return currentStatus || "submitted";
         }
@@ -2538,6 +2918,7 @@
         }
 
         const docStates = documentVerificationState();
+        const uploadedApplicantPhotoPath = await maybeUploadDraftApplicantPhoto();
         const uploadedPhotoPath = await maybeUploadVerifiedPhoto();
         const hardCopyVerified = Boolean(currentInterview && currentInterview.hard_copy_verified);
 
@@ -2552,6 +2933,7 @@
         return {
             formValues: formValues,
             docStates: docStates,
+            uploadedApplicantPhotoPath: uploadedApplicantPhotoPath,
             uploadedPhotoPath: uploadedPhotoPath
         };
     }
@@ -2576,6 +2958,17 @@
             return;
         }
 
+        const currentApplicationId = currentApplication && currentApplication.id ? currentApplication.id : "";
+        if (currentApplicationId) {
+            const latestApplication = await fetchApplication(currentApplicationId);
+            if (latestApplication) {
+                currentApplication = latestApplication;
+            }
+            latestCorrectionNotice = await fetchLatestCorrectionNotice(currentApplicationId) || null;
+            renderCorrectionHistoryNotice();
+            updateVerificationNavigationButtons();
+        }
+
         const previousStatus = normalizedApplicationStatus();
         const docStates = documentVerificationState();
         const targetStatus = deriveSaveStatus(formValues, docStates);
@@ -2587,6 +2980,18 @@
                 "Application Ready for Examination",
                 "Your application passed secretary checking and is now waiting for examination scheduling."
             );
+        } else if (previousStatus === "returned_for_correction" && targetStatus === "submitted") {
+            await notifyApplicant(
+                "application",
+                "Corrected Application Received",
+                "The scholarship office reviewed your updated application and returned it to the submitted verification queue."
+            );
+        } else if (previousStatus === "draft" && targetStatus === "submitted") {
+            await notifyApplicant(
+                "application",
+                "Application Submitted by Scholarship Office",
+                "Your draft application was completed by the scholarship office and moved into the submitted queue for secretary checking."
+            );
         } else {
             await notifyApplicant(
                 "application",
@@ -2595,8 +3000,13 @@
             );
         }
 
+        refreshVerificationView();
         return targetStatus === "pending_exam"
             ? "Secretary checking saved. Application moved to Pending Exam."
+            : (previousStatus === "returned_for_correction" && targetStatus === "submitted")
+                ? "Corrected application moved back to Submitted."
+            : (previousStatus === "draft" && targetStatus === "submitted")
+                ? "Draft finished and moved to Submitted."
             : "Secretary checking details saved successfully.";
     }
 
@@ -2608,6 +3018,10 @@
         }
 
         const previousStatus = normalizedApplicationStatus();
+        if (previousStatus === "draft") {
+            showStatus("Finish this draft first before setting it for examination.", "alert-warning");
+            return;
+        }
         if (!isSecretaryCheckingStage(previousStatus) && previousStatus !== "pending_exam") {
             showStatus("This application is no longer in secretary checking stage.", "alert-warning");
             return;
@@ -2621,6 +3035,7 @@
                 "Application Ready for Examination",
                 "Your application passed secretary checking and is now waiting for examination scheduling."
             );
+            refreshVerificationView();
             return "Application moved to Pending Exam.";
         }
 
@@ -2629,7 +3044,46 @@
             "Pending Exam Details Updated",
             "The scholarship office updated your examination preparation details."
         );
+        refreshVerificationView();
         return "Pending Exam details updated successfully.";
+    }
+
+    async function handleMarkNotQualified() {
+        const formValues = readFormValues();
+        if (formValues.error) {
+            showStatus(formValues.error, "alert-danger");
+            return;
+        }
+
+        const previousStatus = normalizedApplicationStatus();
+        if (previousStatus === "draft") {
+            showStatus("Finish this draft first before marking it as not qualified.", "alert-warning");
+            return;
+        }
+        if (!isSecretaryCheckingStage(previousStatus)) {
+            showStatus("This application is no longer in secretary checking stage.", "alert-warning");
+            return;
+        }
+
+        const confirmed = window.confirm("Mark this application as Not Qualified and stop it from proceeding to examination?");
+        if (!confirmed) {
+            return;
+        }
+
+        const remarks = (formValues.remarks || "").trim();
+        const applicantMessage = remarks
+            ? "After secretary checking, your application was marked as not qualified and will not proceed to examination. Remarks: " + remarks
+            : "After secretary checking, your application was marked as not qualified and will not proceed to examination.";
+
+        await persistVerification("rejected", false, false);
+        await notifyApplicant(
+            "application",
+            "Application Not Qualified",
+            applicantMessage
+        );
+
+        refreshVerificationView();
+        return "Application marked as Not Qualified and moved to Rejected.";
     }
 
     async function handleReturnForCorrection() {
@@ -2653,6 +3107,7 @@
             modal.hide();
         }
 
+        refreshVerificationView();
         return "Application returned for correction. Applicant will open " + correctionTargetLabel(correctionTarget) + " first and review " + targetSummary + ".";
     }
 
@@ -2774,8 +3229,11 @@
         }
     }
 
-    async function loadApplicationNavigationQueue(currentApplicationId) {
+    async function loadApplicationNavigationQueue(currentApplicationId, loadToken) {
         if (!authContext || !authContext.client) {
+            if (!isActivePageLoad(loadToken)) {
+                return;
+            }
             applicationNavigationIds = [];
             currentNavigationIndex = -1;
             updateVerificationNavigationButtons();
@@ -2783,6 +3241,9 @@
         }
 
         if (currentApplicationId && isDraftReadOnlyMode()) {
+            if (!isActivePageLoad(loadToken)) {
+                return;
+            }
             applicationNavigationIds = [currentApplicationId];
             currentNavigationIndex = 0;
             updateVerificationNavigationButtons();
@@ -2791,17 +3252,29 @@
 
         const storedIds = readStoredVerificationQueue();
         if (currentApplicationId && storedIds.length && storedIds.indexOf(currentApplicationId) !== -1) {
+            if (!isActivePageLoad(loadToken)) {
+                return;
+            }
             applicationNavigationIds = storedIds.slice();
             currentNavigationIndex = applicationNavigationIds.indexOf(currentApplicationId);
             updateVerificationNavigationButtons();
             return;
         }
 
-        const result = await authContext.client
+        let navigationQuery = authContext.client
             .from("applications")
             .select("id")
-            .neq("status", "draft")
             .order("updated_at", { ascending: false });
+
+        if (!isSecretaryDraftCompletionEnabled()) {
+            navigationQuery = navigationQuery.neq("status", "draft");
+        }
+
+        const result = await navigationQuery;
+
+        if (!isActivePageLoad(loadToken)) {
+            return;
+        }
 
         if (result.error) {
             applicationNavigationIds = currentApplicationId ? [currentApplicationId] : [];
@@ -2848,6 +3321,7 @@
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const correctionTargetInputs = document.querySelectorAll("input[name='verificationCorrectionTargets']");
         const forExamBtn = byId("verificationForExamBtn");
+        const notQualifiedBtn = byId("verificationNotQualifiedBtn");
         const prevBtn = byId("verificationPrevBtn");
         const nextBtn = byId("verificationNextBtn");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
@@ -2858,6 +3332,7 @@
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
         const cameraStopBtn = byId("verificationStopCameraBtn");
+        const draftApplicantPhotoInput = byId("verificationDraftApplicantPhotoFile");
 
         if (printBtn) {
             printBtn.addEventListener("click", function () {
@@ -2884,6 +3359,12 @@
         if (forExamBtn) {
             forExamBtn.addEventListener("click", function () {
                 runAction("verificationForExamBtn", "Sending...", handleSetForExamination);
+            });
+        }
+
+        if (notQualifiedBtn) {
+            notQualifiedBtn.addEventListener("click", function () {
+                runAction("verificationNotQualifiedBtn", "Saving...", handleMarkNotQualified);
             });
         }
 
@@ -2934,7 +3415,7 @@
                     showStatus("Applicant details are not loaded yet.", "alert-warning");
                     return;
                 }
-                if (workflowControls.allow_secretary_applicant_edits !== true) {
+                if (!isDraftCompletionMode() && workflowControls.allow_secretary_applicant_edits !== true) {
                     showStatus("Applicant detail editing is currently disabled in System Administrator settings.", "alert-warning");
                     return;
                 }
@@ -2997,6 +3478,122 @@
             });
         }
 
+        if (draftApplicantPhotoInput) {
+            draftApplicantPhotoInput.addEventListener("change", function () {
+                const file = draftApplicantPhotoInput.files && draftApplicantPhotoInput.files[0] ? draftApplicantPhotoInput.files[0] : null;
+                if (!file) {
+                    clearDraftApplicantPhotoPreviewObjectUrl();
+                    if (currentApplicantPhotoPath()) {
+                        createSignedUrl(currentApplicantPhotoPath()).then(function (url) {
+                            setPhotoArea(
+                                "verificationApplicantPhotoPreview",
+                                "verificationApplicantPhotoPlaceholder",
+                                "verificationApplicantPhotoLink",
+                                url || "",
+                                "No Photo"
+                            );
+                        }).catch(function () {
+                            setPhotoArea(
+                                "verificationApplicantPhotoPreview",
+                                "verificationApplicantPhotoPlaceholder",
+                                "verificationApplicantPhotoLink",
+                                "",
+                                "Photo preview unavailable."
+                            );
+                        });
+                    } else {
+                        setPhotoArea(
+                            "verificationApplicantPhotoPreview",
+                            "verificationApplicantPhotoPlaceholder",
+                            "verificationApplicantPhotoLink",
+                            "",
+                            "No Photo"
+                        );
+                    }
+                    return;
+                }
+
+                const mime = (file.type || "").toLowerCase();
+                if (!mime.startsWith("image/")) {
+                    draftApplicantPhotoInput.value = "";
+                    clearDraftApplicantPhotoPreviewObjectUrl();
+                    if (currentApplicantPhotoPath()) {
+                        createSignedUrl(currentApplicantPhotoPath()).then(function (url) {
+                            setPhotoArea(
+                                "verificationApplicantPhotoPreview",
+                                "verificationApplicantPhotoPlaceholder",
+                                "verificationApplicantPhotoLink",
+                                url || "",
+                                "No Photo"
+                            );
+                        }).catch(function () {
+                            setPhotoArea(
+                                "verificationApplicantPhotoPreview",
+                                "verificationApplicantPhotoPlaceholder",
+                                "verificationApplicantPhotoLink",
+                                "",
+                                "Photo preview unavailable."
+                            );
+                        });
+                    } else {
+                        setPhotoArea(
+                            "verificationApplicantPhotoPreview",
+                            "verificationApplicantPhotoPlaceholder",
+                            "verificationApplicantPhotoLink",
+                            "",
+                            "No Photo"
+                        );
+                    }
+                    showStatus("Applicant 1x1 photo must be a JPG or PNG image.", "alert-warning");
+                    return;
+                }
+                if (file.size > MAX_IMAGE_SIZE_BYTES) {
+                    draftApplicantPhotoInput.value = "";
+                    clearDraftApplicantPhotoPreviewObjectUrl();
+                    if (currentApplicantPhotoPath()) {
+                        createSignedUrl(currentApplicantPhotoPath()).then(function (url) {
+                            setPhotoArea(
+                                "verificationApplicantPhotoPreview",
+                                "verificationApplicantPhotoPlaceholder",
+                                "verificationApplicantPhotoLink",
+                                url || "",
+                                "No Photo"
+                            );
+                        }).catch(function () {
+                            setPhotoArea(
+                                "verificationApplicantPhotoPreview",
+                                "verificationApplicantPhotoPlaceholder",
+                                "verificationApplicantPhotoLink",
+                                "",
+                                "Photo preview unavailable."
+                            );
+                        });
+                    } else {
+                        setPhotoArea(
+                            "verificationApplicantPhotoPreview",
+                            "verificationApplicantPhotoPlaceholder",
+                            "verificationApplicantPhotoLink",
+                            "",
+                            "No Photo"
+                        );
+                    }
+                    showStatus("Applicant 1x1 photo exceeds the 10MB limit.", "alert-warning");
+                    return;
+                }
+
+                clearDraftApplicantPhotoPreviewObjectUrl();
+                draftApplicantPhotoPreviewObjectUrl = URL.createObjectURL(file);
+                setPhotoArea(
+                    "verificationApplicantPhotoPreview",
+                    "verificationApplicantPhotoPlaceholder",
+                    "verificationApplicantPhotoLink",
+                    draftApplicantPhotoPreviewObjectUrl,
+                    "No Photo"
+                );
+                showStatus("Applicant photo ready. Click Finish Draft to upload and submit this draft.", "alert-info");
+            });
+        }
+
         if (cameraStartBtn) {
             cameraStartBtn.addEventListener("click", async function () {
                 try {
@@ -3028,6 +3625,7 @@
         window.addEventListener("beforeunload", function () {
             stopCameraStream();
             clearLocalPreviewObjectUrl();
+            clearDraftApplicantPhotoPreviewObjectUrl();
         });
 
         const editModalEl = byId("verificationApplicantEditModal");
@@ -3039,14 +3637,33 @@
     }
 
     async function loadPageData(targetApplicationId) {
+        const loadToken = pageLoadToken + 1;
+        pageLoadToken = loadToken;
         showStatus("");
         stopCameraStream();
         counselorOptions = loadCounselorOptions();
         currentAuxMeta = {};
         currentFormSnapshot = "";
         latestCorrectionNotice = null;
+        currentProfile = null;
+        currentInterview = null;
+        latestDocumentByType = {};
+        signedDocumentUrlByType = {};
+        documentNotesById = {};
+        applicationNavigationIds = [];
+        currentNavigationIndex = -1;
+        clearLocalPreviewObjectUrl();
+        clearDraftApplicantPhotoPreviewObjectUrl();
+        if (byId("verificationDraftApplicantPhotoFile")) {
+            byId("verificationDraftApplicantPhotoFile").value = "";
+        }
+        resetVerificationPhotoAreas();
+        updateVerificationNavigationButtons();
 
         currentApplication = await fetchApplication(targetApplicationId || queryApplicationId());
+        if (!isActivePageLoad(loadToken)) {
+            return;
+        }
         if (!currentApplication) {
             showStatus("No application records are currently available for secretary verification.", "alert-warning");
             applicationNavigationIds = [];
@@ -3056,21 +3673,30 @@
             return;
         }
 
-        currentAuxMeta = (await fetchSharedAuxMeta(currentApplication.id))
-            || readAuxMeta(currentApplication.applicant_id, currentApplication.id);
+        currentAuxMeta = readAuxMeta(currentApplication.applicant_id, currentApplication.id);
         writeAuxMeta(currentApplication.applicant_id, currentApplication.id, currentAuxMeta);
 
+        const sharedAuxMetaPromise = fetchSharedAuxMeta(currentApplication.id);
+        const navigationQueuePromise = loadApplicationNavigationQueue(currentApplication.id, loadToken);
         const dataResults = await Promise.all([
+            sharedAuxMetaPromise,
             fetchProfile(currentApplication.applicant_id),
             fetchInterview(currentApplication.id),
             fetchDocuments(currentApplication.id),
             fetchLatestCorrectionNotice(currentApplication.id)
         ]);
+        if (!isActivePageLoad(loadToken)) {
+            return;
+        }
 
-        currentProfile = dataResults[0];
-        currentInterview = dataResults[1];
-        latestDocumentByType = latestDocumentsByType(dataResults[2]);
-        latestCorrectionNotice = dataResults[3] || null;
+        currentAuxMeta = dataResults[0]
+            || currentAuxMeta
+            || {};
+        writeAuxMeta(currentApplication.applicant_id, currentApplication.id, currentAuxMeta);
+        currentProfile = dataResults[1];
+        currentInterview = dataResults[2];
+        latestDocumentByType = latestDocumentsByType(dataResults[3]);
+        latestCorrectionNotice = dataResults[4] || null;
 
         signedDocumentUrlByType = {};
         for (let i = 0; i < REQUIRED_DOCUMENTS.length; i += 1) {
@@ -3088,38 +3714,43 @@
             || (currentProfile && currentProfile.verified_interview_photo_path)
             || "";
 
-        const photoUrls = await Promise.all([
-            applicantPhotoPath ? createSignedUrl(applicantPhotoPath) : Promise.resolve(""),
-            verifiedPhotoPath ? createSignedUrl(verifiedPhotoPath) : Promise.resolve("")
-        ]);
-
         renderHeaderAndSummary();
         renderCorrectionHistoryNotice();
         renderInterviewForm();
         syncApplicantEditAccess();
-        await loadApplicationNavigationQueue(currentApplication.id);
         syncDraftReadOnlyState();
-
-        clearLocalPreviewObjectUrl();
-
-        setPhotoArea(
-            "verificationApplicantPhotoPreview",
-            "verificationApplicantPhotoPlaceholder",
-            "verificationApplicantPhotoLink",
-            photoUrls[0],
-            "No Photo"
-        );
-
-        setPhotoArea(
-            "verificationVerifiedPhotoPreview",
-            "verificationVerifiedPhotoPlaceholder",
-            "verificationVerifiedPhotoLink",
-            photoUrls[1],
-            "No verified interview photo uploaded."
-        );
-
         markCurrentFormSnapshot();
         updateVerificationNavigationButtons();
+
+        hydrateVerificationPhotoAreas(loadToken, applicantPhotoPath, verifiedPhotoPath)
+            .catch(function () {
+                if (!isActivePageLoad(loadToken)) {
+                    return;
+                }
+                setPhotoArea(
+                    "verificationApplicantPhotoPreview",
+                    "verificationApplicantPhotoPlaceholder",
+                    "verificationApplicantPhotoLink",
+                    "",
+                    "Photo preview unavailable."
+                );
+                setPhotoArea(
+                    "verificationVerifiedPhotoPreview",
+                    "verificationVerifiedPhotoPlaceholder",
+                    "verificationVerifiedPhotoLink",
+                    "",
+                    "Verified photo preview unavailable."
+                );
+            });
+
+        navigationQueuePromise.catch(function () {
+            if (!isActivePageLoad(loadToken)) {
+                return;
+            }
+            applicationNavigationIds = currentApplication && currentApplication.id ? [currentApplication.id] : [];
+            currentNavigationIndex = applicationNavigationIds.length ? 0 : -1;
+            updateVerificationNavigationButtons();
+        });
     }
 
     async function init() {
@@ -3129,13 +3760,27 @@
         }
 
         bindActions();
-        try {
-            await loadWorkflowControls();
-        } catch (error) {
-            showStatus(error && error.message ? error.message : "Failed to load workflow controls.", "alert-warning");
+        const targetApplicationId = queryApplicationId();
+        const workflowPromise = loadWorkflowControls()
+            .catch(function (error) {
+                showStatus(error && error.message ? error.message : "Failed to load workflow controls.", "alert-warning");
+                return workflowControls;
+            })
+            .then(function () {
+                renderHeaderAndSummary();
+                syncApplicantEditAccess();
+                syncDraftReadOnlyState();
+                updateVerificationNavigationButtons();
+            });
+
+        if (targetApplicationId) {
+            await loadPageData(targetApplicationId);
+            await workflowPromise;
+            return;
         }
-        syncApplicantEditAccess();
-        await loadPageData(queryApplicationId());
+
+        await workflowPromise;
+        await loadPageData("");
     }
 
     window.addEventListener("DOMContentLoaded", init);

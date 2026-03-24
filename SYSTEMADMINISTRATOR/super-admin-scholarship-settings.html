@@ -659,6 +659,24 @@
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretaryDraftCompletion">
+                                                            <span class="ldss-settings-switch-title">Allow secretary to finish applicant drafts from Secretary Checking</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Shows draft applications in the Secretary queue and lets office staff complete applicant details, attach the 1x1 photo, and move the draft into the submitted queue.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsAllowSecretaryDraftCompletion" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
+                                                    <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretaryWalkInIntake">
+                                                            <span class="ldss-settings-switch-title">Allow secretary walk-in intake for individual office applicants</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Shows a Secretary Applications page action that can create a walk-in applicant account and submitted application record even when normal applicant filing is already closed.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsAllowSecretaryWalkInIntake" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
+                                                    <div class="ldss-settings-switch-card">
                                                         <label class="ldss-settings-switch-copy small" for="superSettingsRequireApplicantPhotoOnSubmit">
                                                             <span class="ldss-settings-switch-title">Require applicant 1x1 photo before submission</span>
                                                             <span class="ldss-settings-switch-help ldss-settings-flag-help">Turn this off temporarily if weak devices are getting stuck on image upload so more draft users can finish filing.</span>
@@ -725,8 +743,8 @@
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/supabase-superadmin-audit-helper.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260322-3"></script>
+        <script src="../js/supabase-superadmin-audit-helper.js?v=20260323-2"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260323-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

@@ -21,6 +21,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - `server.js` (Node server for static pages + private uploads API)
 - `uploads/` (created at runtime on the host; ignored in git)
 - `supabase/ldss_phase1_schema_rls.sql`
+- `LDSS_CODEBASE_MEMORY.md` (concise internal codebase map for future edit sessions)
 
 ## Supabase
 - Schema + RLS bootstrap is in `supabase/ldss_phase1_schema_rls.sql`.
@@ -72,6 +73,16 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Applicant profile address display now deduplicates repeated `Barangay` segments so messy saved address text renders as one clean Daet address.
 - Applicant `My Profile` now uses a more mobile-first summary layout with a stronger profile hero, scholarship summary, document status chips, a simplified applicant account menu, the summary row hidden on phones for later redesign, and the detailed personal/contact/education/family cards removed from the main view to reduce applicant confusion.
 - Secretary verification supports document status updates, interview scheduling, hard-copy verification state, verified photo upload, return-for-correction/compliance flows, and applicant notifications.
+- Secretary Checking now renders the applicant summary and form state first, while photo previews and queue-navigation hydration finish in the background for a faster first load on localhost and hosted deployments.
+- Secretary address displays in checking/print now strip loose `Barangay` placeholder segments so summary fields no longer show redundant values like `Barangay, Barangay Magang`.
+- Secretary Applications now includes a System Administrator-controlled `Walk-In Intake` action in the page header so office staff can create or reuse one applicant account and place a submitted application directly into the secretary queue for in-person walk-ins.
+- Secretary Applications queue now renders faster by showing the main queue first and loading correction-history badges as a secondary pass; apply `supabase/secretary_application_queue_performance_hotfix_2026_03_23.sql` if the hosted queue still feels slow on larger datasets.
+- Secretary Applications barangay filtering now includes a `No Barangay` option whenever queue records still have a blank barangay value, so office staff can find and clean those records directly.
+- Secretary Applications now opens with the status filter set to `Submitted` by default instead of `Status All` so the regular queue is front and center on load.
+- Secretary draft applications can now be exposed to the Secretary queue only when Scholarship Settings enables draft completion; the status filter now pins `Draft` for faster office triage, and from Secretary Checking, staff can update applicant details, attach or replace the applicant 1x1 photo, and move the draft into submitted status.
+- Secretary draft rows now use a queue action dropdown so staff can choose `View Draft` for read-only preview or `Finish Draft` for office-side completion.
+- Secretary Checking now includes a `Not Qualified` action beside `Set for Examination`, allowing the scholarship office to stop an applicant from proceeding to exam and move the record directly to `Rejected`.
+- Secretary Checking `Save Checking` now clears `Returned for Correction` back to `Submitted` once the applicant has actually updated the returned record, so corrected applications do not stay stuck in correction status after secretary re-check.
 - Secretary and applicant printable application forms now share the same official print-sheet layout, and the secretary print output no longer includes the requirement section so both versions match more closely.
 - Secretary dashboard chart row now replaces the old Return / Resubmission graph with a reminder follow-up chart for draft/no-form users, while Sector Classification was moved into the earlier chart slot.
 - Secretary Reports is now a cleared reconstruction shell; the old report cards, filters, and summary details were removed from the page so the secretary printing/reporting flow can be rebuilt cleanly.
@@ -80,9 +91,17 @@ This project is deployable as a static frontend. Application data stays in Supab
 - System Administrator scholarship settings now support application open/close time controls, and applicant submission cutoff follows the configured date and time.
 - System Administrator scholarship settings now use one responsive workspace card for the full policy form, and include a prominent `ENABLE RECEIVE` / `DISABLE RECEIVE` control in Scholarship Duration so the office can manually lock or reopen applicant filing, including emergency reopening after the scheduled cutoff once the new Supabase hotfix is applied.
 - System Administrator Scholarship Settings now has a cleaner responsive workspace layout with refined KPI cards, grouped policy sections, and responsive switch-style System Control Flags for faster office use on desktop and mobile.
+- System Administrator Scholarship Settings now includes an `Allow secretary to finish applicant drafts from Secretary Checking` control flag for emergency office completion of applicant drafts.
+- System Administrator Scholarship Settings now includes an `Allow secretary walk-in intake for individual office applicants` control flag that governs whether the Secretary Applications page exposes the office-only walk-in encoder.
 - System Administrator Audit Logs now provide a live critical-action history for user management verification actions and scholarship settings changes once the audit log hotfix is applied.
+- Secretary draft completion depends on the SQL hotfix `supabase/secretary_draft_completion_hotfix_2026_03_23.sql` so the new workflow flag is exposed through `active_workflow_controls()`.
+- Secretary walk-in intake requires the protected Node route `POST /api/secretary/walk-in-intake`, a valid Supabase service-role key on the server, and the SQL hotfix `supabase/secretary_walk_in_intake_hotfix_2026_03_23.sql`.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
+- Applicant dashboard sidebar is now trimmed for end users and keeps only `Dashboard` plus `My Applications` in the main applicant navigation.
+- Applicant submission form now includes the missing intake-date formatter used by the filing-window guard, fixing the `formatDate is not defined` submission error when the system shows intake open/close schedule messaging.
+- Applicant form now lets users update already-submitted or returned-for-correction applications after the intake deadline, while still blocking first-time draft submission once filing is closed.
+- Login and applicant registration pages now show a public filing-status modal when online scholarship application is not yet open, already closed, or manually closed by the scholarship office, while clarifying that existing applicants may still sign in even though new submission is unavailable.
 - Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
 - Admin approval queue supports ranking view, special endorsement action, approve/reject/waitlist decisions, and batch decision handling.
 - Scholarship workflow status model:
@@ -175,3 +194,7 @@ Required Supabase Auth settings:
   - move the inline logout script into a standalone JS file
   - then remove `'unsafe-inline'` from `script-src`
 
+- Secretary portal sidebars now include a direct `Exam Management` link again, while the main Exam Management page has been cleared into a simple custom workspace shell so new layout ideas can be added cleanly.
+- Secretary Exam Management now uses a custom shell layout with a compact `Examinee` summary card on the left and a wider `Examinee List` table card on the right, with the table footer fixed to 10 rows per page.
+- Secretary Exam Management now loads a live examinee counter plus a paginated examinee list from Supabase, using a compact `col-xl-3` summary card and a `col-xl-9` table card with fixed 10-row pagination.
+- Secretary Exam Management now shows only applicants already moved by `Set for Examination` into the exam workflow, instead of all submitted forms.

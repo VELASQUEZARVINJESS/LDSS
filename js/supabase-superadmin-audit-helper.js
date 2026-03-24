@@ -46,6 +46,21 @@
             label: "Updated Photo Requirement",
             chipClass: "ldss-chip-accent",
             moduleLabel: "Scholarship Settings"
+        },
+        toggle_secretary_draft_completion: {
+            label: "Toggled Draft Completion",
+            chipClass: "ldss-chip-accent",
+            moduleLabel: "Scholarship Settings"
+        },
+        toggle_secretary_walk_in_intake: {
+            label: "Toggled Walk-In Intake",
+            chipClass: "ldss-chip-accent",
+            moduleLabel: "Scholarship Settings"
+        },
+        create_walk_in_application: {
+            label: "Created Walk-In Application",
+            chipClass: "ldss-chip-success",
+            moduleLabel: "Walk-In Intake"
         }
     };
 

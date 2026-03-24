@@ -2445,6 +2445,22 @@
         return result.data[0];
     }
 
+    function formatDate(value) {
+        if (!value) {
+            return "";
+        }
+        const parsed = new Date(value + "T12:00:00");
+        if (Number.isNaN(parsed.getTime())) {
+            return value;
+        }
+        return parsed.toLocaleDateString("en-US", {
+            timeZone: "Asia/Manila",
+            year: "numeric",
+            month: "long",
+            day: "numeric"
+        });
+    }
+
     function toIsoDateOnly(value) {
         if (!value) {
             return "";
@@ -2743,9 +2759,12 @@
             throw new Error("This application is no longer editable.");
         }
 
+        const currentStatus = (currentApplication.status || "").toString().trim().toLowerCase();
         const submittedAt = currentApplication.submitted_at || new Date().toISOString();
 
-        await assertApplicationIntakeOpen(context);
+        if (currentStatus === "draft") {
+            await assertApplicationIntakeOpen(context);
+        }
 
         await ensureSingleAttemptPerSchoolYear(
             context,

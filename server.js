@@ -33,6 +33,8 @@ const REMINDER_CAMPAIGN_DEFAULT_BATCH_SIZE = 100;
 const REMINDER_CAMPAIGN_DEFAULT_BATCH_DELAY_MINUTES = 10;
 const REMINDER_CAMPAIGN_PROCESSOR_INTERVAL_MS = 60 * 1000;
 const DEFAULT_ONLINE_APPLICATION_SUBMISSION_DEADLINE_LABEL = "March 23, 2026";
+const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
+const WALK_IN_TEMP_PASSWORD_LENGTH = 16;
 const SUPPORT_FACEBOOK_PAGE_URL = "https://www.facebook.com/profile.php?id=61583672829501";
 const CORRECTION_TARGET_LABELS = {
     full_application: "Entire Application Form",
@@ -46,7 +48,17 @@ const CORRECTION_TARGET_LABELS = {
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MIN_STAFF_PASSWORD_LENGTH = 12;
 const STAFF_ROLES = new Set(["secretary", "admin", "super_admin"]);
+const WALK_IN_ENABLED_STAFF_ROLES = new Set(["secretary", "admin", "super_admin"]);
 const EDITABLE_APPLICATION_STATUSES = new Set(["draft", "returned_for_correction"]);
+const ALLOWED_SECTOR_CLASSIFICATIONS = new Set([
+    "Person with Disability (PWD)",
+    "Solo Parent",
+    "Child of Solo Parent",
+    "Child of Farmer",
+    "Child of Fisherfolk",
+    "Orphan",
+    "None of the above"
+]);
 const ROOT_STATIC_FILES = [
     "index.html",
     "login.html",
@@ -305,6 +317,71 @@ function explainUserCreationError(message) {
         return "Email address is already used by another profile.";
     }
     return text || "Secretary account creation failed.";
+}
+
+function generateTemporaryApplicantPassword() {
+    const uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+    const lowercase = "abcdefghijkmnopqrstuvwxyz";
+    const digits = "23456789";
+    const symbols = "!@#$%^&*";
+    const all = uppercase + lowercase + digits + symbols;
+    const required = [
+        uppercase[Math.floor(Math.random() * uppercase.length)],
+        lowercase[Math.floor(Math.random() * lowercase.length)],
+        digits[Math.floor(Math.random() * digits.length)],
+        symbols[Math.floor(Math.random() * symbols.length)]
+    ];
+
+    while (required.length < WALK_IN_TEMP_PASSWORD_LENGTH) {
+        const randomIndex = crypto.randomInt(0, all.length);
+        required.push(all[randomIndex]);
+    }
+
+    for (let index = required.length - 1; index > 0; index -= 1) {
+        const swapIndex = crypto.randomInt(0, index + 1);
+        const temp = required[index];
+        required[index] = required[swapIndex];
+        required[swapIndex] = temp;
+    }
+
+    return required.join("");
+}
+
+function isValidSchoolYear(value) {
+    return /^[0-9]{4}-[0-9]{4}$/.test((value || "").toString().trim());
+}
+
+function normalizeSectorClassification(value) {
+    const text = nullIfBlank(value);
+    if (!text) {
+        return null;
+    }
+    return ALLOWED_SECTOR_CLASSIFICATIONS.has(text) ? text : "";
+}
+
+function buildFullName(firstName, middleName, lastName) {
+    return [firstName, middleName || "", lastName]
+        .map(function (value) { return (value || "").toString().trim(); })
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function explainWalkInApplicationError(message) {
+    const text = (message || "").toString();
+    const normalized = text.toLowerCase();
+
+    if (normalized.includes("one application") || normalized.includes("already has an application")) {
+        return "This applicant already has an application for the selected school year.";
+    }
+    if (normalized.includes("applications_school_year_format")) {
+        return "School year must follow YYYY-YYYY format.";
+    }
+    if (normalized.includes("applications_sector_classification_check")) {
+        return "Sector classification value is not recognized.";
+    }
+    return text || "Walk-in application creation failed.";
 }
 
 function escapeHtml(value) {
@@ -674,6 +751,37 @@ async function loadActiveSubmissionDeadlineLabel(client) {
         result.data.application_close_date || "",
         controls.application_close_time || ""
     );
+}
+
+async function loadActiveRankingSettingsForOffice(adminClient) {
+    if (!adminClient) {
+        return {
+            schoolYear: "",
+            controls: {}
+        };
+    }
+
+    const result = await adminClient
+        .from("ranking_settings")
+        .select("school_year, ranking_basis")
+        .eq("is_active", true)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (result.error || !result.data) {
+        return {
+            schoolYear: "",
+            controls: {}
+        };
+    }
+
+    return {
+        schoolYear: nullIfBlank(result.data.school_year) || "",
+        controls: result.data.ranking_basis && result.data.ranking_basis.controls
+            ? result.data.ranking_basis.controls
+            : {}
+    };
 }
 
 function buildNoApplicationReminderEmailHtml(details) {
@@ -2081,6 +2189,296 @@ app.post("/api/super-admin/users/:userId/confirm-email", authenticate, async fun
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Manual email confirmation failed.");
+    }
+});
+
+app.post("/api/secretary/walk-in-intake", authenticate, async function (request, response) {
+    let createdUserId = "";
+    let cleanupCreatedUser = false;
+
+    try {
+        if (!WALK_IN_ENABLED_STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can encode walk-in applicants.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const activeSettings = await loadActiveRankingSettingsForOffice(adminClient);
+        const officeControls = activeSettings.controls || {};
+        if (officeControls.allow_secretary_walk_in_intake !== true) {
+            writeJsonError(response, 403, "Walk-in intake is currently disabled by System Administrator.");
+            return;
+        }
+
+        const firstName = nullIfBlank(request.body && request.body.firstName);
+        const middleName = nullIfBlank(request.body && request.body.middleName);
+        const lastName = nullIfBlank(request.body && request.body.lastName);
+        const email = ((request.body && request.body.email) || "").toString().trim().toLowerCase();
+        const mobileNumber = normalizePhoneNumber(request.body && request.body.mobileNumber);
+        const officeNote = nullIfBlank(request.body && request.body.officeNote);
+        const schoolYearInput = nullIfBlank(request.body && request.body.schoolYear);
+        const schoolYear = schoolYearInput || activeSettings.schoolYear || "";
+        const scholarshipType = nullIfBlank(request.body && request.body.scholarshipType) || DEFAULT_WALK_IN_SCHOLARSHIP_TYPE;
+        const sectorClassification = normalizeSectorClassification(request.body && request.body.sectorClassification);
+
+        if (!firstName || !lastName || !email || !mobileNumber) {
+            writeJsonError(response, 400, "First name, last name, email, and mobile number are required.");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            writeJsonError(response, 400, "Enter a valid email address.");
+            return;
+        }
+        if (!mobileNumber) {
+            writeJsonError(response, 400, "Enter a valid mobile number.");
+            return;
+        }
+        if (!schoolYear || !isValidSchoolYear(schoolYear)) {
+            writeJsonError(response, 400, "School year is required and must follow YYYY-YYYY format.");
+            return;
+        }
+        if (!scholarshipType) {
+            writeJsonError(response, 400, "Scholarship type is required.");
+            return;
+        }
+        if (sectorClassification === "") {
+            writeJsonError(response, 400, "Sector classification value is not recognized.");
+            return;
+        }
+
+        const existingEmailProfileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email, mobile_number, first_name, middle_name, last_name, is_active")
+            .eq("email", email)
+            .maybeSingle();
+
+        if (existingEmailProfileResult.error) {
+            writeJsonError(response, 400, existingEmailProfileResult.error.message || "Failed to check applicant email.");
+            return;
+        }
+
+        const existingMobileProfileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email")
+            .eq("mobile_number", mobileNumber)
+            .maybeSingle();
+
+        if (existingMobileProfileResult.error) {
+            writeJsonError(response, 400, existingMobileProfileResult.error.message || "Failed to check applicant mobile number.");
+            return;
+        }
+
+        let applicantProfile = existingEmailProfileResult.data || null;
+        let temporaryPassword = "";
+        let usedExistingApplicant = false;
+
+        if (applicantProfile) {
+            if (applicantProfile.role !== "applicant") {
+                writeJsonError(response, 400, "The selected email already belongs to a staff account.");
+                return;
+            }
+            if (
+                existingMobileProfileResult.data &&
+                existingMobileProfileResult.data.id &&
+                existingMobileProfileResult.data.id !== applicantProfile.id
+            ) {
+                writeJsonError(response, 400, "The mobile number already belongs to another account.");
+                return;
+            }
+            usedExistingApplicant = true;
+        } else if (existingMobileProfileResult.data && existingMobileProfileResult.data.id) {
+            writeJsonError(response, 400, "The mobile number already belongs to another account. Use that existing applicant account instead.");
+            return;
+        } else {
+            temporaryPassword = generateTemporaryApplicantPassword();
+            const createResult = await adminClient.auth.admin.createUser({
+                email: email,
+                password: temporaryPassword,
+                email_confirm: true,
+                user_metadata: {
+                    first_name: firstName,
+                    middle_name: middleName || "",
+                    last_name: lastName,
+                    mobile_number: mobileNumber
+                }
+            });
+
+            if (createResult.error || !createResult.data || !createResult.data.user) {
+                writeJsonError(response, 400, explainUserCreationError(createResult.error && createResult.error.message));
+                return;
+            }
+
+            createdUserId = createResult.data.user.id || "";
+            cleanupCreatedUser = true;
+            applicantProfile = {
+                id: createdUserId,
+                role: "applicant",
+                email: email,
+                mobile_number: mobileNumber,
+                first_name: firstName,
+                middle_name: middleName,
+                last_name: lastName,
+                is_active: true
+            };
+        }
+
+        const applicantProfileResult = await adminClient
+            .from("profiles")
+            .upsert({
+                id: applicantProfile.id,
+                role: "applicant",
+                email: email,
+                mobile_number: mobileNumber,
+                first_name: firstName,
+                middle_name: middleName,
+                last_name: lastName,
+                is_active: true
+            }, { onConflict: "id" })
+            .select("id, role, email, mobile_number, first_name, middle_name, last_name, is_active")
+            .single();
+
+        if (applicantProfileResult.error || !applicantProfileResult.data) {
+            if (cleanupCreatedUser && createdUserId) {
+                try {
+                    await adminClient.auth.admin.deleteUser(createdUserId);
+                } catch (_cleanupError) {
+                    // Best effort only.
+                }
+            }
+            writeJsonError(response, 400, explainUserCreationError(applicantProfileResult.error && applicantProfileResult.error.message));
+            return;
+        }
+
+        const submittedAt = new Date().toISOString();
+        const remarkLines = [
+            "Walk-in intake encoded by office on " + submittedAt + "."
+        ];
+        if (officeNote) {
+            remarkLines.push("Office note: " + officeNote);
+        }
+
+        const applicationInsertResult = await adminClient
+            .from("applications")
+            .insert({
+                applicant_id: applicantProfileResult.data.id,
+                application_type: "new",
+                scholarship_type: scholarshipType,
+                school_year: schoolYear,
+                sector_classification: sectorClassification || null,
+                status: "submitted",
+                submitted_at: submittedAt,
+                secretary_reviewer_id: request.auth.user.id,
+                secretary_remarks: remarkLines.join(" ")
+            })
+            .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at")
+            .single();
+
+        if (applicationInsertResult.error || !applicationInsertResult.data) {
+            if (cleanupCreatedUser && createdUserId) {
+                try {
+                    await adminClient.auth.admin.deleteUser(createdUserId);
+                } catch (_cleanupError) {
+                    // Best effort only.
+                }
+            }
+            writeJsonError(response, 400, explainWalkInApplicationError(applicationInsertResult.error && applicationInsertResult.error.message));
+            return;
+        }
+
+        cleanupCreatedUser = false;
+
+        try {
+            await adminClient
+                .from("application_aux_data")
+                .upsert({
+                    application_id: applicationInsertResult.data.id,
+                    applicant_id: applicantProfileResult.data.id,
+                    form_data: {
+                        grantAppliedFor: "Degree Course",
+                        walkInIntake: true,
+                        walkInEncodedAt: submittedAt,
+                        walkInEncodedBy: request.auth.user.id,
+                        walkInOfficeNote: officeNote || ""
+                    }
+                }, { onConflict: "application_id" });
+        } catch (_auxError) {
+            // Non-fatal: walk-in intake can proceed without aux-data metadata.
+        }
+
+        try {
+            await adminClient
+                .from("notifications")
+                .insert({
+                    recipient_user_id: applicantProfileResult.data.id,
+                    sender_user_id: request.auth.user.id,
+                    notification_type: "application",
+                    title: "Walk-In Application Created",
+                    message: "Your scholarship application was encoded by the scholarship office as a walk-in intake record. You may review your account later using your email login.",
+                    related_application_id: applicationInsertResult.data.id,
+                    is_read: false
+                });
+        } catch (_notificationError) {
+            // Non-fatal: walk-in intake can proceed without notification insert.
+        }
+
+        await writeAuditLogEntry(adminClient, {
+            module: "walk_in_intake",
+            action: "create_walk_in_application",
+            actor_id: request.auth.user.id,
+            actor_role: request.auth.role,
+            target_user_id: applicantProfileResult.data.id,
+            target_role: applicantProfileResult.data.role,
+            target_email: applicantProfileResult.data.email,
+            target_label: buildFullName(firstName, middleName, lastName),
+            record_type: "application",
+            record_id: applicationInsertResult.data.id,
+            summary: "Created walk-in application " + (applicationInsertResult.data.application_no || "") + " for " + (email || "applicant") + ".",
+            details: {
+                school_year: schoolYear,
+                scholarship_type: scholarshipType,
+                sector_classification: sectorClassification || "",
+                new_user_created: !usedExistingApplicant,
+                office_note: officeNote || ""
+            }
+        });
+
+        response.status(201).json({
+            ok: true,
+            walk_in_enabled: true,
+            user_created: !usedExistingApplicant,
+            used_existing_applicant: usedExistingApplicant,
+            temporary_password: temporaryPassword,
+            applicant: {
+                id: applicantProfileResult.data.id,
+                email: applicantProfileResult.data.email,
+                mobile_number: applicantProfileResult.data.mobile_number,
+                first_name: applicantProfileResult.data.first_name,
+                middle_name: applicantProfileResult.data.middle_name,
+                last_name: applicantProfileResult.data.last_name
+            },
+            application: applicationInsertResult.data
+        });
+    } catch (error) {
+        if (cleanupCreatedUser && createdUserId) {
+            try {
+                const adminClient = createSupabaseAdminClient();
+                if (adminClient) {
+                    await adminClient.auth.admin.deleteUser(createdUserId);
+                }
+            } catch (_cleanupError) {
+                // Best effort only.
+            }
+        }
+        writeJsonError(response, 500, error && error.message ? error.message : "Walk-in intake failed.");
     }
 });
 

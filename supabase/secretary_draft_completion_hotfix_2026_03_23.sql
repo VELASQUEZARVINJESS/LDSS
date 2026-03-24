@@ -27,7 +27,7 @@ begin
         limit 1;
     exception
         when undefined_table then
-            return fallback_controls;
+            db_controls := '{}'::jsonb;
     end;
 
     return fallback_controls || coalesce(db_controls, '{}'::jsonb);

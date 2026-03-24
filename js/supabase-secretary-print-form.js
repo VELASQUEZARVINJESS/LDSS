@@ -157,7 +157,7 @@
             })
             .filter(function (segment) {
                 const key = normalizeAddressSegment(segment);
-                if (!key || seen.has(key)) {
+                if (!key || key === "barangay" || key === "brgy" || seen.has(key)) {
                     return false;
                 }
                 seen.add(key);
@@ -201,8 +201,21 @@
             .split(",")
             .map(normalizeAddressSegment)
             .filter(Boolean);
-        const barangayKey = normalizeAddressSegment(barangay);
-        if (barangayKey && addressSegments.includes(barangayKey)) {
+        const barangaySegments = cleanupAddressDisplay(barangay)
+            .split(",")
+            .map(normalizeAddressSegment)
+            .filter(Boolean);
+        const namedBarangayKey = barangaySegments.find(function (segment) {
+            return segment !== "daet" && segment !== "barangay" && segment !== "brgy";
+        });
+
+        if (namedBarangayKey && addressSegments.includes(namedBarangayKey)) {
+            return address;
+        }
+        if (
+            namedBarangayKey &&
+            addressSegments.includes("barangay " + namedBarangayKey)
+        ) {
             return address;
         }
 

@@ -346,6 +346,8 @@ create index if not exists idx_approval_queue_decision_status on public.approval
 create index if not exists idx_notifications_recipient_read_created on public.notifications (recipient_user_id, is_read, created_at desc);
 create index if not exists idx_notifications_recipient_dismissed_created on public.notifications (recipient_user_id, dismissed_at, created_at desc);
 create index if not exists idx_notifications_related_application on public.notifications (related_application_id);
+create index if not exists idx_applications_queue_non_draft_updated_at on public.applications (updated_at desc) where status <> 'draft';
+create index if not exists idx_notifications_related_type_created on public.notifications (related_application_id, notification_type, created_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -626,6 +628,8 @@ declare
         'lock_ranking_after_decision', true,
         'allow_special_endorsement', true,
         'allow_secretary_applicant_edits', false,
+        'allow_secretary_draft_completion', false,
+        'allow_secretary_walk_in_intake', false,
         'auto_set_for_interview', true
     );
     db_controls jsonb := '{}'::jsonb;
@@ -1046,7 +1050,7 @@ grant execute on function public.is_super_admin() to authenticated;
 grant execute on function public.super_admin_delete_user(uuid) to authenticated;
 grant execute on function public.application_owned_by_current_user(uuid) to authenticated;
 grant execute on function public.application_editable_by_current_user(uuid) to authenticated;
-grant execute on function public.application_intake_is_open() to authenticated;
+grant execute on function public.application_intake_is_open() to anon, authenticated;
 grant execute on function public.active_workflow_controls() to authenticated;
 
 -- Storage bootstrap for applicant requirement uploads

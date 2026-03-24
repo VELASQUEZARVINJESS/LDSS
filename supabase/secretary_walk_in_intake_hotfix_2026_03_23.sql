@@ -12,7 +12,6 @@ declare
         'lock_ranking_after_decision', true,
         'allow_special_endorsement', true,
         'allow_secretary_applicant_edits', false,
-        'allow_secretary_draft_completion', false,
         'allow_secretary_walk_in_intake', false,
         'auto_set_for_interview', true
     );
