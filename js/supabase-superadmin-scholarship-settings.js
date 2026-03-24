@@ -29,8 +29,8 @@
                 lock_ranking_after_decision: true,
                 allow_special_endorsement: true,
                 allow_secretary_applicant_edits: false,
-                allow_secretary_draft_completion: false,
-                allow_secretary_walk_in_intake: false,
+                allow_secretary_special_consideration: false,
+                special_consideration_options: [],
                 require_applicant_photo_on_submit: true,
                 auto_set_for_interview: true
             }
@@ -130,6 +130,33 @@
         const raw = (value || "").toString().trim();
         const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
         return match ? (match[1] + ":" + match[2]) : "";
+    }
+
+    function normalizeSpecialConsiderationOptions(value) {
+        const source = Array.isArray(value)
+            ? value
+            : (value || "").toString().split(/\r?\n/);
+        const output = [];
+        const seen = new Set();
+
+        source.forEach(function (entry) {
+            const normalized = (entry || "").toString().trim().replace(/\s+/g, " ");
+            if (!normalized) {
+                return;
+            }
+            const key = normalized.toLowerCase();
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            output.push(normalized);
+        });
+
+        return output.slice(0, 25);
+    }
+
+    function specialConsiderationOptionsToTextarea(value) {
+        return normalizeSpecialConsiderationOptions(value).join("\n");
     }
 
     function formatTimeValue(value) {
@@ -374,8 +401,8 @@
                     lock_ranking_after_decision: Boolean(byId("superSettingsLockRankingAfterDecision") && byId("superSettingsLockRankingAfterDecision").checked),
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),
                     allow_secretary_applicant_edits: Boolean(byId("superSettingsAllowSecretaryApplicantEdits") && byId("superSettingsAllowSecretaryApplicantEdits").checked),
-                    allow_secretary_draft_completion: Boolean(byId("superSettingsAllowSecretaryDraftCompletion") && byId("superSettingsAllowSecretaryDraftCompletion").checked),
-                    allow_secretary_walk_in_intake: Boolean(byId("superSettingsAllowSecretaryWalkInIntake") && byId("superSettingsAllowSecretaryWalkInIntake").checked),
+                    allow_secretary_special_consideration: Boolean(byId("superSettingsAllowSecretarySpecialConsideration") && byId("superSettingsAllowSecretarySpecialConsideration").checked),
+                    special_consideration_options: normalizeSpecialConsiderationOptions(byId("superSettingsSpecialConsiderationOptions") ? byId("superSettingsSpecialConsiderationOptions").value : ""),
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
                 }
@@ -436,6 +463,7 @@
         const controls = ranking.controls || {};
         const receiveState = receiveStatusMeta(settings);
         const overrideMode = resolveReceiveOverrideMode(controls);
+        const specialConsiderationOptions = normalizeSpecialConsiderationOptions(controls.special_consideration_options);
         const lines = [
             "School Year: " + (settings.school_year || "-"),
             "Quota: " + Number(settings.quota_slots || 0),
@@ -449,8 +477,8 @@
                     : (overrideMode === RECEIVE_OVERRIDE_FORCE_CLOSED ? "Manual Disable" : "Follow Schedule")
             ),
             "Secretary Applicant Detail Edit: " + (controls.allow_secretary_applicant_edits ? "Enabled" : "Disabled"),
-            "Secretary Draft Completion: " + (controls.allow_secretary_draft_completion ? "Enabled" : "Disabled"),
-            "Secretary Walk-In Intake: " + (controls.allow_secretary_walk_in_intake ? "Enabled" : "Disabled"),
+            "Secretary Internal Review: " + (controls.allow_secretary_special_consideration ? "Enabled" : "Disabled"),
+            "Internal Review Options: " + (specialConsiderationOptions.length ? specialConsiderationOptions.join(", ") : "None"),
             "Applicant Photo Required On Submit: " + (controls.require_applicant_photo_on_submit !== false ? "Enabled" : "Disabled"),
             "Special Endorsement: " + ((controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
             "Weights (Exam/Interview/Income/Requirements): "
@@ -490,8 +518,8 @@
         writeCheckbox("superSettingsLockRankingAfterDecision", controls.lock_ranking_after_decision);
         writeCheckbox("superSettingsAllowSpecialEndorsement", controls.allow_special_endorsement);
         writeCheckbox("superSettingsAllowSecretaryApplicantEdits", controls.allow_secretary_applicant_edits);
-        writeCheckbox("superSettingsAllowSecretaryDraftCompletion", controls.allow_secretary_draft_completion);
-        writeCheckbox("superSettingsAllowSecretaryWalkInIntake", controls.allow_secretary_walk_in_intake);
+        writeCheckbox("superSettingsAllowSecretarySpecialConsideration", controls.allow_secretary_special_consideration);
+        writeInput("superSettingsSpecialConsiderationOptions", specialConsiderationOptionsToTextarea(controls.special_consideration_options));
         writeCheckbox("superSettingsRequireApplicantPhotoOnSubmit", controls.require_applicant_photo_on_submit !== false);
         writeCheckbox("superSettingsAutoSetForInterview", controls.auto_set_for_interview);
 
@@ -516,6 +544,7 @@
         const openTime = normalizeTimeValue(byId("superSettingsCycleOpenTime") ? byId("superSettingsCycleOpenTime").value : "");
         const closeTime = normalizeTimeValue(byId("superSettingsCycleCloseTime") ? byId("superSettingsCycleCloseTime").value : "");
         const receiveOverrideMode = normalizeReceiveOverrideMode(byId("superSettingsApplicationReceiveOverrideMode") ? byId("superSettingsApplicationReceiveOverrideMode").value : "");
+        const specialConsiderationOptions = normalizeSpecialConsiderationOptions(byId("superSettingsSpecialConsiderationOptions") ? byId("superSettingsSpecialConsiderationOptions").value : "");
 
         if (!/^[0-9]{4}-[0-9]{4}$/.test(schoolYear)) {
             return { error: "School year must follow YYYY-YYYY format." };
@@ -545,7 +574,6 @@
         if (openDate && closeDate && openDate === closeDate && openTime && closeTime && closeTime <= openTime) {
             return { error: "On the same day, application close time must be later than the open time." };
         }
-
         return {
             school_year: schoolYear,
             quota_slots: Math.trunc(quotaSlots),
@@ -569,8 +597,8 @@
                     lock_ranking_after_decision: Boolean(byId("superSettingsLockRankingAfterDecision") && byId("superSettingsLockRankingAfterDecision").checked),
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),
                     allow_secretary_applicant_edits: Boolean(byId("superSettingsAllowSecretaryApplicantEdits") && byId("superSettingsAllowSecretaryApplicantEdits").checked),
-                    allow_secretary_draft_completion: Boolean(byId("superSettingsAllowSecretaryDraftCompletion") && byId("superSettingsAllowSecretaryDraftCompletion").checked),
-                    allow_secretary_walk_in_intake: Boolean(byId("superSettingsAllowSecretaryWalkInIntake") && byId("superSettingsAllowSecretaryWalkInIntake").checked),
+                    allow_secretary_special_consideration: Boolean(byId("superSettingsAllowSecretarySpecialConsideration") && byId("superSettingsAllowSecretarySpecialConsideration").checked),
+                    special_consideration_options: specialConsiderationOptions,
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
                 }
@@ -622,9 +650,9 @@
                 waitlist_slots: Number(current.waitlist_slots || 0),
                 passing_score: Number(current.passing_score || 0),
                 receive_override_mode: currentReceiveMode,
-                allow_secretary_draft_completion: Boolean(currentControls.allow_secretary_draft_completion),
-                allow_secretary_walk_in_intake: Boolean(currentControls.allow_secretary_walk_in_intake),
                 require_applicant_photo_on_submit: currentPhotoRequirement,
+                allow_secretary_special_consideration: Boolean(currentControls.allow_secretary_special_consideration),
+                special_consideration_options_count: normalizeSpecialConsiderationOptions(currentControls.special_consideration_options).length,
                 application_open_date: current.application_open_date || "",
                 application_close_date: current.application_close_date || ""
             }
@@ -656,36 +684,6 @@
                     school_year: schoolYear,
                     previous_required: previousPhotoRequirement,
                     current_required: currentPhotoRequirement
-                }
-            });
-        }
-
-        if (Boolean(previousControls.allow_secretary_draft_completion) !== Boolean(currentControls.allow_secretary_draft_completion)) {
-            await writeAuditEntry(context, {
-                module: "scholarship_settings",
-                action: "toggle_secretary_draft_completion",
-                recordType: "ranking_settings",
-                recordId: current.id || schoolYear,
-                summary: "Changed secretary draft completion from " + (previousControls.allow_secretary_draft_completion ? "enabled" : "disabled") + " to " + (currentControls.allow_secretary_draft_completion ? "enabled" : "disabled") + ".",
-                details: {
-                    school_year: schoolYear,
-                    previous_enabled: Boolean(previousControls.allow_secretary_draft_completion),
-                    current_enabled: Boolean(currentControls.allow_secretary_draft_completion)
-                }
-            });
-        }
-
-        if (Boolean(previousControls.allow_secretary_walk_in_intake) !== Boolean(currentControls.allow_secretary_walk_in_intake)) {
-            await writeAuditEntry(context, {
-                module: "scholarship_settings",
-                action: "toggle_secretary_walk_in_intake",
-                recordType: "ranking_settings",
-                recordId: current.id || schoolYear,
-                summary: "Changed secretary walk-in intake from " + (previousControls.allow_secretary_walk_in_intake ? "enabled" : "disabled") + " to " + (currentControls.allow_secretary_walk_in_intake ? "enabled" : "disabled") + ".",
-                details: {
-                    school_year: schoolYear,
-                    previous_enabled: Boolean(previousControls.allow_secretary_walk_in_intake),
-                    current_enabled: Boolean(currentControls.allow_secretary_walk_in_intake)
                 }
             });
         }
@@ -829,8 +827,8 @@
             "superSettingsLockRankingAfterDecision",
             "superSettingsAllowSpecialEndorsement",
             "superSettingsAllowSecretaryApplicantEdits",
-            "superSettingsAllowSecretaryDraftCompletion",
-            "superSettingsAllowSecretaryWalkInIntake",
+            "superSettingsAllowSecretarySpecialConsideration",
+            "superSettingsSpecialConsiderationOptions",
             "superSettingsRequireApplicantPhotoOnSubmit",
             "superSettingsAutoSetForInterview"
         ].forEach(function (id) {

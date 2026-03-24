@@ -26,7 +26,9 @@
     };
     const DEFAULT_WORKFLOW_CONTROLS = {
         allow_special_endorsement: true,
-        allow_secretary_applicant_edits: false
+        allow_secretary_applicant_edits: false,
+        allow_secretary_special_consideration: false,
+        special_consideration_options: []
     };
 
     let authContext = null;
@@ -65,6 +67,12 @@
         }
     }
 
+    function isMissingTableError(error, tableName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedTable = (tableName || "").toString().trim().toLowerCase();
+        return Boolean(normalizedTable) && text.includes(normalizedTable) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
+    }
+
     async function loadWorkflowControls() {
         const fallback = readFallbackControls();
         const result = await authContext.client
@@ -95,7 +103,12 @@
         if (!target) {
             return;
         }
-        target.textContent = "Special Endorsement is " + (workflowControls.allow_special_endorsement ? "enabled" : "disabled") + " by System Administrator.";
+        const specialConsiderationEnabled = workflowControls.allow_secretary_special_consideration === true;
+        target.textContent = "Special Endorsement is "
+            + (workflowControls.allow_special_endorsement ? "enabled" : "disabled")
+            + " by System Administrator. Secretary Internal Review is "
+            + (specialConsiderationEnabled ? "enabled" : "disabled")
+            + ".";
     }
 
     function applyWorkflowVisibility() {
@@ -385,12 +398,45 @@
         return latestByApplication(result.data || []);
     }
 
+    async function fetchSpecialConsiderationFlags(applicationIds) {
+        if (!applicationIds.length) {
+            return {};
+        }
+
+        const result = await authContext.client
+            .from("application_staff_flags")
+            .select("application_id, special_consideration_tag, updated_at, created_at")
+            .in("application_id", applicationIds);
+
+        if (result.error) {
+            if (isMissingTableError(result.error, "application_staff_flags")) {
+                return {};
+            }
+            throw new Error("Failed to load Internal Review tags: " + result.error.message);
+        }
+
+        const map = {};
+        (result.data || []).forEach(function (row) {
+            const applicationId = row && row.application_id ? row.application_id : "";
+            const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+            if (!applicationId || !tag) {
+                return;
+            }
+            map[applicationId] = {
+                application_id: applicationId,
+                special_consideration_tag: tag,
+                updated_at: row.updated_at || row.created_at || null
+            };
+        });
+        return map;
+    }
+
     function isAdminVisible(row) {
         const status = normalizeStatus(row.status);
         return ADMIN_WORKFLOW_STATUSES.includes(status);
     }
 
-    function enrichRows(applications, profilesById, examByApp, interviewByApp, approvalByApp) {
+    function enrichRows(applications, profilesById, examByApp, interviewByApp, approvalByApp, staffFlagsByApp) {
         return applications
             .filter(isAdminVisible)
             .map(function (app) {
@@ -398,6 +444,7 @@
                 const exam = examByApp[app.id] || null;
                 const interview = interviewByApp[app.id] || null;
                 const approval = approvalByApp[app.id] || null;
+                const staffFlags = staffFlagsByApp[app.id] || null;
 
                 return {
                     id: app.id,
@@ -411,6 +458,7 @@
                     is_locked: Boolean(app.is_locked),
                     submitted_at: app.submitted_at,
                     updated_at: app.updated_at || app.created_at,
+                    special_consideration_tag: staffFlags && staffFlags.special_consideration_tag ? staffFlags.special_consideration_tag : "",
                     exam: exam,
                     interview: interview,
                     approval: approval
@@ -453,7 +501,8 @@
                 row.applicant_contact || "",
                 examControl || "",
                 row.scholarship_type || "",
-                row.school_year || ""
+                row.school_year || "",
+                row.special_consideration_tag || ""
             ].join(" ").toLowerCase();
 
             const matchesSearch = !search || searchText.includes(search);
@@ -473,20 +522,24 @@
         const buttons = [];
         const allowSpecialEndorsement = workflowControls.allow_special_endorsement !== false;
         const isFailedExam = status === "failed_exam";
+        const hasSpecialConsideration = Boolean((row.special_consideration_tag || "").trim());
 
         if (!isFinal) {
-            if (!isFailedExam) {
+            if (!isFailedExam || hasSpecialConsideration) {
                 buttons.push('<button class="btn btn-sm btn-dark" type="button" data-row-action="approved" data-app-id="' + escapeHtml(row.id) + '">Approve</button>');
                 buttons.push('<button class="btn btn-sm btn-outline-dark" type="button" data-row-action="waitlisted" data-app-id="' + escapeHtml(row.id) + '">Waitlist</button>');
             }
             buttons.push('<button class="btn btn-sm btn-outline-secondary" type="button" data-row-action="rejected" data-app-id="' + escapeHtml(row.id) + '">Reject</button>');
         }
 
-        if (isFailedExam && allowSpecialEndorsement) {
+        if (isFailedExam && allowSpecialEndorsement && !hasSpecialConsideration) {
             buttons.push('<button class="btn btn-sm btn-outline-dark" type="button" data-row-action="special_endorsement_review" data-app-id="' + escapeHtml(row.id) + '">Special Endorsement Review</button>');
         }
-        if (isFailedExam && !allowSpecialEndorsement) {
+        if (isFailedExam && !allowSpecialEndorsement && !hasSpecialConsideration) {
             buttons.push('<span class="small text-muted">Special endorsement is off.</span>');
+        }
+        if (isFailedExam && hasSpecialConsideration) {
+            buttons.push('<span class="small text-success">Internal Review allows final review.</span>');
         }
 
         if (!buttons.length) {
@@ -517,6 +570,10 @@
                 ? row.approval.recommendation_status
                 : "pending";
             const rankingBasis = rankingBasisText(row.approval);
+            const specialConsiderationTag = (row.special_consideration_tag || "").trim();
+            const specialConsiderationMarkup = specialConsiderationTag
+                ? '<div class="mt-1"><span class="ldss-chip ldss-chip-success">Internal Review</span></div>'
+                : "";
 
             const interviewStatus = interview.status
                 ? interview.status.replace(/_/g, " ").replace(/\b\w/g, function (char) { return char.toUpperCase(); })
@@ -533,6 +590,7 @@
                 '<div class="small text-muted">' + escapeHtml(row.applicant_contact || "-") + "</div>" +
                 '<div class="small mt-1">' + escapeHtml((row.scholarship_type || "-") + " | " + (row.school_year || "-")) + "</div>" +
                 '<div class="mt-1"><span class="ldss-chip ' + appStatus.chipClass + '">' + escapeHtml(appStatus.label) + "</span></div>" +
+                specialConsiderationMarkup +
                 "</td>" +
                 "<td>" +
                 '<div class="small"><strong>Control No:</strong> ' + escapeHtml(exam.controlNo || "-") + "</div>" +
@@ -629,18 +687,19 @@
         const nowIso = new Date().toISOString();
         const requiresDecisionTimestamp = ["approved", "waitlisted", "rejected"].includes(action);
         const currentApproval = row.approval || {};
+        const hasSpecialConsideration = Boolean((row.special_consideration_tag || "").trim());
 
         const payload = {
             application_id: row.id,
             priority: currentApproval.priority || "medium",
-            recommendation_status: currentApproval.recommendation_status || (action === "special_endorsement_review" ? "special_endorsement_review" : "pending"),
+            recommendation_status: currentApproval.recommendation_status || ((action === "special_endorsement_review" || hasSpecialConsideration) ? "special_endorsement_review" : "pending"),
             recommendation_notes: currentApproval.recommendation_notes || null,
             queued_at: currentApproval.queued_at || nowIso,
             decision_status: config.decisionStatus,
             decision_notes: notes || null,
             decided_by: requiresDecisionTimestamp ? authContext.user.id : null,
             decided_at: requiresDecisionTimestamp ? nowIso : null,
-            special_endorsement: action === "special_endorsement_review" || Boolean(currentApproval.special_endorsement),
+            special_endorsement: action === "special_endorsement_review" || hasSpecialConsideration || Boolean(currentApproval.special_endorsement),
             ranking_score: currentApproval.ranking_score == null ? null : currentApproval.ranking_score,
             ranking_basis: currentApproval.ranking_basis || null
         };
@@ -703,7 +762,7 @@
             throw new Error("Special Endorsement is currently disabled in System Administrator settings.");
         }
 
-        if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action)) {
+        if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action) && !(row.special_consideration_tag || "").trim()) {
             throw new Error("Failed exam records must go through Special Endorsement Review before approval or waitlist.");
         }
 
@@ -725,10 +784,11 @@
             fetchProfiles(applicantIds),
             fetchExamRecords(applicationIds),
             fetchInterviewRecords(applicationIds),
-            fetchApprovalRecords(applicationIds)
+            fetchApprovalRecords(applicationIds),
+            fetchSpecialConsiderationFlags(applicationIds)
         ]);
 
-        rows = enrichRows(applications, loaded[0], loaded[1], loaded[2], loaded[3]);
+        rows = enrichRows(applications, loaded[0], loaded[1], loaded[2], loaded[3], loaded[4]);
         renderKpis();
         applyFiltersAndRender();
     }
@@ -814,7 +874,7 @@
                 continue;
             }
             try {
-                if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action)) {
+                if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action) && !(row.special_consideration_tag || "").trim()) {
                     throw new Error("Failed exam records must go through Special Endorsement Review first.");
                 }
                 if (normalizeStatus(row.status) === "special_endorsement_review" && !notes) {

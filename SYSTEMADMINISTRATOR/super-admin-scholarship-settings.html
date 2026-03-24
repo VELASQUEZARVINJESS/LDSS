@@ -659,21 +659,12 @@
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
-                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretaryDraftCompletion">
-                                                            <span class="ldss-settings-switch-title">Allow secretary to finish applicant drafts from Secretary Checking</span>
-                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Shows draft applications in the Secretary queue and lets office staff complete applicant details, attach the 1x1 photo, and move the draft into the submitted queue.</span>
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretarySpecialConsideration">
+                                                            <span class="ldss-settings-switch-title">Allow secretary tag for Internal Review</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Lets Secretary Checking mark an applicant record for Internal Review using a System Administrator-defined reason.</span>
                                                         </label>
                                                         <div class="form-check form-switch ldss-settings-switch-control">
-                                                            <input class="form-check-input" id="superSettingsAllowSecretaryDraftCompletion" type="checkbox" role="switch" />
-                                                        </div>
-                                                    </div>
-                                                    <div class="ldss-settings-switch-card">
-                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretaryWalkInIntake">
-                                                            <span class="ldss-settings-switch-title">Allow secretary walk-in intake for individual office applicants</span>
-                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Shows a Secretary Applications page action that can create a walk-in applicant account and submitted application record even when normal applicant filing is already closed.</span>
-                                                        </label>
-                                                        <div class="form-check form-switch ldss-settings-switch-control">
-                                                            <input class="form-check-input" id="superSettingsAllowSecretaryWalkInIntake" type="checkbox" role="switch" />
+                                                            <input class="form-check-input" id="superSettingsAllowSecretarySpecialConsideration" type="checkbox" role="switch" />
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
@@ -694,6 +685,11 @@
                                                             <input class="form-check-input" id="superSettingsAutoSetForInterview" type="checkbox" role="switch" />
                                                         </div>
                                                     </div>
+                                                </div>
+                                                <div class="mt-4">
+                                                    <label class="small mb-1" for="superSettingsSpecialConsiderationOptions">Internal Review Options</label>
+                                                    <textarea class="form-control" id="superSettingsSpecialConsiderationOptions" rows="4" placeholder="Applicant from Borabod HQ&#10;Child of barangay worker&#10;Office-endorsed hardship case"></textarea>
+                                                    <div class="small text-muted mt-2">One option per line. Secretary uses these choices internally, while the visible label shown to staff stays as Internal Review.</div>
                                                 </div>
                                             </div>
                                         </div>
@@ -743,8 +739,8 @@
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/supabase-superadmin-audit-helper.js?v=20260323-2"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260323-2"></script>
+        <script src="../js/supabase-superadmin-audit-helper.js"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260324-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
