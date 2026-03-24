@@ -625,17 +625,17 @@
     async function fetchAllApplications(context) {
         const rows = [];
         const includeDrafts = workflowControls.allow_secretary_draft_completion === true;
+        const queueStatuses = includeDrafts
+            ? ["draft", "submitted", "returned_for_correction"]
+            : ["submitted", "returned_for_correction"];
 
         for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
-            let query = context.client
+            const query = context.client
                 .from("applications")
                 .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at")
                 .order("updated_at", { ascending: false })
+                .in("status", queueStatuses)
                 .range(from, from + SUPABASE_FETCH_LIMIT - 1);
-
-            if (!includeDrafts) {
-                query = query.neq("status", "draft");
-            }
 
             const result = await query;
 
