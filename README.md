@@ -91,12 +91,17 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary general information report printouts now include the LGU Daet, system icon, and Maogma logos in the report header.
 - System Administrator scholarship settings now support application open/close time controls, and applicant submission cutoff follows the configured date and time.
 - System Administrator scholarship settings now use one responsive workspace card for the full policy form, and include a prominent `ENABLE RECEIVE` / `DISABLE RECEIVE` control in Scholarship Duration so the office can manually lock or reopen applicant filing, including emergency reopening after the scheduled cutoff once the new Supabase hotfix is applied.
+- System Administrator `Application Receive Control` now saves immediately when `ENABLE RECEIVE`, `DISABLE RECEIVE`, or `RETURN TO SCHEDULE` is clicked, so applicant filing opens or locks without requiring a separate `Save Settings` step.
 - System Administrator Scholarship Settings now has a cleaner responsive workspace layout with refined KPI cards, grouped policy sections, and responsive switch-style System Control Flags for faster office use on desktop and mobile.
 - System Administrator Scholarship Settings now includes an `Allow secretary to finish applicant drafts from Secretary Checking` control flag for emergency office completion of applicant drafts.
 - System Administrator Scholarship Settings now includes an `Allow secretary walk-in intake for individual office applicants` control flag that governs whether the Secretary Applications page exposes the office-only walk-in encoder.
 - System Administrator Audit Logs now provide a live critical-action history for user management verification actions and scholarship settings changes once the audit log hotfix is applied.
 - Secretary draft completion depends on the SQL hotfix `supabase/secretary_draft_completion_hotfix_2026_03_23.sql` so the new workflow flag is exposed through `active_workflow_controls()`.
 - Secretary walk-in intake requires the protected Node route `POST /api/secretary/walk-in-intake`, a valid Supabase service-role key on the server, and the SQL hotfix `supabase/secretary_walk_in_intake_hotfix_2026_03_23.sql`.
+- Secretary Exam Management now lets staff enter how many rooms the batch will use, randomly but evenly distribute selected `Pending Exam` applicants across those rooms, save each applicant's room and seat assignment on `exam_records`, and print room-specific or consolidated masterlists from the same page.
+- Secretary Exam Management now uses a more compact monochrome workspace style for the room-assignment screen, keeping the page black, white, and gray with smaller action buttons for a steadier office-facing look on desktop and mobile.
+- Secretary Exam Management status messages now use a cleaner monochrome notice box style so save, review, info, and error states feel more official and easier to scan.
+- Secretary room assignment saving requires the SQL hotfix `supabase/exam_room_assignment_hotfix_2026_03_28.sql`.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
 - Applicant dashboard sidebar is now trimmed for end users and keeps only `Dashboard` plus `My Applications` in the main applicant navigation.

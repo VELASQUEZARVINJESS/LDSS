@@ -435,6 +435,28 @@
         }
     }
 
+    function setReceiveActionButtonsDisabled(disabled) {
+        const toggleBtn = byId("superSettingsReceiveToggleBtn");
+        const resetBtn = byId("superSettingsReceiveResetBtn");
+
+        [toggleBtn, resetBtn].forEach(function (button) {
+            if (!button) {
+                return;
+            }
+            button.disabled = Boolean(disabled);
+        });
+    }
+
+    function receiveAppliedMessage(mode) {
+        if (mode === RECEIVE_OVERRIDE_FORCE_OPEN) {
+            return "Receive control saved. Applicants can create and submit applications immediately.";
+        }
+        if (mode === RECEIVE_OVERRIDE_FORCE_CLOSED) {
+            return "Receive control saved. New applicant filing is now locked immediately.";
+        }
+        return "Receive control returned to schedule mode and saved successfully.";
+    }
+
     function renderWeightTotal() {
         const exam = readNumberField("superSettingsWeightExam");
         const interview = readNumberField("superSettingsWeightInterview");
@@ -723,7 +745,8 @@
         applyForm(active);
     }
 
-    async function saveSettings(context) {
+    async function saveSettings(context, options) {
+        const saveOptions = options || {};
         const values = readFormValues();
         if (values.error) {
             showStatus(values.error, "alert-warning");
@@ -758,7 +781,30 @@
         writeFallbackStorage(upsertResult.data);
         activeSettingsRecord = cloneSettings(upsertResult.data);
         applyForm(upsertResult.data);
-        showStatus("Scholarship settings saved successfully.", "alert-success");
+        showStatus(saveOptions.successMessage || "Scholarship settings saved successfully.", "alert-success");
+    }
+
+    async function applyReceiveOverride(context, nextMode) {
+        const overrideInputId = "superSettingsApplicationReceiveOverrideMode";
+        const previousMode = byId(overrideInputId) ? byId(overrideInputId).value : RECEIVE_OVERRIDE_SCHEDULE;
+
+        writeInput(overrideInputId, nextMode);
+        renderReceiveControl(previewSettingsFromForm());
+        renderSnapshot(previewSettingsFromForm());
+        setReceiveActionButtonsDisabled(true);
+
+        try {
+            await saveSettings(context, {
+                successMessage: receiveAppliedMessage(nextMode)
+            });
+        } catch (error) {
+            writeInput(overrideInputId, previousMode);
+            renderReceiveControl(previewSettingsFromForm());
+            renderSnapshot(previewSettingsFromForm());
+            throw error;
+        } finally {
+            setReceiveActionButtonsDisabled(false);
+        }
     }
 
     function bindEvents(context) {
@@ -787,24 +833,23 @@
             receiveToggleBtn.addEventListener("click", function () {
                 const currentState = computeReceiveState(previewSettingsFromForm());
                 const nextMode = currentState.isOpen ? RECEIVE_OVERRIDE_FORCE_CLOSED : RECEIVE_OVERRIDE_FORCE_OPEN;
-                writeInput("superSettingsApplicationReceiveOverrideMode", nextMode);
-                renderReceiveControl(previewSettingsFromForm());
-                renderSnapshot(previewSettingsFromForm());
-                showStatus(
-                    (nextMode === RECEIVE_OVERRIDE_FORCE_OPEN
-                        ? "Receiving is set to manual ENABLE."
-                        : "Receiving is set to manual DISABLE.") + " Click Save Settings to apply this change to applicants.",
-                    "alert-info"
-                );
+                applyReceiveOverride(context, nextMode).catch(function (error) {
+                    showStatus(
+                        "Failed to apply receive control. " + (error && error.message ? error.message : "Please try again."),
+                        "alert-danger"
+                    );
+                });
             });
         }
 
         if (receiveResetBtn) {
             receiveResetBtn.addEventListener("click", function () {
-                writeInput("superSettingsApplicationReceiveOverrideMode", RECEIVE_OVERRIDE_SCHEDULE);
-                renderReceiveControl(previewSettingsFromForm());
-                renderSnapshot(previewSettingsFromForm());
-                showStatus("Receiving is back to automatic schedule mode. Click Save Settings to apply this change.", "alert-info");
+                applyReceiveOverride(context, RECEIVE_OVERRIDE_SCHEDULE).catch(function (error) {
+                    showStatus(
+                        "Failed to return receive control to schedule mode. " + (error && error.message ? error.message : "Please try again."),
+                        "alert-danger"
+                    );
+                });
             });
         }
 
