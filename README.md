@@ -77,6 +77,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Checking no longer exposes the old `Internal Review` selector to secretary users; the hidden failed-exam exception path is now managed only from the System Administrator side.
 - System Administrator Scholarship Settings now includes a reserved-slot student allow-list, letting the office search applicants by the active school year and mark who can stay eligible for final review even if the exam result would normally block them.
 - Admin Approval Queue now shows only neutral `final review` wording for those reserved-slot exceptions instead of exposing the old internal label in the staff queue.
+- System Administrator sidebar now includes a `Reserved Slots` shortcut that jumps straight to the hidden allow-list section inside Scholarship Settings.
 - Secretary Checking now renders the applicant summary and form state first, while photo previews and queue-navigation hydration finish in the background for a faster first load on localhost and hosted deployments.
 - Secretary address displays in checking/print now strip loose `Barangay` placeholder segments so summary fields no longer show redundant values like `Barangay, Barangay Magang`.
 - Secretary Applications now includes a System Administrator-controlled `Walk-In Intake` action in the page header so office staff can create or reuse one applicant account and place a submitted application directly into the secretary queue for in-person walk-ins.
