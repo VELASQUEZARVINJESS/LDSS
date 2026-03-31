@@ -975,8 +975,10 @@
             const applicantName = row.applicant_name || "Unknown";
             const sectorClassification = row.sector_classification || "-";
             const resubmittedMarkup = row.resubmitted_for_check
-                ? '<div class="ldss-queue-applicant-flags"><span class="ldss-chip ldss-chip-accent">Resubmitted</span></div>' +
-                    '<span class="ldss-queue-applicant-note">After ' + escapeHtml(row.resubmitted_notice_label || "Correction Notice") + "</span>"
+                ? '<div class="ldss-queue-applicant-meta">' +
+                    '<span class="ldss-chip ldss-chip-accent">Resubmitted</span>' +
+                    '<span class="ldss-queue-applicant-note">After ' + escapeHtml(row.resubmitted_notice_label || "Correction Notice") + "</span>" +
+                    "</div>"
                 : "";
             return (
                 '<tr class="ldss-secretary-app-row" tabindex="0">' +

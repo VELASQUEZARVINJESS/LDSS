@@ -106,9 +106,14 @@
         const specialConsiderationEnabled = workflowControls.allow_secretary_special_consideration === true;
         target.textContent = "Special Endorsement is "
             + (workflowControls.allow_special_endorsement ? "enabled" : "disabled")
-            + " by System Administrator. Secretary Internal Review is "
+            + " by System Administrator. Reserved-slot exception flow is "
             + (specialConsiderationEnabled ? "enabled" : "disabled")
             + ".";
+    }
+
+    function hasReservedSlotException(row) {
+        return workflowControls.allow_secretary_special_consideration === true
+            && Boolean((row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim());
     }
 
     function applyWorkflowVisibility() {
@@ -412,7 +417,7 @@
             if (isMissingTableError(result.error, "application_staff_flags")) {
                 return {};
             }
-            throw new Error("Failed to load Internal Review tags: " + result.error.message);
+            throw new Error("Failed to load reserved-slot exception flags: " + result.error.message);
         }
 
         const map = {};
@@ -522,7 +527,7 @@
         const buttons = [];
         const allowSpecialEndorsement = workflowControls.allow_special_endorsement !== false;
         const isFailedExam = status === "failed_exam";
-        const hasSpecialConsideration = Boolean((row.special_consideration_tag || "").trim());
+        const hasSpecialConsideration = hasReservedSlotException(row);
 
         if (!isFinal) {
             if (!isFailedExam || hasSpecialConsideration) {
@@ -539,7 +544,7 @@
             buttons.push('<span class="small text-muted">Special endorsement is off.</span>');
         }
         if (isFailedExam && hasSpecialConsideration) {
-            buttons.push('<span class="small text-success">Internal Review allows final review.</span>');
+            buttons.push('<span class="small text-success">Eligible for final review.</span>');
         }
 
         if (!buttons.length) {
@@ -570,9 +575,9 @@
                 ? row.approval.recommendation_status
                 : "pending";
             const rankingBasis = rankingBasisText(row.approval);
-            const specialConsiderationTag = (row.special_consideration_tag || "").trim();
+            const specialConsiderationTag = hasReservedSlotException(row);
             const specialConsiderationMarkup = specialConsiderationTag
-                ? '<div class="mt-1"><span class="ldss-chip ldss-chip-success">Internal Review</span></div>'
+                ? '<div class="mt-1"><span class="ldss-chip ldss-chip-success">Final Review Eligible</span></div>'
                 : "";
 
             const interviewStatus = interview.status
@@ -687,7 +692,7 @@
         const nowIso = new Date().toISOString();
         const requiresDecisionTimestamp = ["approved", "waitlisted", "rejected"].includes(action);
         const currentApproval = row.approval || {};
-        const hasSpecialConsideration = Boolean((row.special_consideration_tag || "").trim());
+        const hasSpecialConsideration = hasReservedSlotException(row);
 
         const payload = {
             application_id: row.id,
@@ -762,7 +767,7 @@
             throw new Error("Special Endorsement is currently disabled in System Administrator settings.");
         }
 
-        if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action) && !(row.special_consideration_tag || "").trim()) {
+        if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action) && !hasReservedSlotException(row)) {
             throw new Error("Failed exam records must go through Special Endorsement Review before approval or waitlist.");
         }
 
@@ -874,7 +879,7 @@
                 continue;
             }
             try {
-                if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action) && !(row.special_consideration_tag || "").trim()) {
+                if (normalizeStatus(row.status) === "failed_exam" && ["approved", "waitlisted"].includes(action) && !hasReservedSlotException(row)) {
                     throw new Error("Failed exam records must go through Special Endorsement Review first.");
                 }
                 if (normalizeStatus(row.status) === "special_endorsement_review" && !notes) {

@@ -283,6 +283,67 @@
                 margin-bottom: 0.35rem;
             }
 
+            .ldss-settings-reserved-meta {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.75rem;
+            }
+
+            .ldss-settings-reserved-list {
+                border: 1px solid #e7ebf1;
+                border-radius: 0.9rem;
+                background: #fbfcfd;
+                overflow: hidden;
+            }
+
+            .ldss-settings-reserved-search {
+                max-height: 18rem;
+                overflow: auto;
+            }
+
+            .ldss-settings-reserved-item {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: space-between;
+                gap: 0.9rem;
+                padding: 0.85rem 1rem;
+                border-top: 1px solid #edf0f4;
+            }
+
+            .ldss-settings-reserved-item:first-child {
+                border-top: 0;
+            }
+
+            .ldss-settings-reserved-copy {
+                min-width: 0;
+                flex: 1 1 14rem;
+            }
+
+            .ldss-settings-reserved-name {
+                font-weight: 600;
+                color: var(--ldss-text);
+            }
+
+            .ldss-settings-reserved-note {
+                font-size: 0.8rem;
+                color: var(--ldss-muted);
+                line-height: 1.5;
+            }
+
+            .ldss-settings-reserved-actions {
+                flex: 0 0 auto;
+            }
+
+            .ldss-settings-reserved-table thead th {
+                font-size: 0.74rem;
+                letter-spacing: 0.03em;
+                text-transform: uppercase;
+                color: var(--ldss-muted);
+            }
+
             @media (max-width: 991.98px) {
                 .ldss-settings-kpis {
                     grid-template-columns: 1fr;
@@ -660,8 +721,8 @@
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
                                                         <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretarySpecialConsideration">
-                                                            <span class="ldss-settings-switch-title">Allow secretary tag for Internal Review</span>
-                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Lets Secretary Checking mark an applicant record for Internal Review using a System Administrator-defined reason.</span>
+                                                            <span class="ldss-settings-switch-title">Enable reserved-slot exception list</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Lets System Administrator keep selected applicants eligible for final review even when the exam result would normally stop them.</span>
                                                         </label>
                                                         <div class="form-check form-switch ldss-settings-switch-control">
                                                             <input class="form-check-input" id="superSettingsAllowSecretarySpecialConsideration" type="checkbox" role="switch" />
@@ -687,9 +748,53 @@
                                                     </div>
                                                 </div>
                                                 <div class="mt-4">
-                                                    <label class="small mb-1" for="superSettingsSpecialConsiderationOptions">Internal Review Options</label>
-                                                    <textarea class="form-control" id="superSettingsSpecialConsiderationOptions" rows="4" placeholder="Applicant from Borabod HQ&#10;Child of barangay worker&#10;Office-endorsed hardship case"></textarea>
-                                                    <div class="small text-muted mt-2">One option per line. Secretary uses these choices internally, while the visible label shown to staff stays as Internal Review.</div>
+                                                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                                                        <div>
+                                                            <label class="small mb-1 d-block" for="superReservedSlotSearchInput">Reserved-Slot Student Allow-List</label>
+                                                            <div class="small text-muted">Search the active school year, then add the applicants who should stay eligible for final review even if they fail the exam.</div>
+                                                        </div>
+                                                        <span class="ldss-chip ldss-chip-neutral" id="superReservedSlotCountChip">0 allowed</span>
+                                                    </div>
+                                                    <div class="alert d-none mb-3" id="superReservedSlotStatus" role="alert"></div>
+                                                    <div class="row g-3">
+                                                        <div class="col-12">
+                                                            <input class="form-control" id="superReservedSlotSearchInput" type="search" placeholder="Search applicant name, application no., or scholarship type" autocomplete="off" />
+                                                            <div class="small text-muted mt-2" id="superReservedSlotMeta">Load the active school year first, then search and add the students who should be allowed into the reserved-slot path.</div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <div class="ldss-settings-reserved-list">
+                                                                <div class="small text-uppercase text-muted fw-700 px-3 pt-3 pb-2">Search Results</div>
+                                                                <div class="ldss-settings-reserved-search" id="superReservedSlotSearchResults">
+                                                                    <div class="px-3 pb-3 small text-muted">Type a student name or application number to search.</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div class="col-12">
+                                                            <div class="ldss-settings-reserved-list">
+                                                                <div class="ldss-settings-reserved-meta px-3 pt-3 pb-2">
+                                                                    <div class="small text-uppercase text-muted fw-700">Allowed Students</div>
+                                                                    <div class="small text-muted">This list is visible only in the System Administrator workspace.</div>
+                                                                </div>
+                                                                <div class="table-responsive">
+                                                                    <table class="table table-sm mb-0 ldss-settings-reserved-table">
+                                                                        <thead class="bg-light">
+                                                                            <tr>
+                                                                                <th>Applicant</th>
+                                                                                <th>Application</th>
+                                                                                <th>Status</th>
+                                                                                <th class="text-end">Action</th>
+                                                                            </tr>
+                                                                        </thead>
+                                                                        <tbody id="superReservedSlotTableBody">
+                                                                            <tr>
+                                                                                <td colspan="4" class="text-center py-4 text-muted">Load the active school year to manage reserved-slot students.</td>
+                                                                            </tr>
+                                                                        </tbody>
+                                                                    </table>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -740,7 +845,7 @@
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/supabase-superadmin-audit-helper.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260324-1"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260331-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

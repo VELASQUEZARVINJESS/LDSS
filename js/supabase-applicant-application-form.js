@@ -2056,7 +2056,7 @@
             { id: "motherOccupation", label: "Mother Occupation", value: motherOccupation },
             { id: "fatherEducationAttainment", label: "Father Educational Attainment", value: fatherEducationAttainment },
             { id: "motherEducationAttainment", label: "Mother Educational Attainment", value: motherEducationAttainment },
-            { id: "totalParentsGrossIncome", label: "Total Parents Gross Income", value: monthlyIncomeRaw },
+            { id: "totalParentsGrossIncome", label: "Total Parents Monthly Gross Income", value: monthlyIncomeRaw },
             { id: "childrenInFamily", label: "No. of Children in Family", value: childrenInFamilyRaw },
             { id: "brotherCount", label: "No. of Brothers", value: brotherCountRaw },
             { id: "sisterCount", label: "No. of Sisters", value: sisterCountRaw }
@@ -2097,13 +2097,13 @@
 
         if (submitting && !monthlyIncomeRaw) {
             setInputValidity("totalParentsGrossIncome", true);
-            errors.push("Total Parents Gross Income is required before submission.");
+            errors.push("Total Parents Monthly Gross Income is required before submission.");
         } else if (monthlyIncomeRaw) {
             const income = Number(monthlyIncomeRaw);
             const invalidIncome = Number.isNaN(income) || income < 0;
             setInputValidity("totalParentsGrossIncome", invalidIncome);
             if (invalidIncome) {
-                errors.push("Total Parents Gross Income must be a valid non-negative number.");
+                errors.push("Total Parents Monthly Gross Income must be a valid non-negative number.");
             }
         } else {
             setInputValidity("totalParentsGrossIncome", false);

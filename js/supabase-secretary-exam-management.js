@@ -13,9 +13,21 @@
     let selectedApplicationIds = new Set();
     let currentBatchId = "";
     let roomHotfixAvailable = true;
+    let returnConfirmModalInstance = null;
+    let returnConfirmResolver = null;
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function getReturnConfirmModal() {
+        if (!returnConfirmModalInstance) {
+            const modalEl = byId("examManagementReturnConfirmModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                returnConfirmModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return returnConfirmModalInstance;
     }
 
     function workflow() {
@@ -208,6 +220,19 @@
 
     function visibleSelectableRows() {
         return eligibleRows().filter(selectableRow);
+    }
+
+    function selectedSelectableRows() {
+        return applications.filter(function (row) {
+            return selectedApplicationIds.has(row.id) && selectableRow(row);
+        });
+    }
+
+    function examRecordsForApplications(applicationIds) {
+        const wanted = new Set((applicationIds || []).filter(Boolean));
+        return examRecords.filter(function (record) {
+            return wanted.has(record.application_id);
+        });
     }
 
     function resetSelectionToEligible() {
@@ -728,6 +753,115 @@
         }
     }
 
+    async function deleteExamRecordsForApplications(applicationIds) {
+        const removableIds = (applicationIds || []).filter(Boolean);
+        if (!removableIds.length) {
+            return;
+        }
+
+        const records = examRecordsForApplications(removableIds);
+        if (!records.length) {
+            return;
+        }
+        if (records.some(function (record) { return normalizeStatus(record.status) !== LOCKED_RECORD_STATUS; })) {
+            throw new Error("One or more selected examinees already have completed or encoded exam records and cannot be returned.");
+        }
+
+        for (let start = 0; start < removableIds.length; start += 200) {
+            const chunk = removableIds.slice(start, start + 200);
+            const result = await authContext.client
+                .from("exam_records")
+                .delete()
+                .in("application_id", chunk);
+
+            if (result.error) {
+                throw new Error("Failed to clear exam assignments: " + result.error.message);
+            }
+        }
+    }
+
+    function resolveReturnConfirmation(confirmed) {
+        if (!returnConfirmResolver) {
+            return;
+        }
+        const resolve = returnConfirmResolver;
+        returnConfirmResolver = null;
+        resolve(Boolean(confirmed));
+    }
+
+    function confirmationDetails(nextStatus, selectedCount, scheduledCount) {
+        if (nextStatus === "submitted") {
+            return {
+                kicker: "Return to Checking",
+                title: "Return selected examinees to secretary checking?",
+                copy: "This will move the selected examinees out of Room Assignment and send them back to the secretary checking queue for review.",
+                target: "Secretary Checking",
+                note: scheduledCount > 0
+                    ? String(scheduledCount) + " scheduled room assignment(s) will be cleared before the rollback is saved."
+                    : "No saved room assignment will be cleared for this selection. The selected records will simply leave Room Assignment and return to checking.",
+                confirmLabel: "Return to Checking"
+            };
+        }
+
+        return {
+            kicker: "Back to Pending",
+            title: "Move selected examinees back to Pending Exam?",
+            copy: "This keeps the selected examinees in Room Assignment but removes them from the current scheduled room assignment so staff can schedule them again later.",
+            target: "Pending Exam",
+            note: String(scheduledCount) + " scheduled room assignment(s) will be cleared before the rollback is saved.",
+            confirmLabel: "Back to Pending"
+        };
+    }
+
+    function populateReturnConfirmModal(nextStatus, selectedCount, scheduledCount) {
+        const details = confirmationDetails(nextStatus, selectedCount, scheduledCount);
+        const kicker = byId("examManagementReturnConfirmKicker");
+        const title = byId("examManagementReturnConfirmTitle");
+        const copy = byId("examManagementReturnConfirmCopy");
+        const count = byId("examManagementReturnConfirmCount");
+        const target = byId("examManagementReturnConfirmTarget");
+        const note = byId("examManagementReturnConfirmNote");
+        const proceedBtn = byId("examManagementReturnConfirmProceedBtn");
+
+        if (kicker) {
+            kicker.textContent = details.kicker;
+        }
+        if (title) {
+            title.textContent = details.title;
+        }
+        if (copy) {
+            copy.textContent = details.copy;
+        }
+        if (count) {
+            count.textContent = String(selectedCount);
+        }
+        if (target) {
+            target.textContent = details.target;
+        }
+        if (note) {
+            note.textContent = details.note;
+        }
+        if (proceedBtn) {
+            proceedBtn.textContent = details.confirmLabel;
+        }
+    }
+
+    function requestReturnConfirmation(nextStatus, selectedCount, scheduledCount) {
+        const actionCopy = nextStatus === "submitted"
+            ? "return the selected examinees to secretary checking"
+            : "move the selected examinees back to Pending Exam";
+        const modal = getReturnConfirmModal();
+        if (!modal) {
+            return Promise.resolve(window.confirm("This will " + actionCopy + ". Continue?"));
+        }
+
+        populateReturnConfirmModal(nextStatus, selectedCount, scheduledCount);
+        return new Promise(function (resolve) {
+            returnConfirmResolver = resolve;
+            modal.show();
+        });
+    }
+
     async function deleteRemovedBatchAssignments(batchId, keepIds) {
         const records = batchRecords(batchId);
         if (!records.length) {
@@ -826,6 +960,63 @@
         }
     }
 
+    async function handleReturnSelected(nextStatus, buttonId, loadingText) {
+        const selectedRows = selectedSelectableRows();
+        if (!selectedRows.length) {
+            showStatus("Select at least one eligible examinee first.", "alert-warning");
+            return;
+        }
+
+        const selectedIds = selectedRows.map(function (row) { return row.id; }).filter(Boolean);
+        const scheduledIds = selectedRows.filter(function (row) {
+            return normalizeStatus(row.status) === "exam_scheduled";
+        }).map(function (row) {
+            return row.id;
+        }).filter(Boolean);
+        const idsNeedingStatusChange = selectedRows.filter(function (row) {
+            return normalizeStatus(row.status) !== nextStatus;
+        }).map(function (row) {
+            return row.id;
+        }).filter(Boolean);
+
+        if (nextStatus === "pending_exam" && !scheduledIds.length) {
+            showStatus("The selected examinees are already in Pending Exam.", "alert-info");
+            return;
+        }
+
+        const confirmed = await requestReturnConfirmation(nextStatus, selectedRows.length, scheduledIds.length);
+        if (!confirmed) {
+            return;
+        }
+
+        const button = byId(buttonId);
+        if (button) {
+            button.disabled = true;
+            button.textContent = loadingText;
+        }
+
+        try {
+            await deleteExamRecordsForApplications(selectedIds);
+            if (idsNeedingStatusChange.length) {
+                await updateApplicationStatuses(idsNeedingStatusChange, nextStatus);
+            }
+            await loadData(currentBatchId);
+
+            if (nextStatus === "submitted") {
+                showStatus("Selected examinees were returned to secretary checking. Any unlocked exam assignments tied to them were cleared.", "alert-success");
+            } else {
+                showStatus("Selected examinees were moved back to Pending Exam and removed from their saved room assignment.", "alert-success");
+            }
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to reverse the selected examinees.", "alert-danger");
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = nextStatus === "submitted" ? "Return to Checking" : "Back to Pending";
+            }
+        }
+    }
+
     function buildPrintHtml(mode, batch, rows) {
         const iconHref = new URL("../img/icon.png", window.location.href).href;
         const grouped = {};
@@ -891,6 +1082,11 @@
         const searchInput = byId("examManagementSearchInput");
         const selectAllBtn = byId("examManagementSelectAllBtn");
         const clearBtn = byId("examManagementClearBtn");
+        const backToPendingBtn = byId("examManagementBackToPendingBtn");
+        const returnToCheckingBtn = byId("examManagementReturnToCheckingBtn");
+        const returnConfirmModalEl = byId("examManagementReturnConfirmModal");
+        const returnConfirmCancelBtn = byId("examManagementReturnConfirmCancelBtn");
+        const returnConfirmProceedBtn = byId("examManagementReturnConfirmProceedBtn");
         const headerCheckbox = byId("examManagementSelectAllCheckbox");
         const tableBody = byId("examManagementEligibleTableBody");
         const generateBtn = byId("examGenerateBtn");
@@ -930,6 +1126,35 @@
             clearBtn.addEventListener("click", function () {
                 visibleSelectableRows().forEach(function (row) { selectedApplicationIds.delete(row.id); });
                 renderEligibleTable();
+            });
+        }
+        if (backToPendingBtn) {
+            backToPendingBtn.addEventListener("click", function () {
+                handleReturnSelected("pending_exam", "examManagementBackToPendingBtn", "Returning...");
+            });
+        }
+        if (returnToCheckingBtn) {
+            returnToCheckingBtn.addEventListener("click", function () {
+                handleReturnSelected("submitted", "examManagementReturnToCheckingBtn", "Returning...");
+            });
+        }
+        if (returnConfirmCancelBtn) {
+            returnConfirmCancelBtn.addEventListener("click", function () {
+                resolveReturnConfirmation(false);
+            });
+        }
+        if (returnConfirmProceedBtn) {
+            returnConfirmProceedBtn.addEventListener("click", function () {
+                resolveReturnConfirmation(true);
+                const modal = getReturnConfirmModal();
+                if (modal) {
+                    modal.hide();
+                }
+            });
+        }
+        if (returnConfirmModalEl) {
+            returnConfirmModalEl.addEventListener("hidden.bs.modal", function () {
+                resolveReturnConfirmation(false);
             });
         }
         if (headerCheckbox) {

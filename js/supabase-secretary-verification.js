@@ -66,7 +66,11 @@
         released: { label: "Released", chipClass: "ldss-chip-success" }
     };
 
-    const REQUIRED_DOCUMENTS = [];
+    const DEFAULT_VERIFICATION_DOCUMENT_TYPES = ["applicant_photo"];
+    const DOCUMENT_LABELS = {
+        applicant_photo: "Applicant 1x1 Photo",
+        income_certificate: "Income Certificate"
+    };
 
     const DOCUMENT_STATUS_META = {
         pending: { label: "Pending Review", chipClass: "ldss-chip-accent" },
@@ -126,6 +130,8 @@
     let applicationStaffFlagsAvailable = true;
     let currentStaffFlags = null;
     let selectedSpecialConsiderationTag = "";
+    let specialConsiderationToastInstance = null;
+    let shownSpecialConsiderationToastKeys = {};
 
     function byId(id) {
         return document.getElementById(id);
@@ -240,6 +246,16 @@
             }
         }
         return returnCorrectionModalInstance;
+    }
+
+    function getNotesModal() {
+        if (!notesModalInstance) {
+            const modalEl = byId("verificationDocNotesModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                notesModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return notesModalInstance;
     }
 
     function setApplicantEditStatus(message, type) {
@@ -661,6 +677,56 @@
         return ["submitted", "pending_exam", "returned_for_correction"].includes((status || "").toString().toLowerCase());
     }
 
+    function startCaseLabel(value) {
+        return (value || "")
+            .toString()
+            .replace(/[_-]+/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .replace(/\b\w/g, function (character) {
+                return character.toUpperCase();
+            });
+    }
+
+    function documentLabel(type) {
+        const normalizedType = (type || "").toString().trim().toLowerCase();
+        if (!normalizedType) {
+            return "Requirement";
+        }
+        return DOCUMENT_LABELS[normalizedType] || startCaseLabel(normalizedType);
+    }
+
+    function verificationDocumentDefinitions() {
+        const seen = new Set();
+        const definitions = [];
+
+        DEFAULT_VERIFICATION_DOCUMENT_TYPES.forEach(function (type) {
+            const normalizedType = (type || "").toString().trim().toLowerCase();
+            if (!normalizedType || seen.has(normalizedType)) {
+                return;
+            }
+            seen.add(normalizedType);
+            definitions.push({
+                type: normalizedType,
+                label: documentLabel(normalizedType)
+            });
+        });
+
+        Object.keys(latestDocumentByType || {}).sort().forEach(function (type) {
+            const normalizedType = (type || "").toString().trim().toLowerCase();
+            if (!normalizedType || seen.has(normalizedType)) {
+                return;
+            }
+            seen.add(normalizedType);
+            definitions.push({
+                type: normalizedType,
+                label: documentLabel(normalizedType)
+            });
+        });
+
+        return definitions;
+    }
+
     function documentMeta(status) {
         return DOCUMENT_STATUS_META[status] || DOCUMENT_STATUS_META.pending;
     }
@@ -776,10 +842,13 @@
         const counselorSelect = byId("verificationCounselorEndorsement");
         const recommendationSelect = byId("verificationRecommendationDecision");
         const specialConsiderationSelect = byId("verificationSpecialConsiderationTag");
+        const hardCopyToggle = byId("verificationHardCopyVerified");
         const verifiedPhotoInput = byId("verificationVerifiedPhotoFile");
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
         const cameraStopBtn = byId("verificationStopCameraBtn");
+        const notesText = byId("verificationDocNotesText");
+        const notesSaveBtn = byId("verificationDocNotesSaveBtn");
         const saveBtn = byId("verificationSaveBtn");
         const complianceBtn = byId("verificationComplianceBtn");
         const returnBtn = byId("verificationReturnBtn");
@@ -817,6 +886,9 @@
         if (specialConsiderationSelect) {
             specialConsiderationSelect.disabled = draftMode || isProcessing || !currentApplication || !specialConsiderationInputEnabled();
         }
+        if (hardCopyToggle) {
+            hardCopyToggle.disabled = draftMode;
+        }
         if (verifiedPhotoInput) {
             verifiedPhotoInput.disabled = draftMode;
         }
@@ -828,6 +900,12 @@
         }
         if (cameraStopBtn) {
             cameraStopBtn.disabled = draftMode;
+        }
+        if (notesText) {
+            notesText.disabled = draftMode || isProcessing;
+        }
+        if (notesSaveBtn) {
+            notesSaveBtn.disabled = draftMode || isProcessing;
         }
         if (saveBtn) {
             saveBtn.disabled = draftMode || isProcessing || !currentApplication;
@@ -1194,6 +1272,60 @@
         };
     }
 
+    function getSpecialConsiderationToast() {
+        if (!specialConsiderationToastInstance) {
+            const toastEl = byId("verificationSpecialConsiderationToast");
+            if (toastEl && window.bootstrap && typeof window.bootstrap.Toast === "function") {
+                specialConsiderationToastInstance = new window.bootstrap.Toast(toastEl, {
+                    autohide: true,
+                    delay: 3400
+                });
+            }
+        }
+        return specialConsiderationToastInstance;
+    }
+
+    function showSpecialConsiderationToast(message, variant, dedupeKey) {
+        const toastEl = byId("verificationSpecialConsiderationToast");
+        const toastHeader = byId("verificationSpecialConsiderationToastHeader");
+        const toastTitle = byId("verificationSpecialConsiderationToastTitle");
+        const toastBody = byId("verificationSpecialConsiderationToastBody");
+        const key = (dedupeKey || message || "").toString();
+        const tone = (variant || "info").toString().trim().toLowerCase();
+
+        if (!toastEl || !toastHeader || !toastTitle || !toastBody || !message) {
+            return;
+        }
+        if (key && shownSpecialConsiderationToastKeys[key]) {
+            return;
+        }
+        if (key) {
+            shownSpecialConsiderationToastKeys[key] = true;
+        }
+
+        toastHeader.classList.remove("text-warning", "text-danger", "text-success", "text-info");
+        if (tone === "warning") {
+            toastTitle.textContent = "Internal Review Unavailable";
+            toastHeader.classList.add("text-warning");
+        } else if (tone === "danger") {
+            toastTitle.textContent = "Review Error";
+            toastHeader.classList.add("text-danger");
+        } else if (tone === "success") {
+            toastTitle.textContent = "Review Updated";
+            toastHeader.classList.add("text-success");
+        } else {
+            toastTitle.textContent = "Review Notice";
+            toastHeader.classList.add("text-info");
+        }
+
+        toastBody.textContent = message;
+
+        const toast = getSpecialConsiderationToast();
+        if (toast) {
+            toast.show();
+        }
+    }
+
     function renderSpecialConsiderationControl() {
         const select = byId("verificationSpecialConsiderationTag");
         const badge = byId("verificationSpecialConsiderationBadge");
@@ -1217,22 +1349,23 @@
             return;
         }
         if (!applicationStaffFlagsAvailable) {
-            help.textContent = "Internal Review storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.";
+            help.textContent = "Internal Review unavailable on this setup.";
+            showSpecialConsiderationToast(
+                "Internal Review storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.",
+                "warning",
+                "internal-review-storage-missing"
+            );
             return;
         }
         if (selectedTag) {
-            help.textContent = "Internal Review flag is set.";
-            return;
-        }
-        if (currentApplication && statusSummary.label && statusSummary.label !== "-") {
-            help.textContent = "Current application status is " + statusSummary.label + ".";
+            help.textContent = "Marked as Internal Review.";
             return;
         }
         if (workflowControls.allow_secretary_special_consideration !== true) {
-            help.textContent = "System Administrator has not enabled Internal Review yet.";
+            help.textContent = "Internal Review is disabled in settings.";
             return;
         }
-        help.textContent = "Use the selector to switch between Regular Review and Internal Review.";
+        help.textContent = "Choose Regular Review or Internal Review.";
     }
 
     async function fetchApplicationStaffFlags(applicationId) {
@@ -1536,6 +1669,25 @@
         }) ? selectedCounselor : "";
     }
 
+    function renderHardCopyVerificationState() {
+        const checkbox = byId("verificationHardCopyVerified");
+        const meta = byId("verificationHardCopyMeta");
+        if (!checkbox || !meta) {
+            return;
+        }
+
+        if (checkbox.checked) {
+            if (currentInterview && currentInterview.hard_copy_verified_at) {
+                meta.textContent = "Hard copies verified on " + formatDateTime(currentInterview.hard_copy_verified_at) + ".";
+                return;
+            }
+            meta.textContent = "This will be saved as verified when you save secretary checking.";
+            return;
+        }
+
+        meta.textContent = "Use this after the office matches the online record with the applicant's printed requirements.";
+    }
+
     function updateDocNotePreview(docId) {
         const preview = byId("verificationDocNotePreview-" + docId);
         const button = document.querySelector('[data-doc-note-open="1"][data-doc-id="' + docId + '"]');
@@ -1582,8 +1734,9 @@
             text.focus();
         }
 
-        if (notesModalInstance) {
-            notesModalInstance.show();
+        const modal = getNotesModal();
+        if (modal) {
+            modal.show();
         }
     }
 
@@ -2025,7 +2178,7 @@
         setSelectValue("verificationEditGender", profile.sex || "");
         setSelectValue("verificationEditCivilStatus", profile.civil_status || "");
         setControlValue("verificationEditDateOfBirth", profile.date_of_birth || "");
-        setControlValue("verificationEditPlaceOfBirth", profile.place_of_birth || "");
+        setControlValue("verificationEditPlaceOfBirth", profile.place_of_birth || aux.placeOfBirth || "");
         setSelectValue("verificationEditSectorClassification", application.sector_classification || "");
         setSelectValue("verificationEditBarangay", profile.barangay || addressParts.barangay || "");
         setControlValue("verificationEditAddressLine", addressParts.line || "");
@@ -2081,7 +2234,6 @@
                 byId("verificationEditBarangay") ? byId("verificationEditBarangay").value : ""
             ),
             mobile_number: normalizeMobileForStorage(byId("verificationEditContact") ? byId("verificationEditContact").value : ""),
-            email: nullIfBlank(byId("verificationEditEmail") ? byId("verificationEditEmail").value.toLowerCase() : ""),
             school_name: upperTextOrNull(byId("verificationEditSchoolName") ? byId("verificationEditSchoolName").value : ""),
             course_or_strand: courseValue,
             year_level: nullIfBlank(byId("verificationEditYearLevel") ? byId("verificationEditYearLevel").value : ""),
@@ -2148,10 +2300,6 @@
         }
 
         const payloads = collectApplicantEditPayload();
-        const emailValue = payloads.profilePatch.email || "";
-        if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
-            throw new Error("Enter a valid email address before saving corrections.");
-        }
 
         let profileResult = await authContext.client
             .from("profiles")
@@ -2203,20 +2351,24 @@
         const dateTime = byId("verificationInterviewDateTime");
         const venue = byId("verificationInterviewVenue");
         const remarks = byId("verificationRemarks");
+        const hardCopyToggle = byId("verificationHardCopyVerified");
         selectedCounselor = remarksParsed.counselorEndorsement || "";
 
         if (dateTime) {
-            dateTime.value = configuredSchedule || toDatetimeLocalValue(interview.scheduled_at || "");
+            dateTime.value = toDatetimeLocalValue(interview.scheduled_at || "") || configuredSchedule || "";
         }
         if (venue) {
-            venue.value = configuredVenue || interview.venue || "";
+            venue.value = interview.venue || configuredVenue || "";
         }
         if (remarks) {
             remarks.value = remarksParsed.plainRemarks;
         }
+        if (hardCopyToggle) {
+            hardCopyToggle.checked = Boolean(interview.hard_copy_verified);
+        }
 
         renderCounselorOptions();
-
+        renderHardCopyVerificationState();
     }
 
     function documentRowMarkup(definition) {
@@ -2264,7 +2416,7 @@
             "</select>" +
             "</td>" +
             "<td>" +
-            '<button class="btn btn-outline-dark btn-sm ldss-doc-note-btn" type="button" data-doc-note-open="1" data-doc-id="' + escapeHtml(documentRow.id) + '" data-doc-label="' + escapeHtml(definition.label) + '">' +
+            '<button class="btn btn-outline-dark btn-sm ldss-doc-note-btn" type="button" data-doc-note-open="1" data-doc-id="' + escapeHtml(documentRow.id) + '" data-doc-label="' + escapeHtml(definition.label) + '" data-doc-has-file="1">' +
             (noteValue ? "Edit Note" : "Add Note") +
             "</button>" +
             '<div class="small text-muted mt-1" id="' + escapeHtml(notePreviewId) + '"></div>' +
@@ -2288,14 +2440,14 @@
             documentNotesById[row.id] = row.verification_notes || "";
         });
 
-        tbody.innerHTML = REQUIRED_DOCUMENTS.map(documentRowMarkup).join("");
+        tbody.innerHTML = verificationDocumentDefinitions().map(documentRowMarkup).join("");
         Object.keys(documentNotesById).forEach(function (docId) {
             updateDocNotePreview(docId);
         });
     }
 
     function documentVerificationState() {
-        return REQUIRED_DOCUMENTS.map(function (definition) {
+        return verificationDocumentDefinitions().map(function (definition) {
             const row = latestDocumentByType[definition.type] || null;
             if (!row) {
                 return {
@@ -2322,26 +2474,39 @@
     }
 
     function readFormValues() {
-        const configuredSchedule = loadConfiguredInterviewSchedule();
-        const interviewDateTimeRaw = configuredSchedule || "";
+        const interviewDateTimeRaw = byId("verificationInterviewDateTime")
+            ? byId("verificationInterviewDateTime").value.trim()
+            : "";
         const remarksValue = byId("verificationRemarks") ? byId("verificationRemarks").value.trim() : "";
         const cleanCounselorEndorsement = normalizeTag(selectedCounselor);
-        const configuredVenue = loadConfiguredInterviewVenue();
-        const preservedInterviewStatus = currentInterview && currentInterview.status
+        const interviewVenueValue = byId("verificationInterviewVenue")
+            ? byId("verificationInterviewVenue").value.trim()
+            : "";
+        const hardCopyVerified = Boolean(byId("verificationHardCopyVerified") && byId("verificationHardCopyVerified").checked);
+        const currentInterviewStatus = currentInterview && currentInterview.status
             ? currentInterview.status
-            : (interviewDateTimeRaw ? "scheduled" : "not_scheduled");
+            : "";
+        let preservedInterviewStatus = currentInterviewStatus || (interviewDateTimeRaw ? "scheduled" : "not_scheduled");
         const preservedInterviewResult = currentInterview && currentInterview.result
             ? currentInterview.result
             : "pending";
 
+        if (!interviewDateTimeRaw && (!currentInterviewStatus || currentInterviewStatus === "scheduled" || currentInterviewStatus === "not_scheduled")) {
+            preservedInterviewStatus = "not_scheduled";
+        }
+        if (interviewDateTimeRaw && (!currentInterviewStatus || currentInterviewStatus === "not_scheduled")) {
+            preservedInterviewStatus = "scheduled";
+        }
+
         return {
             interviewDateTimeIso: toIsoFromDatetimeLocal(interviewDateTimeRaw),
-            interviewVenue: configuredVenue || (currentInterview && currentInterview.venue ? currentInterview.venue : ""),
+            interviewVenue: interviewVenueValue,
             interviewStatus: preservedInterviewStatus,
             interviewResult: preservedInterviewResult,
             examScore: currentInterview && typeof currentInterview.exam_score !== "undefined"
                 ? currentInterview.exam_score
                 : null,
+            hardCopyVerified: hardCopyVerified,
             counselorEndorsement: cleanCounselorEndorsement,
             queuePriority: "medium",
             recommendationDecision: byId("verificationRecommendationDecision") ? byId("verificationRecommendationDecision").value : "approved",
@@ -2354,13 +2519,24 @@
 
     function buildFormSnapshot() {
         const formValues = readFormValues();
+        const photoInput = byId("verificationVerifiedPhotoFile");
         return JSON.stringify({
             counselorEndorsement: formValues.counselorEndorsement || "",
             interviewDateTimeIso: formValues.interviewDateTimeIso || "",
             interviewVenue: formValues.interviewVenue || "",
+            hardCopyVerified: Boolean(formValues.hardCopyVerified),
             recommendationDecision: formValues.recommendationDecision || "",
             specialConsiderationTag: formValues.specialConsiderationTag || "",
-            remarks: formValues.remarks || ""
+            remarks: formValues.remarks || "",
+            docStates: documentVerificationState().map(function (row) {
+                return {
+                    type: row.type,
+                    exists: row.exists,
+                    status: row.status,
+                    notes: row.notes || ""
+                };
+            }),
+            hasVerifiedPhotoUpload: Boolean(photoInput && photoInput.files && photoInput.files.length)
         });
     }
 
@@ -2723,7 +2899,7 @@
 
         const docStates = documentVerificationState();
         const uploadedPhotoPath = await maybeUploadVerifiedPhoto();
-        const hardCopyVerified = Boolean(currentInterview && currentInterview.hard_copy_verified);
+        const hardCopyVerified = Boolean(formValues.hardCopyVerified);
 
         await persistDocumentUpdates(docStates);
         currentInterview = await upsertInterview(formValues, uploadedPhotoPath, hardCopyVerified);
@@ -3041,9 +3217,13 @@
         const editApplicantSaveBtn = byId("verificationApplicantEditSaveBtn");
         const counselorSelect = byId("verificationCounselorEndorsement");
         const specialConsiderationSelect = byId("verificationSpecialConsiderationTag");
+        const hardCopyToggle = byId("verificationHardCopyVerified");
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
         const cameraStopBtn = byId("verificationStopCameraBtn");
+        const docNotesSaveBtn = byId("verificationDocNotesSaveBtn");
+        const docNotesModalEl = byId("verificationDocNotesModal");
+        const docTableBody = byId("verificationDocumentsTableBody");
 
         if (printBtn) {
             printBtn.addEventListener("click", function () {
@@ -3171,6 +3351,36 @@
                 renderSpecialConsiderationControl();
             });
         }
+        if (hardCopyToggle) {
+            hardCopyToggle.addEventListener("change", function () {
+                renderHardCopyVerificationState();
+            });
+        }
+        if (docTableBody) {
+            docTableBody.addEventListener("click", function (event) {
+                const button = event.target && event.target.closest
+                    ? event.target.closest("[data-doc-note-open='1']")
+                    : null;
+                if (!button) {
+                    return;
+                }
+                openNotesModal(
+                    button.getAttribute("data-doc-id"),
+                    button.getAttribute("data-doc-label"),
+                    button.getAttribute("data-doc-has-file") === "1"
+                );
+            });
+        }
+        if (docNotesSaveBtn) {
+            docNotesSaveBtn.addEventListener("click", function () {
+                saveNotesFromModal();
+            });
+        }
+        if (docNotesModalEl) {
+            docNotesModalEl.addEventListener("hidden.bs.modal", function () {
+                activeNotesDocId = "";
+            });
+        }
 
         const photoInput = byId("verificationVerifiedPhotoFile");
         if (photoInput) {
@@ -3274,8 +3484,7 @@
         selectedSpecialConsiderationTag = normalizeTag(currentStaffFlags && currentStaffFlags.special_consideration_tag);
 
         signedDocumentUrlByType = {};
-        for (let i = 0; i < REQUIRED_DOCUMENTS.length; i += 1) {
-            const type = REQUIRED_DOCUMENTS[i].type;
+        for (const type of Object.keys(latestDocumentByType)) {
             const row = latestDocumentByType[type];
             if (row && row.storage_path) {
                 signedDocumentUrlByType[type] = await createSignedUrl(row.storage_path);
@@ -3297,6 +3506,7 @@
         renderHeaderAndSummary();
         renderCorrectionHistoryNotice();
         renderInterviewForm();
+        renderDocumentTable();
         renderSpecialConsiderationControl();
         syncApplicantEditAccess();
         await loadApplicationNavigationQueue(currentApplication.id);

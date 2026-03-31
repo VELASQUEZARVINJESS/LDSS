@@ -5,6 +5,10 @@
     const RECEIVE_OVERRIDE_SCHEDULE = "schedule";
     const RECEIVE_OVERRIDE_FORCE_OPEN = "force_open";
     const RECEIVE_OVERRIDE_FORCE_CLOSED = "force_closed";
+    const APPLICATION_STAFF_FLAGS_TABLE = "application_staff_flags";
+    const RESERVED_SLOT_TAG = "reserved_slot_exception";
+    const PROFILE_BATCH_SIZE = 120;
+    const RESERVED_SLOT_RESULT_LIMIT = 8;
 
     const DEFAULT_SETTINGS = {
         school_year: "",
@@ -37,6 +41,11 @@
         }
     };
     let activeSettingsRecord = null;
+    let reservedSlotCandidates = [];
+    let reservedSlotApplicationsById = {};
+    let reservedSlotFlagsAvailable = true;
+    let reservedSlotLoadedYear = "";
+    let reservedSlotLoadToken = 0;
 
     function byId(id) {
         return document.getElementById(id);
@@ -157,6 +166,39 @@
 
     function specialConsiderationOptionsToTextarea(value) {
         return normalizeSpecialConsiderationOptions(value).join("\n");
+    }
+
+    function escapeHtml(value) {
+        return (value || "")
+            .toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    function normalizeStatus(value) {
+        return (value || "").toString().trim().toLowerCase();
+    }
+
+    function formatStatusLabel(value) {
+        const normalized = normalizeStatus(value);
+        if (!normalized) {
+            return "-";
+        }
+        return normalized.replace(/_/g, " ").replace(/\b\w/g, function (char) { return char.toUpperCase(); });
+    }
+
+    function buildApplicantName(profile) {
+        if (!profile || typeof profile !== "object") {
+            return "";
+        }
+        return [
+            (profile.first_name || "").trim(),
+            (profile.middle_name || "").trim(),
+            (profile.last_name || "").trim()
+        ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     }
 
     function formatTimeValue(value) {
@@ -402,7 +444,7 @@
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),
                     allow_secretary_applicant_edits: Boolean(byId("superSettingsAllowSecretaryApplicantEdits") && byId("superSettingsAllowSecretaryApplicantEdits").checked),
                     allow_secretary_special_consideration: Boolean(byId("superSettingsAllowSecretarySpecialConsideration") && byId("superSettingsAllowSecretarySpecialConsideration").checked),
-                    special_consideration_options: normalizeSpecialConsiderationOptions(byId("superSettingsSpecialConsiderationOptions") ? byId("superSettingsSpecialConsiderationOptions").value : ""),
+                    special_consideration_options: [],
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
                 }
@@ -457,6 +499,415 @@
         return "Receive control returned to schedule mode and saved successfully.";
     }
 
+    function showReservedSlotStatus(message, type) {
+        const box = byId("superReservedSlotStatus");
+        if (!box) {
+            return;
+        }
+        if (!message) {
+            box.className = "alert d-none";
+            box.textContent = "";
+            return;
+        }
+        box.className = "alert " + (type || "alert-info");
+        box.textContent = message;
+    }
+
+    function currentReservedSlotYear() {
+        const fromInput = byId("superSettingsSchoolYear") ? byId("superSettingsSchoolYear").value : "";
+        const fromActive = activeSettingsRecord && activeSettingsRecord.school_year ? activeSettingsRecord.school_year : "";
+        return (fromInput || fromActive || "").toString().trim();
+    }
+
+    function reservedSlotFlowEnabled() {
+        return Boolean(byId("superSettingsAllowSecretarySpecialConsideration") && byId("superSettingsAllowSecretarySpecialConsideration").checked);
+    }
+
+    function reservedSlotRows() {
+        return reservedSlotCandidates
+            .filter(function (row) { return row.is_reserved_slot; })
+            .sort(function (left, right) {
+                const leftStamp = new Date(left.flag_updated_at || left.updated_at || left.created_at || 0).getTime();
+                const rightStamp = new Date(right.flag_updated_at || right.updated_at || right.created_at || 0).getTime();
+                return rightStamp - leftStamp;
+            });
+    }
+
+    function renderReservedSlotCount() {
+        const chip = byId("superReservedSlotCountChip");
+        if (!chip) {
+            return;
+        }
+        const count = reservedSlotRows().length;
+        chip.className = "ldss-chip " + (count > 0 ? "ldss-chip-accent" : "ldss-chip-neutral");
+        chip.textContent = count + " allowed";
+    }
+
+    function setReservedSlotLoadingState(message) {
+        const searchResults = byId("superReservedSlotSearchResults");
+        const tableBody = byId("superReservedSlotTableBody");
+        const safeMessage = escapeHtml(message || "Loading reserved-slot students...");
+
+        if (searchResults) {
+            searchResults.innerHTML = '<div class="px-3 pb-3 small text-muted">' + safeMessage + "</div>";
+        }
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">' + safeMessage + "</td></tr>";
+        }
+        renderReservedSlotCount();
+    }
+
+    function syncReservedSlotManagerState() {
+        const searchInput = byId("superReservedSlotSearchInput");
+        const meta = byId("superReservedSlotMeta");
+        const schoolYear = currentReservedSlotYear();
+
+        if (searchInput) {
+            searchInput.disabled = !reservedSlotFlagsAvailable || !schoolYear;
+        }
+
+        if (meta) {
+            if (!reservedSlotFlagsAvailable) {
+                meta.textContent = "Reserved-slot storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.";
+            } else if (!schoolYear) {
+                meta.textContent = "Set or load the active school year first, then search and add allowed students.";
+            } else if (!reservedSlotFlowEnabled()) {
+                meta.textContent = "Reserved-slot flow is currently off. You can still prepare the list below, then enable the switch when the office is ready.";
+            } else {
+                meta.textContent = "Search the active school year queue and add the students who should stay eligible for final review.";
+            }
+        }
+
+        renderReservedSlotCount();
+    }
+
+    async function fetchReservedSlotProfiles(context, applicantIds) {
+        const profileMap = {};
+        const ids = Array.isArray(applicantIds) ? applicantIds.filter(Boolean) : [];
+
+        for (let index = 0; index < ids.length; index += PROFILE_BATCH_SIZE) {
+            const batch = ids.slice(index, index + PROFILE_BATCH_SIZE);
+            const result = await context.client
+                .from("profiles")
+                .select("id, first_name, middle_name, last_name, email")
+                .in("id", batch);
+
+            if (result.error) {
+                throw new Error("Failed to load applicant names: " + result.error.message);
+            }
+
+            (result.data || []).forEach(function (profile) {
+                if (profile && profile.id) {
+                    profileMap[profile.id] = profile;
+                }
+            });
+        }
+
+        return profileMap;
+    }
+
+    function renderReservedSlotSearchResults() {
+        const target = byId("superReservedSlotSearchResults");
+        const schoolYear = currentReservedSlotYear();
+        const query = (byId("superReservedSlotSearchInput") ? byId("superReservedSlotSearchInput").value : "").toString().trim().toLowerCase();
+
+        if (!target) {
+            return;
+        }
+        if (!reservedSlotFlagsAvailable) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">Reserved-slot storage is not installed yet.</div>';
+            return;
+        }
+        if (!schoolYear) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">Set the active school year first.</div>';
+            return;
+        }
+        if (!reservedSlotCandidates.length) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">No application records were found for ' + escapeHtml(schoolYear) + ".</div>";
+            return;
+        }
+
+        let matches = reservedSlotCandidates.filter(function (row) {
+            return !row.is_reserved_slot;
+        });
+
+        if (query) {
+            matches = matches.filter(function (row) {
+                const haystack = [
+                    row.applicant_name,
+                    row.application_no,
+                    row.scholarship_type,
+                    row.status
+                ].join(" ").toLowerCase();
+                return haystack.includes(query);
+            });
+        }
+
+        matches = matches.slice(0, RESERVED_SLOT_RESULT_LIMIT);
+
+        if (!matches.length) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">No matching students are available to add.</div>';
+            return;
+        }
+
+        target.innerHTML = matches.map(function (row) {
+            return [
+                '<div class="ldss-settings-reserved-item">',
+                '<div class="ldss-settings-reserved-copy">',
+                '<div class="ldss-settings-reserved-name">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>",
+                '<div class="ldss-settings-reserved-note">' + escapeHtml((row.application_no || "-") + " | " + formatStatusLabel(row.status) + " | " + (row.scholarship_type || "-")) + "</div>",
+                "</div>",
+                '<div class="ldss-settings-reserved-actions">',
+                '<button class="btn btn-dark btn-sm" type="button" data-reserved-slot-add="' + escapeHtml(row.id) + '">Allow</button>',
+                "</div>",
+                "</div>"
+            ].join("");
+        }).join("");
+    }
+
+    function renderReservedSlotTable() {
+        const tbody = byId("superReservedSlotTableBody");
+        const rows = reservedSlotRows();
+
+        if (!tbody) {
+            return;
+        }
+        renderReservedSlotCount();
+
+        if (!reservedSlotFlagsAvailable) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">Reserved-slot storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.</td></tr>';
+            return;
+        }
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">No students are currently on the reserved-slot allow-list.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = rows.map(function (row) {
+            return [
+                "<tr>",
+                "<td>",
+                '<div class="fw-600">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>",
+                '<div class="small text-muted">' + escapeHtml((row.scholarship_type || "-") + " | " + (row.school_year || "-")) + "</div>",
+                "</td>",
+                "<td>",
+                '<div class="fw-600">' + escapeHtml(row.application_no || "-") + "</div>",
+                '<div class="small text-muted">Updated ' + escapeHtml(formatDateDisplay((row.flag_updated_at || row.updated_at || "").slice(0, 10))) + "</div>",
+                "</td>",
+                "<td>",
+                '<span class="ldss-chip ldss-chip-neutral">' + escapeHtml(formatStatusLabel(row.status)) + "</span>",
+                "</td>",
+                '<td class="text-end"><button class="btn btn-outline-dark btn-sm" type="button" data-reserved-slot-remove="' + escapeHtml(row.id) + '">Remove</button></td>',
+                "</tr>"
+            ].join("");
+        }).join("");
+    }
+
+    async function loadReservedSlotManager(context) {
+        const schoolYear = currentReservedSlotYear();
+        const loadToken = reservedSlotLoadToken + 1;
+        reservedSlotLoadToken = loadToken;
+        reservedSlotLoadedYear = schoolYear;
+        showReservedSlotStatus("");
+
+        if (!schoolYear) {
+            reservedSlotCandidates = [];
+            reservedSlotApplicationsById = {};
+            setReservedSlotLoadingState("Set the active school year to load applicants.");
+            syncReservedSlotManagerState();
+            return;
+        }
+
+        setReservedSlotLoadingState("Loading reserved-slot student list...");
+
+        const applicationResult = await context.client
+            .from("applications")
+            .select("id, application_no, applicant_id, school_year, scholarship_type, status, submitted_at, created_at, updated_at")
+            .eq("school_year", schoolYear)
+            .neq("status", "draft")
+            .order("updated_at", { ascending: false })
+            .limit(500);
+
+        if (loadToken !== reservedSlotLoadToken) {
+            return;
+        }
+
+        if (applicationResult.error) {
+            reservedSlotCandidates = [];
+            reservedSlotApplicationsById = {};
+            setReservedSlotLoadingState("Unable to load application records for this school year.");
+            throw new Error("Failed to load reserved-slot candidates: " + applicationResult.error.message);
+        }
+
+        const applicationRows = applicationResult.data || [];
+        const applicantIds = Array.from(new Set(applicationRows.map(function (row) {
+            return row.applicant_id;
+        }).filter(Boolean)));
+        const profileMap = await fetchReservedSlotProfiles(context, applicantIds);
+
+        if (loadToken !== reservedSlotLoadToken) {
+            return;
+        }
+
+        let flagMap = {};
+        if (reservedSlotFlagsAvailable && applicationRows.length) {
+            const flagResult = await context.client
+                .from(APPLICATION_STAFF_FLAGS_TABLE)
+                .select("application_id, special_consideration_tag, updated_at, created_at")
+                .in("application_id", applicationRows.map(function (row) { return row.id; }));
+
+            if (loadToken !== reservedSlotLoadToken) {
+                return;
+            }
+
+            if (flagResult.error) {
+                if (/does not exist|relation|schema cache/i.test(flagResult.error.message || "")) {
+                    reservedSlotFlagsAvailable = false;
+                    showReservedSlotStatus("Reserved-slot storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.", "alert-warning");
+                } else {
+                    throw new Error("Failed to load reserved-slot records: " + flagResult.error.message);
+                }
+            } else {
+                (flagResult.data || []).forEach(function (row) {
+                    const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+                    if (row && row.application_id && tag) {
+                        flagMap[row.application_id] = {
+                            tag: tag,
+                            updated_at: row.updated_at || row.created_at || null
+                        };
+                    }
+                });
+            }
+        }
+
+        reservedSlotCandidates = applicationRows.map(function (row) {
+            const profile = row && row.applicant_id ? profileMap[row.applicant_id] : null;
+            const flag = flagMap[row.id] || null;
+            return {
+                id: row.id,
+                applicant_id: row.applicant_id || "",
+                applicant_name: buildApplicantName(profile) || "Unknown Applicant",
+                applicant_email: profile && profile.email ? profile.email : "",
+                application_no: row.application_no || "",
+                school_year: row.school_year || "",
+                scholarship_type: row.scholarship_type || "",
+                status: row.status || "",
+                submitted_at: row.submitted_at || null,
+                created_at: row.created_at || null,
+                updated_at: row.updated_at || null,
+                is_reserved_slot: Boolean(flag),
+                flag_updated_at: flag && flag.updated_at ? flag.updated_at : null,
+                hidden_tag: flag && flag.tag ? flag.tag : ""
+            };
+        });
+
+        reservedSlotApplicationsById = {};
+        reservedSlotCandidates.forEach(function (row) {
+            reservedSlotApplicationsById[row.id] = row;
+        });
+
+        syncReservedSlotManagerState();
+        renderReservedSlotSearchResults();
+        renderReservedSlotTable();
+    }
+
+    async function addReservedSlotStudent(context, applicationId) {
+        const row = reservedSlotApplicationsById[applicationId];
+        if (!row) {
+            showReservedSlotStatus("Applicant record could not be found. Reload the active school year first.", "alert-warning");
+            return;
+        }
+        if (!reservedSlotFlagsAvailable) {
+            showReservedSlotStatus("Reserved-slot storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.", "alert-warning");
+            return;
+        }
+
+        const result = await context.client
+            .from(APPLICATION_STAFF_FLAGS_TABLE)
+            .upsert({
+                application_id: applicationId,
+                special_consideration_tag: RESERVED_SLOT_TAG,
+                special_consideration_marked_by: context.user.id
+            }, { onConflict: "application_id" });
+
+        if (result.error) {
+            if (/does not exist|relation|schema cache/i.test(result.error.message || "")) {
+                reservedSlotFlagsAvailable = false;
+                syncReservedSlotManagerState();
+                renderReservedSlotSearchResults();
+                renderReservedSlotTable();
+                showReservedSlotStatus("Reserved-slot storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.", "alert-warning");
+                return;
+            }
+            throw new Error("Failed to add reserved-slot student: " + result.error.message);
+        }
+
+        row.is_reserved_slot = true;
+        row.hidden_tag = RESERVED_SLOT_TAG;
+        row.flag_updated_at = new Date().toISOString();
+        renderReservedSlotSearchResults();
+        renderReservedSlotTable();
+        showReservedSlotStatus("Reserved-slot access saved for " + row.applicant_name + ".", "alert-success");
+
+        await writeAuditEntry(context, {
+            module: "scholarship_settings",
+            action: "grant_reserved_slot_exception",
+            recordType: "application",
+            recordId: applicationId,
+            targetUserId: row.applicant_id || null,
+            targetLabel: row.applicant_name,
+            summary: "Granted reserved-slot exception to " + row.applicant_name + ".",
+            details: {
+                application_no: row.application_no || "",
+                school_year: row.school_year || "",
+                status: normalizeStatus(row.status)
+            }
+        });
+    }
+
+    async function removeReservedSlotStudent(context, applicationId) {
+        const row = reservedSlotApplicationsById[applicationId];
+        if (!row) {
+            showReservedSlotStatus("Applicant record could not be found. Reload the active school year first.", "alert-warning");
+            return;
+        }
+        if (!reservedSlotFlagsAvailable) {
+            showReservedSlotStatus("Reserved-slot storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.", "alert-warning");
+            return;
+        }
+
+        const result = await context.client
+            .from(APPLICATION_STAFF_FLAGS_TABLE)
+            .delete()
+            .eq("application_id", applicationId);
+
+        if (result.error) {
+            throw new Error("Failed to remove reserved-slot student: " + result.error.message);
+        }
+
+        row.is_reserved_slot = false;
+        row.hidden_tag = "";
+        row.flag_updated_at = new Date().toISOString();
+        renderReservedSlotSearchResults();
+        renderReservedSlotTable();
+        showReservedSlotStatus("Removed reserved-slot access for " + row.applicant_name + ".", "alert-success");
+
+        await writeAuditEntry(context, {
+            module: "scholarship_settings",
+            action: "revoke_reserved_slot_exception",
+            recordType: "application",
+            recordId: applicationId,
+            targetUserId: row.applicant_id || null,
+            targetLabel: row.applicant_name,
+            summary: "Removed reserved-slot exception from " + row.applicant_name + ".",
+            details: {
+                application_no: row.application_no || "",
+                school_year: row.school_year || "",
+                status: normalizeStatus(row.status)
+            }
+        });
+    }
+
     function renderWeightTotal() {
         const exam = readNumberField("superSettingsWeightExam");
         const interview = readNumberField("superSettingsWeightInterview");
@@ -485,7 +936,6 @@
         const controls = ranking.controls || {};
         const receiveState = receiveStatusMeta(settings);
         const overrideMode = resolveReceiveOverrideMode(controls);
-        const specialConsiderationOptions = normalizeSpecialConsiderationOptions(controls.special_consideration_options);
         const lines = [
             "School Year: " + (settings.school_year || "-"),
             "Quota: " + Number(settings.quota_slots || 0),
@@ -499,8 +949,7 @@
                     : (overrideMode === RECEIVE_OVERRIDE_FORCE_CLOSED ? "Manual Disable" : "Follow Schedule")
             ),
             "Secretary Applicant Detail Edit: " + (controls.allow_secretary_applicant_edits ? "Enabled" : "Disabled"),
-            "Secretary Internal Review: " + (controls.allow_secretary_special_consideration ? "Enabled" : "Disabled"),
-            "Internal Review Options: " + (specialConsiderationOptions.length ? specialConsiderationOptions.join(", ") : "None"),
+            "Reserved-Slot Exception Flow: " + (controls.allow_secretary_special_consideration ? "Enabled" : "Disabled"),
             "Applicant Photo Required On Submit: " + (controls.require_applicant_photo_on_submit !== false ? "Enabled" : "Disabled"),
             "Special Endorsement: " + ((controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
             "Weights (Exam/Interview/Income/Requirements): "
@@ -541,7 +990,6 @@
         writeCheckbox("superSettingsAllowSpecialEndorsement", controls.allow_special_endorsement);
         writeCheckbox("superSettingsAllowSecretaryApplicantEdits", controls.allow_secretary_applicant_edits);
         writeCheckbox("superSettingsAllowSecretarySpecialConsideration", controls.allow_secretary_special_consideration);
-        writeInput("superSettingsSpecialConsiderationOptions", specialConsiderationOptionsToTextarea(controls.special_consideration_options));
         writeCheckbox("superSettingsRequireApplicantPhotoOnSubmit", controls.require_applicant_photo_on_submit !== false);
         writeCheckbox("superSettingsAutoSetForInterview", controls.auto_set_for_interview);
 
@@ -549,6 +997,7 @@
         renderKpis(settings);
         renderReceiveControl(settings);
         renderSnapshot(settings);
+        syncReservedSlotManagerState();
     }
 
     function readFormValues() {
@@ -566,8 +1015,6 @@
         const openTime = normalizeTimeValue(byId("superSettingsCycleOpenTime") ? byId("superSettingsCycleOpenTime").value : "");
         const closeTime = normalizeTimeValue(byId("superSettingsCycleCloseTime") ? byId("superSettingsCycleCloseTime").value : "");
         const receiveOverrideMode = normalizeReceiveOverrideMode(byId("superSettingsApplicationReceiveOverrideMode") ? byId("superSettingsApplicationReceiveOverrideMode").value : "");
-        const specialConsiderationOptions = normalizeSpecialConsiderationOptions(byId("superSettingsSpecialConsiderationOptions") ? byId("superSettingsSpecialConsiderationOptions").value : "");
-
         if (!/^[0-9]{4}-[0-9]{4}$/.test(schoolYear)) {
             return { error: "School year must follow YYYY-YYYY format." };
         }
@@ -620,7 +1067,7 @@
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),
                     allow_secretary_applicant_edits: Boolean(byId("superSettingsAllowSecretaryApplicantEdits") && byId("superSettingsAllowSecretaryApplicantEdits").checked),
                     allow_secretary_special_consideration: Boolean(byId("superSettingsAllowSecretarySpecialConsideration") && byId("superSettingsAllowSecretarySpecialConsideration").checked),
-                    special_consideration_options: specialConsiderationOptions,
+                    special_consideration_options: [],
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
                 }
@@ -673,8 +1120,7 @@
                 passing_score: Number(current.passing_score || 0),
                 receive_override_mode: currentReceiveMode,
                 require_applicant_photo_on_submit: currentPhotoRequirement,
-                allow_secretary_special_consideration: Boolean(currentControls.allow_secretary_special_consideration),
-                special_consideration_options_count: normalizeSpecialConsiderationOptions(currentControls.special_consideration_options).length,
+                reserved_slot_exception_flow: Boolean(currentControls.allow_secretary_special_consideration),
                 application_open_date: current.application_open_date || "",
                 application_close_date: current.application_close_date || ""
             }
@@ -728,6 +1174,7 @@
                 activeSettingsRecord = cloneSettings(fallback || DEFAULT_SETTINGS);
                 applyForm(activeSettingsRecord);
                 showStatus("Using local fallback settings. Deploy ranking_settings table for Supabase persistence.", "alert-warning");
+                await loadReservedSlotManager(context);
                 return;
             }
             throw new Error("Failed to load ranking settings: " + result.error.message);
@@ -738,11 +1185,13 @@
             activeSettingsRecord = cloneSettings(fallback || DEFAULT_SETTINGS);
             applyForm(activeSettingsRecord);
             showStatus("No active ranking settings yet. Configure and save to initialize.", "alert-info");
+            await loadReservedSlotManager(context);
             return;
         }
 
         activeSettingsRecord = cloneSettings(active);
         applyForm(active);
+        await loadReservedSlotManager(context);
     }
 
     async function saveSettings(context, options) {
@@ -772,6 +1221,7 @@
                 activeSettingsRecord = cloneSettings(payload);
                 applyForm(payload);
                 showStatus("Saved to local fallback only. Run schema update to enable Supabase persistence.", "alert-warning");
+                await loadReservedSlotManager(context);
                 return;
             }
             throw new Error("Failed to save settings: " + upsertResult.error.message);
@@ -782,6 +1232,7 @@
         activeSettingsRecord = cloneSettings(upsertResult.data);
         applyForm(upsertResult.data);
         showStatus(saveOptions.successMessage || "Scholarship settings saved successfully.", "alert-success");
+        await loadReservedSlotManager(context);
     }
 
     async function applyReceiveOverride(context, nextMode) {
@@ -812,6 +1263,9 @@
         const loadBtn = byId("superSettingsLoadBtn");
         const receiveToggleBtn = byId("superSettingsReceiveToggleBtn");
         const receiveResetBtn = byId("superSettingsReceiveResetBtn");
+        const reservedSearchInput = byId("superReservedSlotSearchInput");
+        const reservedSearchResults = byId("superReservedSlotSearchResults");
+        const reservedTableBody = byId("superReservedSlotTableBody");
 
         if (saveBtn) {
             saveBtn.addEventListener("click", function () {
@@ -853,6 +1307,36 @@
             });
         }
 
+        if (reservedSearchInput) {
+            reservedSearchInput.addEventListener("input", function () {
+                renderReservedSlotSearchResults();
+            });
+        }
+
+        if (reservedSearchResults) {
+            reservedSearchResults.addEventListener("click", function (event) {
+                const button = event.target && event.target.closest ? event.target.closest("[data-reserved-slot-add]") : null;
+                if (!button) {
+                    return;
+                }
+                addReservedSlotStudent(context, button.getAttribute("data-reserved-slot-add")).catch(function (error) {
+                    showReservedSlotStatus(error && error.message ? error.message : "Failed to add reserved-slot student.", "alert-danger");
+                });
+            });
+        }
+
+        if (reservedTableBody) {
+            reservedTableBody.addEventListener("click", function (event) {
+                const button = event.target && event.target.closest ? event.target.closest("[data-reserved-slot-remove]") : null;
+                if (!button) {
+                    return;
+                }
+                removeReservedSlotStudent(context, button.getAttribute("data-reserved-slot-remove")).catch(function (error) {
+                    showReservedSlotStatus(error && error.message ? error.message : "Failed to remove reserved-slot student.", "alert-danger");
+                });
+            });
+        }
+
         [
             "superSettingsCycleOpen",
             "superSettingsCycleOpenTime",
@@ -873,7 +1357,6 @@
             "superSettingsAllowSpecialEndorsement",
             "superSettingsAllowSecretaryApplicantEdits",
             "superSettingsAllowSecretarySpecialConsideration",
-            "superSettingsSpecialConsiderationOptions",
             "superSettingsRequireApplicantPhotoOnSubmit",
             "superSettingsAutoSetForInterview"
         ].forEach(function (id) {
@@ -887,10 +1370,21 @@
                 }
                 renderReceiveControl(previewSettingsFromForm());
                 renderSnapshot(previewSettingsFromForm());
+                if (id === "superSettingsAllowSecretarySpecialConsideration") {
+                    syncReservedSlotManagerState();
+                }
             });
             input.addEventListener("change", function () {
                 renderReceiveControl(previewSettingsFromForm());
                 renderSnapshot(previewSettingsFromForm());
+                if (id === "superSettingsAllowSecretarySpecialConsideration") {
+                    syncReservedSlotManagerState();
+                }
+                if (id === "superSettingsSchoolYear") {
+                    loadReservedSlotManager(context).catch(function (error) {
+                        showReservedSlotStatus(error && error.message ? error.message : "Failed to load reserved-slot student list.", "alert-danger");
+                    });
+                }
             });
         });
     }
@@ -908,6 +1402,11 @@
             showStatus(error && error.message ? error.message : "Failed to load scholarship settings.", "alert-danger");
             activeSettingsRecord = cloneSettings(readFallbackStorage() || DEFAULT_SETTINGS);
             applyForm(activeSettingsRecord);
+            try {
+                await loadReservedSlotManager(context);
+            } catch (reservedError) {
+                showReservedSlotStatus(reservedError && reservedError.message ? reservedError.message : "Failed to load reserved-slot student list.", "alert-danger");
+            }
         }
     }
 

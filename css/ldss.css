@@ -1544,8 +1544,8 @@ body {
 .ldss-secretary-applications-table th,
 .ldss-secretary-applications-table td {
     white-space: nowrap;
-    padding-top: 0.52rem;
-    padding-bottom: 0.52rem;
+    padding-top: 0.42rem;
+    padding-bottom: 0.42rem;
     vertical-align: middle;
 }
 
@@ -1624,10 +1624,27 @@ body {
 .ldss-secretary-applications-table .ldss-queue-applicant-name {
     font-weight: 400;
     color: #334155;
+    line-height: 1.18;
+}
+
+.ldss-secretary-applications-table .ldss-queue-applicant-body {
+    display: grid;
+    gap: 0.12rem;
+}
+
+.ldss-secretary-applications-table .ldss-queue-applicant-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.18rem 0.38rem;
+    min-width: 0;
 }
 
 .ldss-secretary-applications-table .ldss-queue-applicant-note {
-    font-size: 0.72rem;
+    display: inline;
+    margin-top: 0;
+    font-size: 0.7rem;
+    line-height: 1.2;
 }
 
 .ldss-secretary-applications-table .btn.btn-outline-dark.btn-sm {
@@ -2293,6 +2310,27 @@ body {
     padding: 0.38rem 0.45rem;
 }
 
+.ldss-review-toast-layer {
+    top: 4.85rem !important;
+    left: 16rem !important;
+    z-index: 1085;
+}
+
+.ldss-review-toast-layer .toast {
+    width: min(22rem, calc(100vw - 17rem));
+}
+
+@media (max-width: 991.98px) {
+    .ldss-review-toast-layer {
+        left: 0.75rem !important;
+        right: 0.75rem !important;
+    }
+
+    .ldss-review-toast-layer .toast {
+        width: min(100%, calc(100vw - 1.5rem));
+    }
+}
+
 @media (max-width: 1399.98px) {
     .ldss-secretary-photo-stack {
         width: min(100%, 11rem);
@@ -2348,6 +2386,7 @@ body {
     .ldss-secretary-detail-sheet .ldss-print-table td {
         padding: 0.3rem 0.35rem;
     }
+
 }
 
 .ldss-photo-1x1 {
