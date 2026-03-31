@@ -7,6 +7,8 @@
     const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const APPLICATION_STAFF_FLAGS_TABLE = "application_staff_flags";
+    const LEGACY_RESERVED_SLOT_TAG = "reserved_slot_exception";
+    const SPECIAL_TAG_DELIMITER = "::";
     const INTERNAL_REVIEW_UI_VALUE = "__internal_review__";
     const INTERNAL_REVIEW_TAG = "Internal Review";
     const DAET_MUNICIPALITY = "DAET";
@@ -42,6 +44,10 @@
         allow_secretary_applicant_edits: false,
         allow_secretary_special_consideration: false,
         special_consideration_options: []
+    };
+    const SPECIAL_CONSIDERATION_LEVEL_META = {
+        internal_review: { label: "Priority Review", chipClass: "ldss-chip-accent" },
+        for_approval: { label: "For Approval", chipClass: "ldss-chip-success" }
     };
 
     const APPLICATION_STATUS_META = {
@@ -1223,6 +1229,52 @@
             .replace(/\s+/g, " ");
     }
 
+    function normalizeSpecialConsiderationLevel(value) {
+        const normalized = normalizeTag(value).toLowerCase();
+        if (!normalized) {
+            return "";
+        }
+        if (normalized === LEGACY_RESERVED_SLOT_TAG) {
+            return "internal_review";
+        }
+        if (normalized === "internal review" || normalized === "priority review") {
+            return "internal_review";
+        }
+        if (normalized === "endorse" || normalized === "indorse" || normalized === "endorsed") {
+            return "internal_review";
+        }
+        if (normalized === "for approval") {
+            return "for_approval";
+        }
+        return Object.prototype.hasOwnProperty.call(SPECIAL_CONSIDERATION_LEVEL_META, normalized)
+            ? normalized
+            : "";
+    }
+
+    function decodeSpecialConsiderationTag(value) {
+        const raw = normalizeTag(value);
+        if (!raw) {
+            return { level: "", label: "" };
+        }
+        if (raw.toLowerCase() === LEGACY_RESERVED_SLOT_TAG) {
+            return { level: "internal_review", label: "" };
+        }
+
+        const delimiterIndex = raw.indexOf(SPECIAL_TAG_DELIMITER);
+        if (delimiterIndex >= 0) {
+            const level = normalizeSpecialConsiderationLevel(raw.slice(0, delimiterIndex));
+            const label = normalizeTag(raw.slice(delimiterIndex + SPECIAL_TAG_DELIMITER.length));
+            if (level) {
+                return { level: level, label: label };
+            }
+        }
+
+        return {
+            level: normalizeSpecialConsiderationLevel(raw),
+            label: ""
+        };
+    }
+
     function uniqueTags(values) {
         const output = [];
         const seen = new Set();
@@ -1328,9 +1380,13 @@
 
     function renderSpecialConsiderationControl() {
         const select = byId("verificationSpecialConsiderationTag");
-        const badge = byId("verificationSpecialConsiderationBadge");
+        const statusBadge = byId("verificationStatusBadge");
+        const specialWrap = byId("verificationSpecialConsiderationWrap");
+        const specialBadge = byId("verificationSpecialConsiderationBadge");
+        const specialLabel = byId("verificationSpecialConsiderationLabel");
         const help = byId("verificationSpecialConsiderationHelp");
         const selectedTag = currentSpecialConsiderationTag();
+        const selectedMeta = decodeSpecialConsiderationTag(selectedTag);
         const draftMode = isDraftReadOnlyMode();
         const statusSummary = secretaryStatusSummary();
 
@@ -1340,32 +1396,49 @@
             select.disabled = draftMode || isProcessing || !currentApplication || !specialConsiderationInputEnabled();
         }
 
-        if (badge) {
-            badge.className = "ldss-chip " + (statusSummary.chipClass || "ldss-chip-neutral");
-            badge.textContent = statusSummary.label || "-";
+        if (statusBadge) {
+            statusBadge.className = "ldss-chip " + (statusSummary.chipClass || "ldss-chip-neutral");
+            statusBadge.textContent = statusSummary.label || "-";
+        }
+
+        if (specialWrap && specialBadge && specialLabel) {
+            if (selectedMeta.level || selectedMeta.label) {
+                const levelMeta = SPECIAL_CONSIDERATION_LEVEL_META[selectedMeta.level] || SPECIAL_CONSIDERATION_LEVEL_META.internal_review;
+                specialWrap.classList.remove("d-none");
+                specialBadge.className = "ldss-chip " + (levelMeta.chipClass || "ldss-chip-accent");
+                specialBadge.textContent = levelMeta.label || "Special Consideration";
+                specialLabel.textContent = selectedMeta.label || "Office label not specified.";
+            } else {
+                specialWrap.classList.add("d-none");
+                specialBadge.className = "ldss-chip ldss-chip-accent";
+                specialBadge.textContent = "-";
+                specialLabel.textContent = "-";
+            }
         }
 
         if (!help) {
             return;
         }
         if (!applicationStaffFlagsAvailable) {
-            help.textContent = "Internal Review unavailable on this setup.";
+            help.textContent = "Special Consideration unavailable on this setup.";
             showSpecialConsiderationToast(
-                "Internal Review storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.",
+                "Special Consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.",
                 "warning",
-                "internal-review-storage-missing"
+                "special-consideration-storage-missing"
             );
             return;
         }
-        if (selectedTag) {
-            help.textContent = "Marked as Internal Review.";
+        if (selectedMeta.level) {
+            help.textContent = selectedMeta.label
+                ? ("Special Consideration: " + selectedMeta.label + ".")
+                : "Marked for Special Consideration.";
             return;
         }
         if (workflowControls.allow_secretary_special_consideration !== true) {
-            help.textContent = "Internal Review is disabled in settings.";
+            help.textContent = "Special Consideration is disabled in settings.";
             return;
         }
-        help.textContent = "Choose Regular Review or Internal Review.";
+        help.textContent = "No Special Consideration is assigned to this applicant.";
     }
 
     async function fetchApplicationStaffFlags(applicationId) {

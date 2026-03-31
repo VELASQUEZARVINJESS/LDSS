@@ -3,7 +3,138 @@
     * Copyright 2013-2022 Start Bootstrap
     * Licensed under SEE_LICENSE (https://github.com/StartBootstrap/sb-admin-pro/blob/master/LICENSE)
     */
-    window.addEventListener('DOMContentLoaded', event => {
+(function () {
+    if (typeof window.ldssShowToast === 'function') {
+        return;
+    }
+
+    const recentToastKeys = {};
+
+    function toastToneMeta(variant) {
+        const tone = (variant || 'info').toString().trim().toLowerCase();
+
+        if (tone === 'success') {
+            return { badgeClass: 'bg-success', badgeText: 'Saved' };
+        }
+        if (tone === 'warning') {
+            return { badgeClass: 'bg-warning text-dark', badgeText: 'Notice' };
+        }
+        if (tone === 'danger') {
+            return { badgeClass: 'bg-danger', badgeText: 'Error' };
+        }
+        return { badgeClass: 'bg-primary', badgeText: 'Info' };
+    }
+
+    function shouldShowToast(key, dedupeMs) {
+        const normalizedKey = (key || '').toString().trim();
+        const windowMs = Number.isFinite(dedupeMs) ? dedupeMs : 1200;
+        const now = Date.now();
+
+        if (!normalizedKey) {
+            return true;
+        }
+        if (recentToastKeys[normalizedKey] && (now - recentToastKeys[normalizedKey]) < windowMs) {
+            return false;
+        }
+        recentToastKeys[normalizedKey] = now;
+        return true;
+    }
+
+    function ensureToastContainer() {
+        if (!document.body) {
+            return null;
+        }
+
+        let container = document.getElementById('ldssToastViewport');
+        if (container) {
+            return container;
+        }
+
+        container = document.createElement('div');
+        container.id = 'ldssToastViewport';
+        container.className = 'toast-container position-fixed top-0 end-0 p-3';
+        container.style.zIndex = '1085';
+        document.body.appendChild(container);
+        return container;
+    }
+
+    window.ldssShowToast = function (options) {
+        const settings = (options && typeof options === 'object')
+            ? options
+            : { message: options };
+        const message = settings.message ? settings.message.toString().trim() : '';
+        const title = settings.title ? settings.title.toString().trim() : 'Notice';
+        const variant = settings.variant ? settings.variant.toString().trim().toLowerCase() : 'info';
+        const delay = Number.isFinite(settings.delay) ? settings.delay : (variant === 'danger' ? 4200 : 3200);
+        const autohide = settings.autohide !== false;
+        const key = settings.key || '';
+
+        if (!message || !shouldShowToast(key || (variant + '|' + title + '|' + message), settings.dedupeMs)) {
+            return null;
+        }
+
+        const container = ensureToastContainer();
+        if (!container) {
+            return null;
+        }
+
+        const tone = toastToneMeta(variant);
+        const toastEl = document.createElement('div');
+        toastEl.className = 'toast border-0 shadow-sm bg-white';
+        toastEl.setAttribute('role', 'status');
+        toastEl.setAttribute('aria-live', 'polite');
+        toastEl.setAttribute('aria-atomic', 'true');
+
+        const header = document.createElement('div');
+        header.className = 'toast-header bg-white';
+
+        const badge = document.createElement('span');
+        badge.className = 'badge rounded-pill ' + tone.badgeClass + ' me-2';
+        badge.textContent = tone.badgeText;
+
+        const heading = document.createElement('strong');
+        heading.className = 'me-auto';
+        heading.textContent = title;
+
+        const closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.className = 'btn-close ms-2 mb-1';
+        closeButton.setAttribute('data-bs-dismiss', 'toast');
+        closeButton.setAttribute('aria-label', 'Close');
+
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = message;
+
+        header.appendChild(badge);
+        header.appendChild(heading);
+        header.appendChild(closeButton);
+        toastEl.appendChild(header);
+        toastEl.appendChild(body);
+        container.appendChild(toastEl);
+
+        toastEl.addEventListener('hidden.bs.toast', function () {
+            toastEl.remove();
+        });
+
+        if (window.bootstrap && typeof window.bootstrap.Toast === 'function') {
+            const toast = new window.bootstrap.Toast(toastEl, {
+                autohide: autohide,
+                delay: delay
+            });
+            toast.show();
+            return toast;
+        }
+
+        toastEl.classList.add('show');
+        window.setTimeout(function () {
+            toastEl.remove();
+        }, delay);
+        return toastEl;
+    };
+})();
+
+window.addEventListener('DOMContentLoaded', event => {
     // Small staged class to trigger restrained page-load motion
     requestAnimationFrame(() => {
         document.body.classList.add('ldss-ready');

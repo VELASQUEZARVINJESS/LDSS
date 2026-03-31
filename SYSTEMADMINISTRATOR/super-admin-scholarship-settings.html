@@ -431,9 +431,9 @@
                                 <div class="nav-link-icon"><i data-feather="sliders"></i></div>
                                 Scholarship Settings
                             </a>
-                            <a class="nav-link" href="super-admin-scholarship-settings.html#superReservedSlotSection">
+                            <a class="nav-link" href="super-admin-special-consideration.html">
                                 <div class="nav-link-icon"><i data-feather="bookmark"></i></div>
-                                Reserved Slots
+                                Special Consideration
                             </a>
                             <a class="nav-link" href="super-admin-reports.html">
                                 <div class="nav-link-icon"><i data-feather="bar-chart-2"></i></div>
@@ -724,12 +724,12 @@
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
-                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretarySpecialConsideration">
-                                                            <span class="ldss-settings-switch-title">Enable reserved-slot exception list</span>
-                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Lets System Administrator keep selected applicants eligible for final review even when the exam result would normally stop them.</span>
-                                                        </label>
-                                                        <div class="form-check form-switch ldss-settings-switch-control">
-                                                            <input class="form-check-input" id="superSettingsAllowSecretarySpecialConsideration" type="checkbox" role="switch" />
+                                                        <div class="ldss-settings-switch-copy small">
+                                                            <span class="ldss-settings-switch-title">Special Consideration Workspace</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Manage the special consideration flow and student allow-list from its own System Administrator page so staff can open it directly from the sidebar.</span>
+                                                        </div>
+                                                        <div class="ldss-settings-switch-control">
+                                                            <a class="btn btn-outline-dark btn-sm" href="super-admin-special-consideration.html">Open Page</a>
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
@@ -748,55 +748,6 @@
                                                         </label>
                                                         <div class="form-check form-switch ldss-settings-switch-control">
                                                             <input class="form-check-input" id="superSettingsAutoSetForInterview" type="checkbox" role="switch" />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div class="mt-4" id="superReservedSlotSection">
-                                                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                                                        <div>
-                                                            <label class="small mb-1 d-block" for="superReservedSlotSearchInput">Reserved-Slot Student Allow-List</label>
-                                                            <div class="small text-muted">Search the active school year, then add the applicants who should stay eligible for final review even if they fail the exam.</div>
-                                                        </div>
-                                                        <span class="ldss-chip ldss-chip-neutral" id="superReservedSlotCountChip">0 allowed</span>
-                                                    </div>
-                                                    <div class="alert d-none mb-3" id="superReservedSlotStatus" role="alert"></div>
-                                                    <div class="row g-3">
-                                                        <div class="col-12">
-                                                            <input class="form-control" id="superReservedSlotSearchInput" type="search" placeholder="Search applicant name, application no., or scholarship type" autocomplete="off" />
-                                                            <div class="small text-muted mt-2" id="superReservedSlotMeta">Load the active school year first, then search and add the students who should be allowed into the reserved-slot path.</div>
-                                                        </div>
-                                                        <div class="col-12">
-                                                            <div class="ldss-settings-reserved-list">
-                                                                <div class="small text-uppercase text-muted fw-700 px-3 pt-3 pb-2">Search Results</div>
-                                                                <div class="ldss-settings-reserved-search" id="superReservedSlotSearchResults">
-                                                                    <div class="px-3 pb-3 small text-muted">Type a student name or application number to search.</div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                        <div class="col-12">
-                                                            <div class="ldss-settings-reserved-list">
-                                                                <div class="ldss-settings-reserved-meta px-3 pt-3 pb-2">
-                                                                    <div class="small text-uppercase text-muted fw-700">Allowed Students</div>
-                                                                    <div class="small text-muted">This list is visible only in the System Administrator workspace.</div>
-                                                                </div>
-                                                                <div class="table-responsive">
-                                                                    <table class="table table-sm mb-0 ldss-settings-reserved-table">
-                                                                        <thead class="bg-light">
-                                                                            <tr>
-                                                                                <th>Applicant</th>
-                                                                                <th>Application</th>
-                                                                                <th>Status</th>
-                                                                                <th class="text-end">Action</th>
-                                                                            </tr>
-                                                                        </thead>
-                                                                        <tbody id="superReservedSlotTableBody">
-                                                                            <tr>
-                                                                                <td colspan="4" class="text-center py-4 text-muted">Load the active school year to manage reserved-slot students.</td>
-                                                                            </tr>
-                                                                        </tbody>
-                                                                    </table>
-                                                                </div>
-                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -849,7 +800,7 @@
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/supabase-superadmin-audit-helper.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260331-1"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260331-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
