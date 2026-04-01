@@ -75,7 +75,8 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Checking now keeps the simpler summary-first workspace, while secretary-side applicant corrections keep the applicant email read-only so profile edits do not desync the user's Supabase Auth login.
 - Secretary Checking applicant detail editing now keeps `Place of Birth` populated from the same fallback source used by the summary sheet, so opening the correction modal no longer shows that field blank when the value is stored in shared application data.
 - Secretary Checking no longer exposes the old `Internal Review` selector to secretary users; the hidden failed-exam exception path is now managed only from the System Administrator side.
-- Secretary Checking now shows a read-only `Special Consideration` block in the applicant summary whenever System Administrator assigned one, including the saved level and office label.
+- Secretary Checking now places that discreet `Special Consideration` chip inline beside `Applicant Summary`, without the extra `Category` label or a separate header row.
+- Secretary Checking now styles `Priority Review` with the default soft chip background and green text, while `For Approval` uses the yellow accent style for quicker office scanning.
 - System Administrator Special Consideration now has its own dedicated page, letting the office search applicants by the active school year and mark who can stay eligible for final review even if the exam result would normally block them.
 - System Administrator Special Consideration now uses a compact header switch plus a green confirmation modal when the flow is turned on.
 - System Administrator Special Consideration now uses the same compact modal pattern for both enable and disable flow changes, instead of leaving a long inline status banner after turning the flow off.

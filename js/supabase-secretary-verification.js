@@ -46,8 +46,8 @@
         special_consideration_options: []
     };
     const SPECIAL_CONSIDERATION_LEVEL_META = {
-        internal_review: { label: "Priority Review", chipClass: "ldss-chip-accent" },
-        for_approval: { label: "For Approval", chipClass: "ldss-chip-success" }
+        internal_review: { label: "Priority Review", chipClass: "ldss-chip-special-priority" },
+        for_approval: { label: "For Approval", chipClass: "ldss-chip-special-approval" }
     };
 
     const APPLICATION_STATUS_META = {
@@ -1380,15 +1380,12 @@
 
     function renderSpecialConsiderationControl() {
         const select = byId("verificationSpecialConsiderationTag");
-        const statusBadge = byId("verificationStatusBadge");
         const specialWrap = byId("verificationSpecialConsiderationWrap");
         const specialBadge = byId("verificationSpecialConsiderationBadge");
-        const specialLabel = byId("verificationSpecialConsiderationLabel");
         const help = byId("verificationSpecialConsiderationHelp");
         const selectedTag = currentSpecialConsiderationTag();
         const selectedMeta = decodeSpecialConsiderationTag(selectedTag);
         const draftMode = isDraftReadOnlyMode();
-        const statusSummary = secretaryStatusSummary();
 
         if (select) {
             select.innerHTML = '<option value="">Regular Review</option><option value="' + INTERNAL_REVIEW_UI_VALUE + '">Internal Review</option>';
@@ -1396,23 +1393,15 @@
             select.disabled = draftMode || isProcessing || !currentApplication || !specialConsiderationInputEnabled();
         }
 
-        if (statusBadge) {
-            statusBadge.className = "ldss-chip " + (statusSummary.chipClass || "ldss-chip-neutral");
-            statusBadge.textContent = statusSummary.label || "-";
-        }
-
-        if (specialWrap && specialBadge && specialLabel) {
+        if (specialWrap && specialBadge) {
+            specialWrap.classList.remove("d-none");
             if (selectedMeta.level || selectedMeta.label) {
                 const levelMeta = SPECIAL_CONSIDERATION_LEVEL_META[selectedMeta.level] || SPECIAL_CONSIDERATION_LEVEL_META.internal_review;
-                specialWrap.classList.remove("d-none");
                 specialBadge.className = "ldss-chip " + (levelMeta.chipClass || "ldss-chip-accent");
                 specialBadge.textContent = levelMeta.label || "Special Consideration";
-                specialLabel.textContent = selectedMeta.label || "Office label not specified.";
             } else {
-                specialWrap.classList.add("d-none");
-                specialBadge.className = "ldss-chip ldss-chip-accent";
-                specialBadge.textContent = "-";
-                specialLabel.textContent = "-";
+                specialBadge.className = "ldss-chip ldss-chip-neutral";
+                specialBadge.textContent = "Regular";
             }
         }
 
@@ -2219,21 +2208,12 @@
 
     function syncApplicantEditAccess() {
         const editBtn = byId("verificationEditApplicantBtn");
-        const meta = byId("verificationEditApplicantMeta");
         const draftMode = isDraftReadOnlyMode();
         const enabled = workflowControls.allow_secretary_applicant_edits === true && !draftMode;
 
         if (editBtn) {
             editBtn.classList.toggle("d-none", !enabled);
             editBtn.disabled = !enabled;
-        }
-        if (meta) {
-            meta.classList.toggle("d-none", !enabled && !draftMode);
-            meta.textContent = draftMode
-                ? "Draft preview is read-only. Applicant detail editing is unavailable until the applicant submits the form."
-                : enabled
-                    ? "Applicant detail editing is enabled by System Administrator."
-                    : "Applicant detail editing is off in System Administrator settings.";
         }
     }
 
