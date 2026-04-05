@@ -38,6 +38,10 @@
         return fallback || "-";
     }
 
+    function upperText(value) {
+        return (value || "").toString().trim().toUpperCase();
+    }
+
     function showProfileStatus(message, type) {
         const target = byId("profileStatus");
         if (!target) {
@@ -323,7 +327,7 @@
     function composeFullName(profile) {
         const parts = [profile.first_name, profile.middle_name, profile.last_name]
             .map(function (value) {
-                return (value || "").toString().trim();
+                return upperText(value);
             })
             .filter(function (value) {
                 return value.length > 0;
@@ -335,7 +339,7 @@
         const parts = (fullName || "")
             .split(/\s+/)
             .map(function (value) {
-                return value.trim();
+                return upperText(value);
             })
             .filter(function (value) {
                 return value.length > 0;

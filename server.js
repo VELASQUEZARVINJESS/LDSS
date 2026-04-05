@@ -23,6 +23,7 @@ const MAIL_FROM = (process.env.LDSS_MAIL_FROM || process.env.MAIL_FROM || "").to
 const MAIL_REPLY_TO = (process.env.LDSS_MAIL_REPLY_TO || process.env.MAIL_REPLY_TO || "").toString().trim();
 const REMINDER_LOGS_TABLE = "reminder_email_logs";
 const REMINDER_CAMPAIGN_JOBS_TABLE = "reminder_campaign_jobs";
+const EXAM_SCHEDULE_EMAIL_JOBS_TABLE = "exam_schedule_email_jobs";
 const REMINDER_COOLDOWN_DAYS = {
     draft_only: 5,
     no_application: 7,
@@ -32,9 +33,13 @@ const REMINDER_CAMPAIGN_MAX_RECIPIENTS = 5000;
 const REMINDER_CAMPAIGN_DEFAULT_BATCH_SIZE = 100;
 const REMINDER_CAMPAIGN_DEFAULT_BATCH_DELAY_MINUTES = 10;
 const REMINDER_CAMPAIGN_PROCESSOR_INTERVAL_MS = 60 * 1000;
+const EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_SIZE = 100;
+const EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_DELAY_MINUTES = 5;
+const EXAM_SCHEDULE_EMAIL_PROCESSOR_INTERVAL_MS = 60 * 1000;
 const DEFAULT_ONLINE_APPLICATION_SUBMISSION_DEADLINE_LABEL = "March 23, 2026";
 const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
 const WALK_IN_TEMP_PASSWORD_LENGTH = 16;
+const SUPABASE_FETCH_LIMIT = 1000;
 const SUPPORT_FACEBOOK_PAGE_URL = "https://www.facebook.com/profile.php?id=61583672829501";
 const CORRECTION_TARGET_LABELS = {
     full_application: "Entire Application Form",
@@ -64,6 +69,7 @@ const ROOT_STATIC_FILES = [
     "login.html",
     "register.html",
     "verify-account.html",
+    "exam-room-lookup.html",
     "forgot-password.html",
     "reset-password.html",
     "logout.html",
@@ -83,6 +89,8 @@ const STATIC_DIRECTORIES = [
 ];
 let reminderCampaignProcessorRunning = false;
 let reminderCampaignProcessorInterval = null;
+let examScheduleEmailProcessorRunning = false;
+let examScheduleEmailProcessorInterval = null;
 const MIME_BY_KIND = {
     jpg: "image/jpeg",
     png: "image/png",
@@ -247,6 +255,11 @@ function nullIfBlank(value) {
     return text || null;
 }
 
+function upperTextOrNull(value) {
+    const text = nullIfBlank(value);
+    return text ? text.toUpperCase() : null;
+}
+
 function isUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test((value || "").toString().trim());
 }
@@ -319,6 +332,25 @@ function explainUserCreationError(message) {
     return text || "Secretary account creation failed.";
 }
 
+function explainAccountClaimError(message) {
+    const text = (message || "").toString();
+    const normalized = text.toLowerCase();
+
+    if (normalized.includes("user already registered")) {
+        return "Email address is already registered.";
+    }
+    if (
+        normalized.includes("profiles_email_key") ||
+        (normalized.includes("duplicate key value") && normalized.includes("email"))
+    ) {
+        return "Email address is already used by another account.";
+    }
+    if (normalized.includes("password")) {
+        return text || "Password did not meet the required security rules.";
+    }
+    return text || "Claim account update failed.";
+}
+
 function generateTemporaryApplicantPassword() {
     const uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ";
     const lowercase = "abcdefghijkmnopqrstuvwxyz";
@@ -364,6 +396,15 @@ function buildFullName(firstName, middleName, lastName) {
         .map(function (value) { return (value || "").toString().trim(); })
         .filter(Boolean)
         .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function normalizePublicLookupName(value) {
+    return (value || "")
+        .toString()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, " ")
         .replace(/\s+/g, " ")
         .trim();
 }
@@ -579,6 +620,333 @@ async function sendComplianceEmailMail(details) {
     await transporter.sendMail(mailOptions);
 }
 
+function formatExamScheduleDateTime(value) {
+    if (!value) {
+        return "";
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return "";
+    }
+    return parsed.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric"
+    });
+}
+
+function buildExamScheduleDetailUrl(baseUrl, applicationId) {
+    if (!baseUrl || !applicationId) {
+        return "";
+    }
+    return baseUrl + "/APPLICANT/application-detail.html?id=" + encodeURIComponent(applicationId);
+}
+
+function buildExamRoomLookupUrl(baseUrl, applicationNo) {
+    if (!baseUrl) {
+        return "";
+    }
+    return baseUrl + "/exam-room-lookup.html";
+}
+
+function buildExamScheduleEmailHtml(details) {
+    const detailButton = details.detailUrl
+        ? '<a href="' + escapeHtml(details.detailUrl) + '" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;">Open Application Tracking</a>'
+        : "";
+    const lookupButton = details.lookupUrl
+        ? '<a href="' + escapeHtml(details.lookupUrl) + '" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#ffffff;color:#111827;text-decoration:none;font-weight:700;font-size:14px;border:1px solid #cbd5e1;">Open Public Room Checker</a>'
+        : "";
+    const noteBlock = details.customMessage
+        ? (
+            '<div style="margin-top:20px;padding:16px 18px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;">' +
+            '<div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Office Reminder</div>' +
+            '<div style="font-size:14px;line-height:1.7;color:#1f2937;white-space:pre-wrap;">' + escapeHtml(details.customMessage) + "</div>" +
+            "</div>"
+        )
+        : "";
+    const supportBlock = SUPPORT_FACEBOOK_PAGE_URL
+        ? (
+            '<div style="margin-top:18px;padding:14px 16px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;">' +
+            '<div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px;">Need Help?</div>' +
+            '<div style="font-size:14px;line-height:1.65;">If you cannot see your room assignment, please contact the LDSP Support Facebook Page: <a href="' + escapeHtml(SUPPORT_FACEBOOK_PAGE_URL) + '" style="color:#c2410c;font-weight:700;word-break:break-all;">' + escapeHtml(SUPPORT_FACEBOOK_PAGE_URL) + "</a>.</div>" +
+            "</div>"
+        )
+        : "";
+
+    return (
+        '<div style="margin:0;padding:24px 12px;background:#eef2f7;font-family:Arial,sans-serif;color:#111827;">' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">' +
+        '<tr><td align="center">' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;border-collapse:collapse;background:#ffffff;border:1px solid #dbe3ee;border-radius:22px;overflow:hidden;box-shadow:0 12px 30px rgba(15,23,42,0.08);">' +
+        '<tr>' +
+        '<td style="padding:0;">' +
+        '<div style="height:6px;background:linear-gradient(90deg,#f59e0b 0%,#111827 100%);font-size:0;line-height:0;">&nbsp;</div>' +
+        '<div style="padding:26px 28px 18px;background:linear-gradient(180deg,#f8fafc 0%,#ffffff 100%);border-bottom:1px solid #e5e7eb;">' +
+        '<div style="font-size:12px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;margin-bottom:10px;">LDSP LGU Daet Scholarship System</div>' +
+        '<div style="font-size:28px;line-height:1.2;font-weight:800;color:#0f172a;margin-bottom:8px;">Exam Schedule Notice</div>' +
+        '<div style="font-size:15px;line-height:1.7;color:#475569;">Your official examination schedule has been posted. Please review your assigned room details below and keep this notice for exam day reference.</div>' +
+        '</div>' +
+        '</td>' +
+        '</tr>' +
+        '<tr>' +
+        '<td style="padding:28px;">' +
+        '<div style="font-size:16px;line-height:1.7;color:#111827;margin-bottom:18px;">Good day <strong>' + escapeHtml(details.applicantName) + '</strong>,</div>' +
+        '<div style="padding:16px 18px;border-radius:16px;background:#f8fafc;border:1px solid #e2e8f0;color:#334155;font-size:14px;line-height:1.7;">Your scholarship examination is now <strong style="color:#0f172a;">scheduled</strong>. Please arrive prepared and review the official assignment details below.</div>' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:20px;border-collapse:separate;border-spacing:0;">' +
+        '<tr>' +
+        '<td width="50%" valign="top" style="padding:0 8px 12px 0;">' +
+        '<div style="padding:18px;border:1px solid #dbe3ee;border-radius:16px;background:#ffffff;">' +
+        '<div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px;">Assigned Room</div>' +
+        '<div style="font-size:28px;line-height:1.15;font-weight:800;color:#0f172a;">' + escapeHtml(details.roomLabel || "-") + '</div>' +
+        '</div>' +
+        '</td>' +
+        '<td width="50%" valign="top" style="padding:0 0 12px 8px;">' +
+        '<div style="padding:18px;border:1px solid #dbe3ee;border-radius:16px;background:#ffffff;">' +
+        '<div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px;">Seat Number</div>' +
+        '<div style="font-size:28px;line-height:1.15;font-weight:800;color:#0f172a;">' + escapeHtml(details.seatNo || "-") + '</div>' +
+        '</div>' +
+        '</td>' +
+        '</tr>' +
+        '</table>' +
+        '<div style="margin-top:8px;border:1px solid #dbe3ee;border-radius:18px;overflow:hidden;background:#ffffff;">' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">' +
+        '<tr><td colspan="2" style="padding:16px 18px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;">Official Schedule Details</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;width:34%;">Application No.</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:700;color:#111827;">' + escapeHtml(details.applicationNo) + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Batch</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(details.batchLabel) + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Exam Date</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(details.scheduleLabel || "-") + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Venue</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(details.venue || "-") + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Exam Control No.</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(details.examControlNo || "-") + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;font-size:13px;font-weight:700;color:#64748b;">Please Bring</td><td style="padding:14px 18px;font-size:14px;color:#111827;">Valid school ID or any valid ID, plus one black ballpen.</td></tr>' +
+        '</table>' +
+        '</div>' +
+        noteBlock +
+        '<div style="margin-top:22px;">' +
+        (detailButton ? '<div style="display:inline-block;margin:0 10px 10px 0;">' + detailButton + '</div>' : "") +
+        (lookupButton ? '<div style="display:inline-block;margin:0 10px 10px 0;">' + lookupButton + '</div>' : "") +
+        '</div>' +
+        '<div style="margin-top:8px;font-size:13px;line-height:1.7;color:#64748b;">Use the Public Room Checker if you only need to confirm your assigned room and seat. You will be asked to enter your full name together with your LDSP application number.</div>' +
+        supportBlock +
+        '<div style="margin-top:22px;padding-top:18px;border-top:1px solid #e5e7eb;font-size:13px;line-height:1.7;color:#475569;">Please keep this email for your reference and follow the scholarship office instructions on exam day.</div>' +
+        '<div style="margin-top:12px;font-size:14px;font-weight:700;color:#0f172a;">LDSP LGU Daet Scholarship System</div>' +
+        '</td>' +
+        '</tr>' +
+        '</table>' +
+        '</td></tr>' +
+        '</table>' +
+        '</div>'
+    );
+}
+
+function buildExamScheduleEmailText(details) {
+    const lines = [
+        "Good day " + details.applicantName + ",",
+        "",
+        "Your scholarship examination is now scheduled. Please review the details below and be present on time.",
+        "Application No.: " + details.applicationNo,
+        "Batch: " + details.batchLabel,
+        "Exam Schedule: " + (details.scheduleLabel || "-"),
+        "Venue: " + (details.venue || "-"),
+        "Room: " + (details.roomLabel || "-"),
+        "Seat No.: " + (details.seatNo || "-"),
+        "Exam Control No.: " + (details.examControlNo || "-")
+    ];
+
+    if (details.customMessage) {
+        lines.push("", "Office Note:", details.customMessage);
+    }
+
+    if (details.detailUrl) {
+        lines.push("Tracking link: " + details.detailUrl);
+    }
+    if (details.lookupUrl) {
+        lines.push("Public room checker: " + details.lookupUrl);
+        lines.push("Use your full name together with your LDSP application number to verify the posted room assignment.");
+    }
+    if (SUPPORT_FACEBOOK_PAGE_URL) {
+        lines.push("If you cannot see your room assignment, please contact the LDSP Support Facebook Page: " + SUPPORT_FACEBOOK_PAGE_URL);
+    }
+
+    lines.push("", "LDSP LGU Daet Scholarship System");
+    return lines.filter(Boolean).join("\n");
+}
+
+async function sendExamScheduleEmailMail(details) {
+    const transporter = getMailTransporter();
+    const mailOptions = {
+        from: MAIL_FROM,
+        to: details.email,
+        subject: "LDSP Exam Schedule Notice - " + details.applicationNo,
+        text: buildExamScheduleEmailText(details),
+        html: buildExamScheduleEmailHtml(details)
+    };
+
+    if (MAIL_REPLY_TO) {
+        mailOptions.replyTo = MAIL_REPLY_TO;
+    }
+
+    await transporter.sendMail(mailOptions);
+}
+
+function normalizeEmailAddress(value) {
+    return (value || "").toString().trim().toLowerCase();
+}
+
+function uniqueNonBlankStrings(values) {
+    return Array.from(new Set((values || []).map(function (value) {
+        return (value || "").toString().trim();
+    }).filter(Boolean)));
+}
+
+async function loadExamScheduleRecipientsForBatch(request, batchId, targetApplicationIds) {
+    const wantedApplicationIds = uniqueNonBlankStrings(targetApplicationIds);
+    const batchResult = await request.auth.client
+        .from("exam_batches")
+        .select("id, batch_label, exam_datetime, venue, notes")
+        .eq("id", batchId)
+        .maybeSingle();
+
+    if (batchResult.error || !batchResult.data) {
+        throw new Error("Selected exam batch was not found.");
+    }
+
+    let scheduledRecords = [];
+    for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
+        let recordsQuery = request.auth.client
+            .from("exam_records")
+            .select("id, application_id, batch_id, exam_control_no, scheduled_at, status, room_label, room_seat_no")
+            .eq("batch_id", batchId)
+            .eq("status", "scheduled")
+            .order("updated_at", { ascending: false })
+            .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+        if (wantedApplicationIds.length === 1) {
+            recordsQuery = recordsQuery.eq("application_id", wantedApplicationIds[0]);
+        } else if (wantedApplicationIds.length > 1) {
+            recordsQuery = recordsQuery.in("application_id", wantedApplicationIds);
+        }
+
+        let recordsResult = await recordsQuery;
+
+        if (recordsResult.error && /room_label|room_seat_no/i.test(recordsResult.error.message || "")) {
+            let fallbackQuery = request.auth.client
+                .from("exam_records")
+                .select("id, application_id, batch_id, exam_control_no, scheduled_at, status")
+                .eq("batch_id", batchId)
+                .eq("status", "scheduled")
+                .order("updated_at", { ascending: false })
+                .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (wantedApplicationIds.length === 1) {
+                fallbackQuery = fallbackQuery.eq("application_id", wantedApplicationIds[0]);
+            } else if (wantedApplicationIds.length > 1) {
+                fallbackQuery = fallbackQuery.in("application_id", wantedApplicationIds);
+            }
+
+            recordsResult = await fallbackQuery;
+
+            if (!recordsResult.error) {
+                recordsResult.data = (recordsResult.data || []).map(function (row) {
+                    return Object.assign({}, row, {
+                        room_label: "",
+                        room_seat_no: null
+                    });
+                });
+            }
+        }
+
+        if (recordsResult.error) {
+            throw new Error(recordsResult.error.message || "Failed to load scheduled exam records.");
+        }
+
+        const recordBatch = (recordsResult.data || []).filter(function (row) {
+            return row && row.application_id;
+        });
+        scheduledRecords.push.apply(scheduledRecords, recordBatch);
+        if (recordBatch.length < SUPABASE_FETCH_LIMIT || wantedApplicationIds.length > 0) {
+            break;
+        }
+    }
+
+    if (!scheduledRecords.length) {
+        return {
+            batch: batchResult.data,
+            recipients: []
+        };
+    }
+
+    const applicationIds = Array.from(new Set(scheduledRecords.map(function (row) {
+        return row.application_id;
+    }).filter(Boolean)));
+
+    const applicationsResult = await request.auth.client
+        .from("applications")
+        .select("id, application_no, applicant_id, status")
+        .in("id", applicationIds);
+
+    if (applicationsResult.error) {
+        throw new Error(applicationsResult.error.message || "Failed to load scheduled applications.");
+    }
+
+    const applicationRows = applicationsResult.data || [];
+    const applicationMap = {};
+    const applicantIds = [];
+    applicationRows.forEach(function (row) {
+        applicationMap[row.id] = row;
+        if (row.applicant_id) {
+            applicantIds.push(row.applicant_id);
+        }
+    });
+
+    const uniqueApplicantIds = Array.from(new Set(applicantIds.filter(Boolean)));
+    const profilesResult = await request.auth.client
+        .from("profiles")
+        .select("id, first_name, middle_name, last_name, email")
+        .in("id", uniqueApplicantIds);
+
+    if (profilesResult.error) {
+        throw new Error(profilesResult.error.message || "Failed to load applicant profiles.");
+    }
+
+    const profileMap = {};
+    (profilesResult.data || []).forEach(function (row) {
+        profileMap[row.id] = row;
+    });
+
+    const baseUrl = resolveBaseUrl(request);
+    const recipients = scheduledRecords.map(function (record) {
+        const application = applicationMap[record.application_id] || null;
+        const profile = application && application.applicant_id ? (profileMap[application.applicant_id] || null) : null;
+        const applicantName = buildFullName(
+            profile && profile.first_name ? profile.first_name : "",
+            profile && profile.middle_name ? profile.middle_name : "",
+            profile && profile.last_name ? profile.last_name : ""
+        ) || ((profile && profile.email) || "Applicant");
+        const scheduleLabel = formatExamScheduleDateTime(record.scheduled_at || batchResult.data.exam_datetime || "");
+        return {
+            applicationId: record.application_id,
+            applicantId: application && application.applicant_id ? application.applicant_id : "",
+            applicationNo: application && application.application_no ? application.application_no : "LDSP Application",
+            applicantName: applicantName,
+            email: normalizeEmailAddress((profile && profile.email) || ""),
+            batchLabel: batchResult.data.batch_label || "Exam Batch",
+            scheduleLabel: scheduleLabel,
+            venue: batchResult.data.venue || "",
+            roomLabel: record.room_label || "",
+            seatNo: record.room_seat_no == null ? "" : String(record.room_seat_no),
+            examControlNo: record.exam_control_no || "",
+            detailUrl: buildExamScheduleDetailUrl(baseUrl, record.application_id),
+            lookupUrl: buildExamRoomLookupUrl(baseUrl, application && application.application_no ? application.application_no : "")
+        };
+    }).filter(function (item) {
+        return item.applicationId && item.applicantId;
+    });
+
+    return {
+        batch: batchResult.data,
+        recipients: recipients
+    };
+}
+
 function reminderSubjectForState(state) {
     if (state === "draft_only") {
         return "Complete Your LDSP Application";
@@ -684,6 +1052,78 @@ async function writeAuditLogEntry(client, entry) {
             console.error("Audit log insert failed:", error && error.message ? error.message : error);
         }
     }
+}
+
+function emptyWalkInOfficeStatus() {
+    return {
+        is_walk_in_account: false,
+        is_claimed: false,
+        has_office_temp_access: false,
+        walk_in_created_at: null,
+        claimed_at: null,
+        audit_available: true
+    };
+}
+
+async function loadWalkInOfficeStatus(adminClient, userId) {
+    const status = emptyWalkInOfficeStatus();
+    if (!adminClient || !userId) {
+        return status;
+    }
+
+    try {
+        const auditResult = await adminClient
+            .from("audit_logs")
+            .select("action, created_at")
+            .eq("target_user_id", userId)
+            .in("action", ["create_walk_in_application", "claim_applicant_account"])
+            .order("created_at", { ascending: false });
+
+        if (auditResult.error) {
+            if (isMissingRelationMessage(auditResult.error.message)) {
+                status.audit_available = false;
+            } else {
+                throw new Error(auditResult.error.message || "Failed to load walk-in audit history.");
+            }
+        } else {
+            (auditResult.data || []).forEach(function (row) {
+                const action = (row && row.action ? row.action : "").toString().trim().toLowerCase();
+                if (action === "create_walk_in_application" && !status.walk_in_created_at) {
+                    status.is_walk_in_account = true;
+                    status.walk_in_created_at = row.created_at || null;
+                }
+                if (action === "claim_applicant_account" && !status.claimed_at) {
+                    status.is_claimed = true;
+                    status.claimed_at = row.created_at || null;
+                }
+            });
+        }
+    } catch (error) {
+        throw new Error(error && error.message ? error.message : "Failed to load walk-in audit history.");
+    }
+
+    if (!status.is_walk_in_account) {
+        const applicationResult = await adminClient
+            .from("applications")
+            .select("id, created_at, secretary_remarks")
+            .eq("applicant_id", userId)
+            .ilike("secretary_remarks", "Walk-in intake encoded by office%")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (applicationResult.error) {
+            throw new Error(applicationResult.error.message || "Failed to load walk-in application history.");
+        }
+
+        if (applicationResult.data) {
+            status.is_walk_in_account = true;
+            status.walk_in_created_at = applicationResult.data.created_at || null;
+        }
+    }
+
+    status.has_office_temp_access = status.is_walk_in_account && !status.is_claimed;
+    return status;
 }
 
 async function listAllAuthUsers(adminClient) {
@@ -1440,6 +1880,267 @@ function startReminderCampaignProcessor() {
     triggerReminderCampaignProcessor(1500);
 }
 
+function normalizeExamScheduleEmailBatchSize(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_SIZE;
+    }
+    return Math.min(500, Math.max(1, Math.floor(parsed)));
+}
+
+function normalizeExamScheduleEmailDelayMinutes(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_DELAY_MINUTES;
+    }
+    return Math.min(1440, Math.max(1, Math.floor(parsed)));
+}
+
+function normalizeExamScheduleRecipientPayloads(values) {
+    if (!Array.isArray(values)) {
+        return [];
+    }
+
+    return values.map(function (item) {
+        if (!item || typeof item !== "object") {
+            return null;
+        }
+        return {
+            email: normalizeEmailAddress(item.email),
+            applicantName: ((item.applicantName || "")).toString().trim(),
+            applicationId: nullIfBlank(item.applicationId),
+            applicationNo: ((item.applicationNo || "")).toString().trim(),
+            batchLabel: ((item.batchLabel || "")).toString().trim(),
+            scheduleLabel: ((item.scheduleLabel || "")).toString().trim(),
+            venue: ((item.venue || "")).toString().trim(),
+            roomLabel: ((item.roomLabel || "")).toString().trim(),
+            seatNo: item.seatNo == null ? "" : String(item.seatNo),
+            examControlNo: item.examControlNo == null ? "" : String(item.examControlNo),
+            customMessage: ((item.customMessage || "")).toString().trim(),
+            detailUrl: ((item.detailUrl || "")).toString().trim(),
+            lookupUrl: ((item.lookupUrl || "")).toString().trim()
+        };
+    }).filter(function (item) {
+        return item && item.email && item.applicationId;
+    });
+}
+
+async function ensureNoActiveExamScheduleEmailJob(client, batchId) {
+    const result = await client
+        .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+        .select("id, status, total_recipients, processed_count, batch_size, batch_delay_minutes")
+        .eq("batch_id", batchId)
+        .in("status", ["queued", "processing"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (result.error) {
+        throw new Error(
+            isMissingTableError(result.error, EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+                ? "Exam schedule email queue table is not available yet. Run exam_schedule_email_jobs_hotfix_2026_04_05.sql first."
+                : (result.error.message || "Unable to read the exam schedule email queue.")
+        );
+    }
+
+    return result.data || null;
+}
+
+async function queueExamScheduleEmailJob(client, details) {
+    const recipientPayloads = normalizeExamScheduleRecipientPayloads(details && details.recipientPayloads);
+    const batchSize = normalizeExamScheduleEmailBatchSize(details && details.batchSize);
+    const batchDelayMinutes = normalizeExamScheduleEmailDelayMinutes(details && details.batchDelayMinutes);
+    const nowIso = new Date().toISOString();
+
+    const insertResult = await client
+        .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+        .insert({
+            batch_id: nullIfBlank(details && details.batchId),
+            batch_label: nullIfBlank(details && details.batchLabel),
+            recipient_payloads: recipientPayloads,
+            total_recipients: recipientPayloads.length,
+            processed_count: 0,
+            sent_count: 0,
+            skipped_count: Math.max(0, Number(details && details.initialSkippedCount) || 0),
+            failed_count: 0,
+            batch_size: batchSize,
+            batch_delay_minutes: batchDelayMinutes,
+            created_by: nullIfBlank(details && details.createdBy),
+            status: "queued",
+            next_run_at: nowIso
+        })
+        .select("id, batch_id, batch_label, total_recipients, batch_size, batch_delay_minutes, status")
+        .single();
+
+    if (insertResult.error) {
+        throw new Error(
+            isMissingTableError(insertResult.error, EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+                ? "Exam schedule email queue table is not available yet. Run exam_schedule_email_jobs_hotfix_2026_04_05.sql first."
+                : (insertResult.error.message || "Unable to create the exam schedule email queue.")
+        );
+    }
+
+    return insertResult.data;
+}
+
+async function fetchDueExamScheduleEmailJob(adminClient) {
+    const result = await adminClient
+        .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+        .select("id, batch_id, batch_label, recipient_payloads, total_recipients, processed_count, sent_count, skipped_count, failed_count, batch_size, batch_delay_minutes, created_by, status, started_at, next_run_at, created_at")
+        .in("status", ["queued", "processing"])
+        .lte("next_run_at", new Date().toISOString())
+        .order("next_run_at", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(1);
+
+    if (result.error) {
+        if (isMissingTableError(result.error, EXAM_SCHEDULE_EMAIL_JOBS_TABLE)) {
+            return null;
+        }
+        throw new Error(result.error.message || "Unable to load queued exam schedule emails.");
+    }
+
+    return result.data && result.data.length ? result.data[0] : null;
+}
+
+async function processExamScheduleEmailJobBatch(adminClient, job) {
+    const recipientPayloads = normalizeExamScheduleRecipientPayloads(job && job.recipient_payloads);
+    const totalRecipients = recipientPayloads.length;
+    const processedCount = Math.max(0, Number(job && job.processed_count) || 0);
+    const batchSize = normalizeExamScheduleEmailBatchSize(job && job.batch_size);
+    const batchDelayMinutes = normalizeExamScheduleEmailDelayMinutes(job && job.batch_delay_minutes);
+    const nowIso = new Date().toISOString();
+
+    if (!totalRecipients || processedCount >= totalRecipients) {
+        const completeResult = await adminClient
+            .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+            .update({
+                total_recipients: totalRecipients,
+                processed_count: totalRecipients,
+                status: "completed",
+                completed_at: nowIso,
+                next_run_at: null,
+                last_error: null
+            })
+            .eq("id", job.id);
+
+        if (completeResult.error) {
+            throw new Error(completeResult.error.message || "Unable to complete the exam schedule email queue.");
+        }
+        return true;
+    }
+
+    const markProcessingResult = await adminClient
+        .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+        .update({
+            status: "processing",
+            started_at: job.started_at || nowIso,
+            total_recipients: totalRecipients,
+            last_error: null
+        })
+        .eq("id", job.id);
+
+    if (markProcessingResult.error) {
+        throw new Error(markProcessingResult.error.message || "Unable to claim the queued exam schedule email batch.");
+    }
+
+    const batchPayloads = recipientPayloads.slice(processedCount, processedCount + batchSize);
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (let index = 0; index < batchPayloads.length; index += 1) {
+        const recipient = batchPayloads[index];
+        try {
+            await sendExamScheduleEmailMail(recipient);
+            sentCount += 1;
+        } catch (_error) {
+            failedCount += 1;
+        }
+    }
+
+    const nextProcessedCount = processedCount + batchPayloads.length;
+    const isComplete = nextProcessedCount >= totalRecipients;
+    const updateResult = await adminClient
+        .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+        .update({
+            processed_count: nextProcessedCount,
+            sent_count: (Number(job.sent_count) || 0) + sentCount,
+            failed_count: (Number(job.failed_count) || 0) + failedCount,
+            status: isComplete ? "completed" : "queued",
+            completed_at: isComplete ? nowIso : null,
+            next_run_at: isComplete ? null : addMinutesToIso(nowIso, batchDelayMinutes),
+            last_error: null
+        })
+        .eq("id", job.id);
+
+    if (updateResult.error) {
+        throw new Error(updateResult.error.message || "Unable to update exam schedule email queue progress.");
+    }
+
+    return true;
+}
+
+async function runExamScheduleEmailProcessor() {
+    if (examScheduleEmailProcessorRunning) {
+        return;
+    }
+
+    const adminClient = createSupabaseAdminClient();
+    if (!adminClient) {
+        return;
+    }
+
+    examScheduleEmailProcessorRunning = true;
+    try {
+        while (true) {
+            const job = await fetchDueExamScheduleEmailJob(adminClient);
+            if (!job) {
+                break;
+            }
+
+            try {
+                await processExamScheduleEmailJobBatch(adminClient, job);
+            } catch (error) {
+                const failedAt = new Date().toISOString();
+                await adminClient
+                    .from(EXAM_SCHEDULE_EMAIL_JOBS_TABLE)
+                    .update({
+                        status: "failed",
+                        last_error: error && error.message ? error.message : "Queued exam schedule email batch failed.",
+                        completed_at: failedAt,
+                        next_run_at: null
+                    })
+                    .eq("id", job.id);
+            }
+        }
+    } finally {
+        examScheduleEmailProcessorRunning = false;
+    }
+}
+
+function triggerExamScheduleEmailProcessor(delayMs) {
+    const waitTime = Math.max(0, Number(delayMs) || 0);
+    setTimeout(function () {
+        runExamScheduleEmailProcessor().catch(function (error) {
+            console.error("Exam schedule email processor failed:", error && error.message ? error.message : error);
+        });
+    }, waitTime);
+}
+
+function startExamScheduleEmailProcessor() {
+    if (examScheduleEmailProcessorInterval) {
+        return;
+    }
+
+    examScheduleEmailProcessorInterval = setInterval(function () {
+        runExamScheduleEmailProcessor().catch(function (error) {
+            console.error("Exam schedule email processor failed:", error && error.message ? error.message : error);
+        });
+    }, EXAM_SCHEDULE_EMAIL_PROCESSOR_INTERVAL_MS);
+
+    triggerExamScheduleEmailProcessor(2000);
+}
+
 function detectUploadedFileKind(buffer) {
     if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
         return "";
@@ -2192,6 +2893,543 @@ app.post("/api/super-admin/users/:userId/confirm-email", authenticate, async fun
     }
 });
 
+app.post("/api/super-admin/users/:userId/claim-account", authenticate, async function (request, response) {
+    try {
+        if (request.auth.role !== "super_admin") {
+            writeJsonError(response, 403, "Only System Administrator can claim applicant accounts.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const userId = nullIfBlank(request.params && request.params.userId);
+        const newEmail = ((request.body && request.body.newEmail) || "").toString().trim().toLowerCase();
+        const newPassword = ((request.body && request.body.newPassword) || "").toString();
+
+        if (!userId || !isUuid(userId)) {
+            writeJsonError(response, 400, "A valid applicant user ID is required.");
+            return;
+        }
+        if (!newEmail) {
+            writeJsonError(response, 400, "Final login email is required.");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+            writeJsonError(response, 400, "Enter a valid final login email address.");
+            return;
+        }
+        if (!newPassword) {
+            writeJsonError(response, 400, "New password is required.");
+            return;
+        }
+
+        const passwordError = validateStaffPassword(newPassword);
+        if (passwordError) {
+            writeJsonError(response, 400, passwordError);
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email, first_name, middle_name, last_name, mobile_number, is_active")
+            .eq("id", userId)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            writeJsonError(response, 400, profileResult.error.message || "Failed to load the selected applicant profile.");
+            return;
+        }
+        if (!profileResult.data) {
+            writeJsonError(response, 404, "Selected applicant account was not found.");
+            return;
+        }
+        if (profileResult.data.role !== "applicant") {
+            writeJsonError(response, 400, "Only applicant accounts can use the claim-account action.");
+            return;
+        }
+
+        const existingProfileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email")
+            .eq("email", newEmail)
+            .maybeSingle();
+
+        if (existingProfileResult.error) {
+            writeJsonError(response, 400, existingProfileResult.error.message || "Failed to check the final login email.");
+            return;
+        }
+        if (existingProfileResult.data && existingProfileResult.data.id !== userId) {
+            writeJsonError(response, 400, "Email address is already used by another account.");
+            return;
+        }
+
+        const authUsers = await listAllAuthUsers(adminClient);
+        const authUser = authUsers.find(function (user) {
+            return user && user.id === userId;
+        }) || null;
+        if (!authUser) {
+            writeJsonError(response, 404, "The selected applicant does not have an Auth login record.");
+            return;
+        }
+
+        const duplicateAuthUser = authUsers.find(function (user) {
+            return user &&
+                user.id !== userId &&
+                (user.email || "").toString().trim().toLowerCase() === newEmail;
+        }) || null;
+        if (duplicateAuthUser) {
+            writeJsonError(response, 400, "Email address is already registered.");
+            return;
+        }
+
+        const previousProfileEmail = ((profileResult.data.email || "").toString().trim().toLowerCase());
+        const previousAuthEmail = ((authUser.email || "").toString().trim().toLowerCase());
+        const shouldUpdateProfileEmail = newEmail !== previousProfileEmail;
+
+        if (shouldUpdateProfileEmail) {
+            const profileUpdateResult = await adminClient
+                .from("profiles")
+                .update({ email: newEmail })
+                .eq("id", userId);
+
+            if (profileUpdateResult.error) {
+                writeJsonError(response, 400, explainAccountClaimError(profileUpdateResult.error.message || "Failed to update applicant profile email."));
+                return;
+            }
+        }
+
+        const authUpdatePayload = {
+            password: newPassword,
+            email_confirm: true
+        };
+        if (newEmail !== previousAuthEmail) {
+            authUpdatePayload.email = newEmail;
+        }
+
+        const updateResult = await adminClient.auth.admin.updateUserById(userId, authUpdatePayload);
+        const updatedUser = updateResult && updateResult.data
+            ? (updateResult.data.user || updateResult.data)
+            : null;
+
+        if (updateResult.error || !updatedUser) {
+            if (shouldUpdateProfileEmail) {
+                try {
+                    await adminClient
+                        .from("profiles")
+                        .update({ email: previousProfileEmail || null })
+                        .eq("id", userId);
+                } catch (_rollbackError) {
+                    // Best effort only; keep the primary auth error below.
+                }
+            }
+
+            writeJsonError(
+                response,
+                400,
+                explainAccountClaimError((updateResult.error && updateResult.error.message) || "Claim account update failed.")
+            );
+            return;
+        }
+
+        await writeAuditLogEntry(adminClient, {
+            module: "user_management",
+            action: "claim_applicant_account",
+            actor_id: request.auth.user.id,
+            actor_role: request.auth.role,
+            target_user_id: profileResult.data.id,
+            target_role: profileResult.data.role,
+            target_email: updatedUser.email || newEmail,
+            target_label: buildFullName(
+                profileResult.data.first_name || "",
+                profileResult.data.middle_name || "",
+                profileResult.data.last_name || ""
+            ),
+            record_type: "user",
+            record_id: profileResult.data.id,
+            summary: "Claimed applicant login for " + ((updatedUser.email || newEmail || "selected applicant").toString()) + ".",
+            details: {
+                previous_profile_email: previousProfileEmail || "",
+                previous_auth_email: previousAuthEmail || "",
+                claimed_email: (updatedUser.email || newEmail || "").toString(),
+                email_confirmed_at: updatedUser.email_confirmed_at || updatedUser.confirmed_at || null,
+                password_reset_by_admin: true
+            }
+        });
+
+        response.status(200).json({
+            ok: true,
+            user: {
+                id: profileResult.data.id,
+                role: profileResult.data.role,
+                email: updatedUser.email || newEmail,
+                first_name: profileResult.data.first_name || "",
+                middle_name: profileResult.data.middle_name || "",
+                last_name: profileResult.data.last_name || "",
+                mobile_number: profileResult.data.mobile_number || "",
+                email_confirmed_at: updatedUser.email_confirmed_at || updatedUser.confirmed_at || null
+            }
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Claim account update failed.");
+    }
+});
+
+app.get("/api/super-admin/users/:userId/walk-in-status", authenticate, async function (request, response) {
+    try {
+        if (request.auth.role !== "super_admin") {
+            writeJsonError(response, 403, "Only System Administrator can review walk-in office access.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const userId = nullIfBlank(request.params && request.params.userId);
+        if (!userId || !isUuid(userId)) {
+            writeJsonError(response, 400, "A valid applicant user ID is required.");
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email, first_name, middle_name, last_name")
+            .eq("id", userId)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            writeJsonError(response, 400, profileResult.error.message || "Failed to load the selected applicant profile.");
+            return;
+        }
+        if (!profileResult.data) {
+            writeJsonError(response, 404, "Selected applicant account was not found.");
+            return;
+        }
+        if (profileResult.data.role !== "applicant") {
+            writeJsonError(response, 400, "Only applicant accounts can use walk-in office access.");
+            return;
+        }
+
+        const status = await loadWalkInOfficeStatus(adminClient, userId);
+
+        response.status(200).json({
+            ok: true,
+            user: {
+                id: profileResult.data.id,
+                email: profileResult.data.email || "",
+                first_name: profileResult.data.first_name || "",
+                middle_name: profileResult.data.middle_name || "",
+                last_name: profileResult.data.last_name || ""
+            },
+            status: status
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Failed to load walk-in office access.");
+    }
+});
+
+app.post("/api/super-admin/users/:userId/reset-walk-in-password", authenticate, async function (request, response) {
+    try {
+        if (request.auth.role !== "super_admin") {
+            writeJsonError(response, 403, "Only System Administrator can reset walk-in temporary passwords.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const userId = nullIfBlank(request.params && request.params.userId);
+        if (!userId || !isUuid(userId)) {
+            writeJsonError(response, 400, "A valid applicant user ID is required.");
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email, first_name, middle_name, last_name, mobile_number")
+            .eq("id", userId)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            writeJsonError(response, 400, profileResult.error.message || "Failed to load the selected applicant profile.");
+            return;
+        }
+        if (!profileResult.data) {
+            writeJsonError(response, 404, "Selected applicant account was not found.");
+            return;
+        }
+        if (profileResult.data.role !== "applicant") {
+            writeJsonError(response, 400, "Only applicant accounts can use walk-in temporary passwords.");
+            return;
+        }
+
+        const officeStatus = await loadWalkInOfficeStatus(adminClient, userId);
+        if (!officeStatus.is_walk_in_account) {
+            writeJsonError(response, 400, "This applicant does not have an office-created walk-in account.");
+            return;
+        }
+        if (officeStatus.is_claimed) {
+            writeJsonError(response, 400, "This walk-in account was already claimed. Office temporary password access is already closed.");
+            return;
+        }
+
+        const authUsers = await listAllAuthUsers(adminClient);
+        const authUser = authUsers.find(function (user) {
+            return user && user.id === userId;
+        }) || null;
+        if (!authUser) {
+            writeJsonError(response, 404, "The selected applicant does not have an Auth login record.");
+            return;
+        }
+
+        const temporaryPassword = generateTemporaryApplicantPassword();
+        const updateResult = await adminClient.auth.admin.updateUserById(userId, {
+            password: temporaryPassword,
+            email_confirm: true
+        });
+        const updatedUser = updateResult && updateResult.data
+            ? (updateResult.data.user || updateResult.data)
+            : null;
+
+        if (updateResult.error || !updatedUser) {
+            writeJsonError(
+                response,
+                400,
+                explainAccountClaimError((updateResult.error && updateResult.error.message) || "Failed to reset walk-in temporary password.")
+            );
+            return;
+        }
+
+        await writeAuditLogEntry(adminClient, {
+            module: "user_management",
+            action: "reset_walk_in_temporary_password",
+            actor_id: request.auth.user.id,
+            actor_role: request.auth.role,
+            target_user_id: profileResult.data.id,
+            target_role: profileResult.data.role,
+            target_email: updatedUser.email || profileResult.data.email || "",
+            target_label: buildFullName(
+                profileResult.data.first_name || "",
+                profileResult.data.middle_name || "",
+                profileResult.data.last_name || ""
+            ),
+            record_type: "user",
+            record_id: profileResult.data.id,
+            summary: "Generated a new office temporary password for " + ((updatedUser.email || profileResult.data.email || "selected applicant").toString()) + ".",
+            details: {
+                walk_in_created_at: officeStatus.walk_in_created_at || null,
+                email_confirmed_at: updatedUser.email_confirmed_at || updatedUser.confirmed_at || null,
+                office_temp_access_active: true
+            }
+        });
+
+        response.status(200).json({
+            ok: true,
+            temporary_password: temporaryPassword,
+            user: {
+                id: profileResult.data.id,
+                role: profileResult.data.role,
+                email: updatedUser.email || profileResult.data.email || "",
+                first_name: profileResult.data.first_name || "",
+                middle_name: profileResult.data.middle_name || "",
+                last_name: profileResult.data.last_name || "",
+                mobile_number: profileResult.data.mobile_number || "",
+                email_confirmed_at: updatedUser.email_confirmed_at || updatedUser.confirmed_at || null
+            },
+            status: Object.assign({}, officeStatus, {
+                has_office_temp_access: true
+            })
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Failed to reset walk-in temporary password.");
+    }
+});
+
+app.post("/api/public/exam-room-lookup", async function (request, response) {
+    try {
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const fullNameInput = normalizePublicLookupName(request.body && request.body.fullName);
+        const applicationNoInput = ((request.body && request.body.applicationNo) || "").toString().replace(/\s+/g, "").trim().toUpperCase();
+
+        if (!fullNameInput) {
+            writeJsonError(response, 400, "Full name is required.");
+            return;
+        }
+        if (!applicationNoInput) {
+            writeJsonError(response, 400, "LDSP application number is required.");
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const applicationResult = await adminClient
+            .from("applications")
+            .select("id, application_no, applicant_id, status, updated_at")
+            .eq("application_no", applicationNoInput)
+            .maybeSingle();
+
+        if (applicationResult.error) {
+            writeJsonError(response, 400, applicationResult.error.message || "Failed to load application record.");
+            return;
+        }
+        if (!applicationResult.data || !applicationResult.data.id || !applicationResult.data.applicant_id) {
+            writeJsonError(response, 404, "No posted exam assignment matched those details yet.");
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("id, first_name, middle_name, last_name")
+            .eq("id", applicationResult.data.applicant_id)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            writeJsonError(response, 400, profileResult.error.message || "Failed to load applicant record.");
+            return;
+        }
+        if (!profileResult.data || !profileResult.data.id) {
+            writeJsonError(response, 404, "No posted exam assignment matched those details yet.");
+            return;
+        }
+
+        const allowedNames = [
+            normalizePublicLookupName(buildFullName(
+                profileResult.data.first_name || "",
+                profileResult.data.middle_name || "",
+                profileResult.data.last_name || ""
+            )),
+            normalizePublicLookupName(buildFullName(
+                profileResult.data.first_name || "",
+                "",
+                profileResult.data.last_name || ""
+            ))
+        ].filter(Boolean);
+
+        if (allowedNames.indexOf(fullNameInput) === -1) {
+            writeJsonError(response, 404, "No posted exam assignment matched those details yet.");
+            return;
+        }
+
+        const matchedApplication = applicationResult.data;
+        const applicationMap = {};
+        applicationMap[matchedApplication.id] = matchedApplication;
+        const applicationIds = [matchedApplication.id];
+
+        let recordResult = await adminClient
+            .from("exam_records")
+            .select("id, application_id, batch_id, exam_control_no, scheduled_at, status, room_label, room_seat_no, updated_at, created_at")
+            .in("application_id", applicationIds)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (recordResult.error && /room_label|room_seat_no/i.test(recordResult.error.message || "")) {
+            recordResult = await adminClient
+                .from("exam_records")
+                .select("id, application_id, batch_id, exam_control_no, scheduled_at, status, updated_at, created_at")
+                .in("application_id", applicationIds)
+                .order("updated_at", { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (!recordResult.error && recordResult.data) {
+                recordResult.data = Object.assign({}, recordResult.data, {
+                    room_label: "",
+                    room_seat_no: null
+                });
+            }
+        }
+
+        if (recordResult.error) {
+            writeJsonError(response, 400, recordResult.error.message || "Failed to load exam assignment.");
+            return;
+        }
+
+        const record = recordResult.data || null;
+        const application = record && record.application_id && applicationMap[record.application_id]
+            ? applicationMap[record.application_id]
+            : matchedApplication;
+        let batch = null;
+        if (record && record.batch_id) {
+            const batchResult = await adminClient
+                .from("exam_batches")
+                .select("id, batch_label, exam_datetime, venue")
+                .eq("id", record.batch_id)
+                .maybeSingle();
+
+            if (batchResult.error) {
+                writeJsonError(response, 400, batchResult.error.message || "Failed to load exam batch.");
+                return;
+            }
+            batch = batchResult.data || null;
+        }
+
+        const scheduledAt = record && record.scheduled_at
+            ? record.scheduled_at
+            : (batch && batch.exam_datetime ? batch.exam_datetime : "");
+        const assignmentReady = Boolean(record && (record.room_label || record.room_seat_no != null || scheduledAt || (batch && batch.venue)));
+        const applicantName = buildFullName(
+            profileResult.data.first_name || "",
+            profileResult.data.middle_name || "",
+            profileResult.data.last_name || ""
+        ) || "Applicant";
+
+        response.status(200).json({
+            ok: true,
+            assignment_ready: assignmentReady,
+            message: assignmentReady
+                ? "Exam room assignment found."
+                : "Record found, but no room assignment is posted yet. Please check again later.",
+            application: {
+                id: application && application.id ? application.id : "",
+                application_no: application && application.application_no ? application.application_no : applicationNoInput,
+                applicant_name: applicantName,
+                status: application && application.status ? application.status : ""
+            },
+            exam: {
+                batch_label: batch && batch.batch_label ? batch.batch_label : "",
+                schedule_label: formatExamScheduleDateTime(scheduledAt),
+                venue: batch && batch.venue ? batch.venue : "",
+                room_label: record && record.room_label ? record.room_label : "",
+                seat_no: record && record.room_seat_no != null ? String(record.room_seat_no) : "",
+                exam_control_no: record && record.exam_control_no ? record.exam_control_no : "",
+                record_status: record && record.status ? record.status : ""
+            }
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Public exam room lookup failed.");
+    }
+});
+
 app.post("/api/secretary/walk-in-intake", authenticate, async function (request, response) {
     let createdUserId = "";
     let cleanupCreatedUser = false;
@@ -2219,9 +3457,9 @@ app.post("/api/secretary/walk-in-intake", authenticate, async function (request,
             return;
         }
 
-        const firstName = nullIfBlank(request.body && request.body.firstName);
-        const middleName = nullIfBlank(request.body && request.body.middleName);
-        const lastName = nullIfBlank(request.body && request.body.lastName);
+        const firstName = upperTextOrNull(request.body && request.body.firstName);
+        const middleName = upperTextOrNull(request.body && request.body.middleName);
+        const lastName = upperTextOrNull(request.body && request.body.lastName);
         const email = ((request.body && request.body.email) || "").toString().trim().toLowerCase();
         const mobileNumber = normalizePhoneNumber(request.body && request.body.mobileNumber);
         const officeNote = nullIfBlank(request.body && request.body.officeNote);
@@ -2561,6 +3799,300 @@ app.post("/api/notifications/compliance-email", authenticate, async function (re
     }
 });
 
+app.post("/api/notifications/exam-schedule", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send exam schedule emails.");
+            return;
+        }
+
+        if (!mailServerConfigured()) {
+            writeJsonError(response, 503, "Server email is not configured. Add SMTP settings in the Node app environment first.");
+            return;
+        }
+
+        const batchId = nullIfBlank(request.body && request.body.batchId);
+        const customMessage = nullIfBlank(request.body && request.body.customMessage);
+        if (!batchId) {
+            writeJsonError(response, 400, "Batch ID is required.");
+            return;
+        }
+        if (customMessage && customMessage.length > 500) {
+            writeJsonError(response, 400, "Exam schedule email note must stay within 500 characters.");
+            return;
+        }
+
+        let scheduleData;
+        try {
+            scheduleData = await loadExamScheduleRecipientsForBatch(request, batchId, []);
+        } catch (scheduleError) {
+            const message = scheduleError && scheduleError.message ? scheduleError.message : "Failed to load scheduled exam records.";
+            writeJsonError(response, /not found/i.test(message) ? 404 : 400, message);
+            return;
+        }
+        const batch = scheduleData.batch;
+        const recipients = scheduleData.recipients;
+        if (!recipients.length) {
+            writeJsonError(response, 400, "This batch does not have any scheduled examinees yet.");
+            return;
+        }
+
+        let activeQueueJob;
+        try {
+            activeQueueJob = await ensureNoActiveExamScheduleEmailJob(request.auth.client, batchId);
+        } catch (queueCheckError) {
+            writeJsonError(response, 400, queueCheckError && queueCheckError.message ? queueCheckError.message : "Unable to verify the exam schedule email queue.");
+            return;
+        }
+        if (activeQueueJob) {
+            writeJsonError(
+                response,
+                409,
+                "An exam schedule email queue is already active for this batch. Please wait for it to finish before sending again."
+            );
+            return;
+        }
+
+        const deliverableRecipients = [];
+        let emailSkippedCount = 0;
+        for (let index = 0; index < recipients.length; index += 1) {
+            const recipient = recipients[index];
+            if (!recipient.email) {
+                emailSkippedCount += 1;
+                continue;
+            }
+            deliverableRecipients.push({
+                email: recipient.email,
+                applicantName: recipient.applicantName,
+                applicationId: recipient.applicationId,
+                applicationNo: recipient.applicationNo,
+                batchLabel: recipient.batchLabel,
+                scheduleLabel: recipient.scheduleLabel,
+                venue: recipient.venue,
+                roomLabel: recipient.roomLabel,
+                seatNo: recipient.seatNo,
+                examControlNo: recipient.examControlNo,
+                customMessage: customMessage || "",
+                detailUrl: recipient.detailUrl,
+                lookupUrl: recipient.lookupUrl
+            });
+        }
+
+        if (!deliverableRecipients.length) {
+            response.json({
+                ok: true,
+                queued: false,
+                batch_id: batch.id,
+                batch_label: batch.batch_label || "Exam Batch",
+                recipient_count: recipients.length,
+                queued_email_count: 0,
+                status_updated_count: 0,
+                status_update_error: "",
+                notification_count: 0,
+                notification_error: "",
+                email_sent_count: 0,
+                email_skipped_count: emailSkippedCount,
+                email_failed_count: 0
+            });
+            return;
+        }
+
+        let queuedJob;
+        try {
+            queuedJob = await queueExamScheduleEmailJob(request.auth.client, {
+                batchId: batch.id,
+                batchLabel: batch.batch_label || "Exam Batch",
+                recipientPayloads: deliverableRecipients,
+                initialSkippedCount: emailSkippedCount,
+                createdBy: request.auth.user.id,
+                batchSize: EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_SIZE,
+                batchDelayMinutes: EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_DELAY_MINUTES
+            });
+        } catch (queueError) {
+            writeJsonError(response, 400, queueError && queueError.message ? queueError.message : "Unable to queue the exam schedule emails.");
+            return;
+        }
+
+        const recipientApplicationIds = Array.from(new Set(recipients.map(function (item) {
+            return item.applicationId;
+        }).filter(Boolean)));
+        let statusUpdatedCount = 0;
+        let statusUpdateError = "";
+        try {
+            for (let start = 0; start < recipientApplicationIds.length; start += 200) {
+                const chunk = recipientApplicationIds.slice(start, start + 200);
+                const updateResult = await request.auth.client
+                    .from("applications")
+                    .update({
+                        status: "exam_scheduled",
+                        secretary_reviewer_id: request.auth.user.id
+                    })
+                    .in("id", chunk);
+
+                if (updateResult.error) {
+                    throw new Error(updateResult.error.message || "Failed to update application statuses.");
+                }
+                statusUpdatedCount += chunk.length;
+            }
+        } catch (updateError) {
+            statusUpdateError = updateError && updateError.message
+                ? updateError.message
+                : "Failed to update application statuses.";
+        }
+
+        let notificationCount = 0;
+        let notificationError = "";
+        try {
+            const notificationPayload = recipients.map(function (item) {
+                let message = "Your scholarship exam is now scheduled on " + (item.scheduleLabel || "the posted date") + " at " + (item.venue || "the assigned venue") + ".";
+                if (item.roomLabel) {
+                    message += " Room: " + item.roomLabel + ".";
+                }
+                if (item.examControlNo) {
+                    message += " Control No.: " + item.examControlNo + ".";
+                }
+                message += " Please check your email for the full exam instructions.";
+
+                return {
+                    recipient_user_id: item.applicantId,
+                    sender_user_id: request.auth.user.id,
+                    notification_type: "application",
+                    title: "Exam Schedule Available",
+                    message: message,
+                    related_application_id: item.applicationId,
+                    related_url: "application-detail.html?id=" + encodeURIComponent(item.applicationId)
+                };
+            });
+
+            for (let start = 0; start < notificationPayload.length; start += 100) {
+                const chunk = notificationPayload.slice(start, start + 100);
+                const insertResult = await request.auth.client
+                    .from("notifications")
+                    .insert(chunk);
+
+                if (insertResult.error) {
+                    throw new Error(insertResult.error.message || "Failed to save applicant notifications.");
+                }
+                notificationCount += chunk.length;
+            }
+        } catch (notificationInsertError) {
+            notificationError = notificationInsertError && notificationInsertError.message
+                ? notificationInsertError.message
+                : "Failed to save applicant notifications.";
+        }
+
+        triggerExamScheduleEmailProcessor(250);
+
+        response.json({
+            ok: true,
+            queued: true,
+            job_id: queuedJob.id,
+            batch_id: batch.id,
+            batch_label: batch.batch_label || "Exam Batch",
+            recipient_count: recipients.length,
+            queued_email_count: deliverableRecipients.length,
+            status_updated_count: statusUpdatedCount,
+            status_update_error: statusUpdateError,
+            notification_count: notificationCount,
+            notification_error: notificationError,
+            email_sent_count: 0,
+            email_skipped_count: emailSkippedCount,
+            email_failed_count: 0,
+            batch_size: Number(queuedJob.batch_size || EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_SIZE),
+            batch_delay_minutes: Number(queuedJob.batch_delay_minutes || EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_DELAY_MINUTES),
+            estimated_batches: Math.ceil(deliverableRecipients.length / Math.max(1, Number(queuedJob.batch_size || EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_SIZE)))
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Exam schedule email failed.");
+    }
+});
+
+app.post("/api/notifications/exam-schedule/test", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send test exam schedule emails.");
+            return;
+        }
+
+        if (!mailServerConfigured()) {
+            writeJsonError(response, 503, "Server email is not configured. Add SMTP settings in the Node app environment first.");
+            return;
+        }
+
+        const batchId = nullIfBlank(request.body && request.body.batchId);
+        const applicationId = nullIfBlank(request.body && request.body.applicationId);
+        const customMessage = nullIfBlank(request.body && request.body.customMessage);
+        const testEmail = normalizeEmailAddress(request.body && request.body.testEmail);
+
+        if (!batchId) {
+            writeJsonError(response, 400, "Batch ID is required.");
+            return;
+        }
+        if (!applicationId) {
+            writeJsonError(response, 400, "Select one scheduled examinee first.");
+            return;
+        }
+        if (customMessage && customMessage.length > 500) {
+            writeJsonError(response, 400, "Exam schedule email note must stay within 500 characters.");
+            return;
+        }
+        if (testEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) {
+            writeJsonError(response, 400, "Enter a valid test receiver email address.");
+            return;
+        }
+
+        let scheduleData;
+        try {
+            scheduleData = await loadExamScheduleRecipientsForBatch(request, batchId, [applicationId]);
+        } catch (scheduleError) {
+            const message = scheduleError && scheduleError.message ? scheduleError.message : "Failed to load the selected scheduled examinee.";
+            writeJsonError(response, /not found/i.test(message) ? 404 : 400, message);
+            return;
+        }
+
+        const batch = scheduleData.batch;
+        const recipient = scheduleData.recipients[0] || null;
+        if (!recipient) {
+            writeJsonError(response, 404, "The selected scheduled examinee was not found in this batch.");
+            return;
+        }
+
+        const deliveryEmail = testEmail || recipient.email;
+        if (!deliveryEmail) {
+            writeJsonError(response, 400, "The selected examinee does not have an email address on file. Enter a test receiver email first.");
+            return;
+        }
+
+        await sendExamScheduleEmailMail({
+            email: deliveryEmail,
+            applicantName: recipient.applicantName,
+            applicationNo: recipient.applicationNo,
+            batchLabel: recipient.batchLabel,
+            scheduleLabel: recipient.scheduleLabel,
+            venue: recipient.venue,
+            roomLabel: recipient.roomLabel,
+            seatNo: recipient.seatNo,
+            examControlNo: recipient.examControlNo,
+            customMessage: customMessage || "",
+            detailUrl: recipient.detailUrl,
+            lookupUrl: recipient.lookupUrl
+        });
+
+        response.json({
+            ok: true,
+            batch_id: batch.id,
+            batch_label: batch.batch_label || "Exam Batch",
+            application_id: recipient.applicationId,
+            application_no: recipient.applicationNo,
+            applicant_name: recipient.applicantName,
+            sent_to_email: deliveryEmail,
+            used_test_email: Boolean(testEmail)
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Test exam schedule email failed.");
+    }
+});
+
 app.post("/api/notifications/reminder-campaign", authenticate, async function (request, response) {
     try {
         if (!STAFF_ROLES.has(request.auth.role)) {
@@ -2702,6 +4234,7 @@ app.use(function (_request, response) {
 const server = app.listen(PORT, function () {
     console.log("LDSS server running on port " + PORT);
     startReminderCampaignProcessor();
+    startExamScheduleEmailProcessor();
 });
 
 module.exports = server;

@@ -724,6 +724,33 @@
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretaryDraftCompletion">
+                                                            <span class="ldss-settings-switch-title">Allow secretary to finish applicant drafts from Secretary Checking</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Lets the office complete and submit applicant draft forms during in-person support when that workflow is temporarily needed.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsAllowSecretaryDraftCompletion" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
+                                                    <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowSecretaryWalkInIntake">
+                                                            <span class="ldss-settings-switch-title">Allow secretary walk-in intake for individual office applicants</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Shows the Walk-In Intake button on Secretary Applications so staff can encode paper applicants and create their temporary account from the office.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsAllowSecretaryWalkInIntake" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
+                                                    <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsShowSecretarySpecialConsiderationControl">
+                                                            <span class="ldss-settings-switch-title">Show Special Consideration selector on Secretary Checking</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Lets the System Administrator hide or show the secretary-side selector without changing the dedicated Special Consideration page toggle.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsShowSecretarySpecialConsiderationControl" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
+                                                    <div class="ldss-settings-switch-card">
                                                         <div class="ldss-settings-switch-copy small">
                                                             <span class="ldss-settings-switch-title">Special Consideration Workspace</span>
                                                             <span class="ldss-settings-switch-help ldss-settings-flag-help">Manage the special consideration flow and student allow-list from its own System Administrator page so staff can open it directly from the sidebar.</span>
@@ -800,7 +827,7 @@
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/supabase-superadmin-audit-helper.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260331-2"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260405-4"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

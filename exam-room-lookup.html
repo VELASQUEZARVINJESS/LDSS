@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+        <meta name="description" content="LDSP public exam room lookup" />
+        <meta name="author" content="LGU Daet" />
+        <title>LDSP | Public Exam Room Checker</title>
+        <link href="css/styles.css" rel="stylesheet" />
+        <link href="css/ldss.css" rel="stylesheet" />
+        <link rel="icon" type="image/png" href="img/icon.png" />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.28.0/feather.min.js" crossorigin="anonymous"></script>
+        <style>
+            .ldss-public-room-page {
+                min-height: 100vh;
+                background:
+                    radial-gradient(circle at top right, rgba(226, 232, 240, 0.9), transparent 24rem),
+                    radial-gradient(circle at top left, rgba(241, 245, 249, 0.96), transparent 30rem),
+                    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+            }
+
+            .ldss-public-room-shell {
+                max-width: 1120px;
+                margin: 0 auto;
+                padding: 2rem 1rem 3rem;
+            }
+
+            .ldss-public-room-hero,
+            .ldss-public-room-card,
+            .ldss-public-room-result {
+                border: 1px solid rgba(148, 163, 184, 0.18);
+                border-radius: 1.25rem;
+                background: rgba(255, 255, 255, 0.95);
+                box-shadow: 0 1rem 2.6rem rgba(15, 23, 42, 0.07);
+                backdrop-filter: blur(12px);
+            }
+
+            .ldss-public-room-hero {
+                padding: 1.4rem 1.5rem;
+                margin-bottom: 1rem;
+            }
+
+            .ldss-public-room-card,
+            .ldss-public-room-result {
+                padding: 1.35rem 1.35rem 1.45rem;
+            }
+
+            .ldss-public-room-brand {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .ldss-public-room-brand img {
+                width: 4rem;
+                height: 4rem;
+                object-fit: contain;
+            }
+
+            .ldss-public-room-kicker {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.45rem;
+                padding: 0.38rem 0.76rem;
+                border-radius: 999px;
+                border: 1px solid #dbe3ee;
+                background: #f8fafc;
+                color: #475569;
+                font-size: 0.76rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+
+            .ldss-public-room-title {
+                margin-top: 0.9rem;
+                margin-bottom: 0.35rem;
+                font-size: clamp(1.55rem, 2vw, 2rem);
+                font-weight: 800;
+                color: #0f172a;
+                letter-spacing: -0.03em;
+            }
+
+            .ldss-public-room-copy {
+                margin: 0;
+                max-width: 52rem;
+                color: #64748b;
+                line-height: 1.7;
+            }
+
+            .ldss-public-room-grid {
+                display: grid;
+                grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+                gap: 1rem;
+                align-items: start;
+            }
+
+            .ldss-public-room-card h2,
+            .ldss-public-room-result h2 {
+                font-size: 1.02rem;
+                font-weight: 800;
+                color: #1e293b;
+                margin-bottom: 0.25rem;
+            }
+
+            .ldss-public-room-subcopy {
+                color: #64748b;
+                font-size: 0.88rem;
+                line-height: 1.6;
+                margin-bottom: 1rem;
+            }
+
+            .ldss-public-room-page .form-control {
+                min-height: 3rem;
+                border-radius: 1rem;
+                border-color: #dbe3ee;
+            }
+
+            .ldss-public-room-page .form-control:focus {
+                border-color: rgba(15, 23, 42, 0.35);
+                box-shadow: 0 0 0 0.2rem rgba(15, 23, 42, 0.08);
+            }
+
+            .ldss-public-room-actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.65rem;
+                margin-top: 0.25rem;
+            }
+
+            .ldss-public-room-actions .btn {
+                min-height: 2.7rem;
+                padding-inline: 1rem;
+                border-radius: 0.95rem;
+                font-weight: 700;
+            }
+
+            .ldss-public-room-note {
+                margin-top: 1rem;
+                padding: 0.95rem 1rem;
+                border-radius: 1rem;
+                border: 1px solid #dbe3ee;
+                background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+                color: #475569;
+                font-size: 0.85rem;
+                line-height: 1.6;
+            }
+
+            .ldss-public-room-empty {
+                min-height: 100%;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                gap: 0.85rem;
+                padding: 1.2rem;
+                border: 1px dashed #cbd5e1;
+                border-radius: 1rem;
+                background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+                color: #64748b;
+                text-align: center;
+            }
+
+            .ldss-public-room-badge-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.55rem;
+                margin-bottom: 1rem;
+            }
+
+            .ldss-public-room-badge {
+                display: inline-flex;
+                align-items: center;
+                padding: 0.4rem 0.8rem;
+                border-radius: 999px;
+                border: 1px solid #dbe3ee;
+                background: #f8fafc;
+                color: #475569;
+                font-size: 0.78rem;
+                font-weight: 700;
+            }
+
+            .ldss-public-room-summary {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.85rem;
+                margin-bottom: 1rem;
+            }
+
+            .ldss-public-room-tile {
+                border: 1px solid #e2e8f0;
+                border-radius: 1rem;
+                padding: 0.95rem 1rem;
+                background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+            }
+
+            .ldss-public-room-label {
+                font-size: 0.75rem;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: #64748b;
+                font-weight: 700;
+                margin-bottom: 0.35rem;
+            }
+
+            .ldss-public-room-value {
+                font-size: 1rem;
+                color: #0f172a;
+                font-weight: 700;
+                line-height: 1.4;
+            }
+
+            .ldss-public-room-focus {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 0.85rem;
+            }
+
+            .ldss-public-room-focus-card {
+                border-radius: 1.05rem;
+                padding: 1rem 1.05rem;
+                background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+                color: #ffffff;
+            }
+
+            .ldss-public-room-focus-card .ldss-public-room-label {
+                color: rgba(255, 255, 255, 0.72);
+            }
+
+            .ldss-public-room-focus-card .ldss-public-room-value {
+                color: #ffffff;
+                font-size: clamp(1.25rem, 2vw, 1.65rem);
+            }
+
+            .ldss-public-room-result-note {
+                margin-top: 1rem;
+                padding: 0.95rem 1rem;
+                border-radius: 1rem;
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                color: #475569;
+                line-height: 1.6;
+                font-size: 0.86rem;
+            }
+
+            @media (max-width: 991.98px) {
+                .ldss-public-room-grid {
+                    grid-template-columns: 1fr;
+                }
+            }
+
+            @media (max-width: 767.98px) {
+                .ldss-public-room-shell {
+                    padding-inline: 0.85rem;
+                }
+
+                .ldss-public-room-brand {
+                    align-items: flex-start;
+                }
+
+                .ldss-public-room-summary,
+                .ldss-public-room-focus {
+                    grid-template-columns: 1fr;
+                }
+
+                .ldss-public-room-actions .btn {
+                    width: 100%;
+                }
+            }
+        </style>
+    </head>
+    <body class="ldss-public-room-page">
+        <div class="ldss-public-room-shell">
+            <section class="ldss-public-room-hero">
+                <div class="ldss-public-room-brand">
+                    <img src="img/daet-lgu.png" alt="LGU Daet Logo" />
+                    <div>
+                        <div class="ldss-public-room-kicker"><i data-feather="search"></i> Public Access</div>
+                        <h1 class="ldss-public-room-title">LDSP Public Exam Room Checker</h1>
+                        <p class="ldss-public-room-copy">Check your posted examination room, seat number, venue, and exam date without signing in. Enter your <strong>Full Name</strong> together with your <strong>LDSP Application Number</strong>.</p>
+                    </div>
+                </div>
+            </section>
+
+            <div class="alert d-none mb-3" id="publicExamLookupStatus" role="alert"></div>
+
+            <div class="ldss-public-room-grid">
+                <section class="ldss-public-room-card">
+                    <h2>Find My Room Assignment</h2>
+                    <p class="ldss-public-room-subcopy">This checker only shows the matching applicant's posted exam assignment. If your room is not yet available, the page will tell you to check again later.</p>
+                    <form id="publicExamLookupForm">
+                        <div class="mb-3">
+                            <label class="small mb-1" for="publicExamLookupFullName">Full Name</label>
+                            <input class="form-control" id="publicExamLookupFullName" type="text" placeholder="JUAN DELA CRUZ" autocomplete="off" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="small mb-1" for="publicExamLookupApplicationNo">LDSP Application Number</label>
+                            <input class="form-control" id="publicExamLookupApplicationNo" type="text" placeholder="LDSS-2026-00049" autocomplete="off" />
+                            <div class="form-text">Use the LDSP number shown in your exam notice or application record.</div>
+                        </div>
+                        <div class="ldss-public-room-actions">
+                            <button class="btn btn-dark" id="publicExamLookupSubmitBtn" type="submit">Check Assignment</button>
+                            <button class="btn btn-outline-dark" id="publicExamLookupClearBtn" type="button">Clear</button>
+                            <a class="btn btn-outline-dark" href="login.html">Back to Portal</a>
+                        </div>
+                    </form>
+                    <div class="ldss-public-room-note">
+                        Use this page after the scholarship office has already saved room assignments. If you only received an exam notice but your room is not posted yet, wait for the official schedule release and try again later. If you still cannot see your room assignment, please contact the LDSP Support Facebook Page:
+                        <a href="https://www.facebook.com/profile.php?id=61583672829501" target="_blank" rel="noopener noreferrer">https://www.facebook.com/profile.php?id=61583672829501</a>.
+                    </div>
+                </section>
+
+                <section class="ldss-public-room-result">
+                    <div id="publicExamLookupResultEmpty" class="ldss-public-room-empty">
+                        <div class="fw-700 fs-5 text-dark">No Room Assignment Checked Yet</div>
+                        <div>Enter your full name together with your LDSP application number on the left to view your posted exam assignment.</div>
+                    </div>
+                    <div class="d-none" id="publicExamLookupResultCard">
+                        <div class="ldss-public-room-badge-row">
+                            <span class="ldss-public-room-badge" id="publicExamLookupBatchBadge">Exam Batch</span>
+                            <span class="ldss-public-room-badge" id="publicExamLookupStatusBadge">Posted</span>
+                        </div>
+                        <h2 class="mb-2" id="publicExamLookupApplicantName">Applicant</h2>
+                        <div class="small text-muted mb-3" id="publicExamLookupApplicationMeta">LDSP Application</div>
+                        <div class="ldss-public-room-summary">
+                            <div class="ldss-public-room-tile">
+                                <div class="ldss-public-room-label">Exam Date</div>
+                                <div class="ldss-public-room-value" id="publicExamLookupSchedule">-</div>
+                            </div>
+                            <div class="ldss-public-room-tile">
+                                <div class="ldss-public-room-label">Venue</div>
+                                <div class="ldss-public-room-value" id="publicExamLookupVenue">-</div>
+                            </div>
+                        </div>
+                        <div class="ldss-public-room-focus">
+                            <div class="ldss-public-room-focus-card">
+                                <div class="ldss-public-room-label">Assigned Room</div>
+                                <div class="ldss-public-room-value" id="publicExamLookupRoom">-</div>
+                            </div>
+                            <div class="ldss-public-room-focus-card">
+                                <div class="ldss-public-room-label">Seat Number</div>
+                                <div class="ldss-public-room-value" id="publicExamLookupSeat">-</div>
+                            </div>
+                        </div>
+                        <div class="ldss-public-room-result-note" id="publicExamLookupResultNote">Bring your required exam materials and arrive early at the venue.</div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+        <script src="js/public-exam-room-lookup.js?v=20260405-3"></script>
+        <script src="js/scripts.js"></script>
+    </body>
+</html>

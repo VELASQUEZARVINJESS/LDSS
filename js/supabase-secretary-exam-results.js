@@ -1,6 +1,9 @@
 (function () {
     "use strict";
 
+    const SUPABASE_FETCH_LIMIT = 1000;
+    const LOOKUP_BATCH_SIZE = 200;
+
     let context = null;
     let rows = [];
     let batches = [];
@@ -69,12 +72,10 @@
         if (Number.isNaN(parsed.getTime())) {
             return "-";
         }
-        return parsed.toLocaleString("en-US", {
+        return parsed.toLocaleDateString("en-US", {
             year: "numeric",
             month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit"
+            day: "numeric"
         });
     }
 
@@ -86,6 +87,76 @@
             .map(function (value) { return (value || "").toString().trim(); })
             .filter(Boolean);
         return parts.length ? parts.join(" ") : (profile.email || "Unknown Applicant");
+    }
+
+    async function fetchExamRowsPaged() {
+        const examRows = [];
+        for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
+            const examResult = await context.client
+                .from("exam_records")
+                .select("id, application_id, batch_id, exam_control_no, scheduled_at, raw_score, percentage_score, result, status, updated_at")
+                .order("scheduled_at", { ascending: false })
+                .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (examResult.error) {
+                throw new Error("Failed to load exam records: " + examResult.error.message);
+            }
+
+            const batch = examResult.data || [];
+            examRows.push.apply(examRows, batch);
+            if (batch.length < SUPABASE_FETCH_LIMIT) {
+                break;
+            }
+        }
+        return examRows;
+    }
+
+    async function loadApplicationsByIds(applicationIds) {
+        const map = {};
+        const wantedIds = Array.from(new Set((applicationIds || []).filter(Boolean)));
+        for (let start = 0; start < wantedIds.length; start += LOOKUP_BATCH_SIZE) {
+            const chunk = wantedIds.slice(start, start + LOOKUP_BATCH_SIZE);
+            if (!chunk.length) {
+                continue;
+            }
+            const appResult = await context.client
+                .from("applications")
+                .select("id, application_no, applicant_id, status")
+                .in("id", chunk);
+
+            if (appResult.error) {
+                throw new Error("Failed to load linked applications: " + appResult.error.message);
+            }
+
+            (appResult.data || []).forEach(function (row) {
+                map[row.id] = row;
+            });
+        }
+        return map;
+    }
+
+    async function loadProfilesByIds(applicantIds) {
+        const map = {};
+        const wantedIds = Array.from(new Set((applicantIds || []).filter(Boolean)));
+        for (let start = 0; start < wantedIds.length; start += LOOKUP_BATCH_SIZE) {
+            const chunk = wantedIds.slice(start, start + LOOKUP_BATCH_SIZE);
+            if (!chunk.length) {
+                continue;
+            }
+            const profileResult = await context.client
+                .from("profiles")
+                .select("id, first_name, middle_name, last_name, email")
+                .in("id", chunk);
+
+            if (profileResult.error) {
+                throw new Error("Failed to load applicant profiles: " + profileResult.error.message);
+            }
+
+            (profileResult.data || []).forEach(function (profile) {
+                map[profile.id] = profile;
+            });
+        }
+        return map;
     }
 
     function fillBatchFilter() {
@@ -221,47 +292,15 @@
 
         batches = batchResult.data || [];
 
-        const examResult = await context.client
-            .from("exam_records")
-            .select("id, application_id, batch_id, exam_control_no, scheduled_at, raw_score, percentage_score, result, status, updated_at")
-            .order("scheduled_at", { ascending: false });
-
-        if (examResult.error) {
-            throw new Error("Failed to load exam records: " + examResult.error.message);
-        }
-
-        const examRows = examResult.data || [];
+        const examRows = await fetchExamRowsPaged();
         const applicationIds = Array.from(new Set(examRows.map(function (row) { return row.application_id; }).filter(Boolean)));
 
-        const appMap = {};
-        const profileMap = {};
-
-        if (applicationIds.length > 0) {
-            const appResult = await context.client
-                .from("applications")
-                .select("id, application_no, applicant_id, status")
-                .in("id", applicationIds);
-
-            if (!appResult.error && appResult.data) {
-                appResult.data.forEach(function (row) {
-                    appMap[row.id] = row;
-                });
-            }
-
-            const applicantIds = Array.from(new Set((appResult.data || []).map(function (row) { return row.applicant_id; }).filter(Boolean)));
-            if (applicantIds.length > 0) {
-                const profileResult = await context.client
-                    .from("profiles")
-                    .select("id, first_name, middle_name, last_name, email")
-                    .in("id", applicantIds);
-
-                if (!profileResult.error && profileResult.data) {
-                    profileResult.data.forEach(function (profile) {
-                        profileMap[profile.id] = profile;
-                    });
-                }
-            }
-        }
+        const appMap = applicationIds.length ? await loadApplicationsByIds(applicationIds) : {};
+        const applicantIds = Array.from(new Set(Object.keys(appMap).map(function (applicationId) {
+            const row = appMap[applicationId];
+            return row ? row.applicant_id : "";
+        }).filter(Boolean)));
+        const profileMap = applicantIds.length ? await loadProfilesByIds(applicantIds) : {};
 
         const batchMap = {};
         batches.forEach(function (batch) {

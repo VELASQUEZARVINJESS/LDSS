@@ -433,6 +433,18 @@
                 vertical-align: middle;
             }
 
+            .ldss-special-allowed-table .ldss-special-action-row {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 0.5rem;
+            }
+
+            .ldss-special-allowed-table .ldss-special-table-label {
+                margin-top: 0.28rem;
+            }
+
             .ldss-special-state-modal .modal-content {
                 border-radius: 1rem;
             }
@@ -515,6 +527,10 @@
 
                 .ldss-special-search {
                     max-height: 12rem;
+                }
+
+                .ldss-special-allowed-table .ldss-special-action-row {
+                    justify-content: flex-start;
                 }
 
             }
@@ -676,7 +692,10 @@
                                             <div class="row g-3 mt-1">
                                                 <div class="col-12">
                                                     <div class="ldss-special-list">
-                                                        <div class="small text-uppercase text-muted fw-700 px-3 pt-3 pb-2">Search Results</div>
+                                                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 px-3 pt-3 pb-2">
+                                                            <div class="small text-uppercase text-muted fw-700">Search Results</div>
+                                                            <div class="small text-muted">Top 5 matches</div>
+                                                        </div>
                                                         <div class="ldss-special-search" id="specialConsiderationSearchResults">
                                                             <div class="px-3 pb-3 small text-muted">Type a student name or application number to search.</div>
                                                         </div>
@@ -686,29 +705,35 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="mt-4 ldss-special-table-shell">
-                                    <div class="ldss-special-table-head">
-                                        <div class="small text-uppercase text-muted fw-700">Allowed Students</div>
-                                        <div class="small text-muted">This list is visible only in the System Administrator workspace.</div>
+                            </div>
+                        </div>
+                        <div class="card mb-4 ldss-special-shell">
+                            <div class="card-header">
+                                <div class="ldss-special-header">
+                                    <div>
+                                        <div class="ldss-special-header-title">Allowed Students</div>
+                                        <div class="ldss-special-header-copy mt-1">This list is visible only in the System Administrator workspace.</div>
                                     </div>
-                                    <div class="table-responsive ldss-applications-table-wrap">
-                                        <table class="table table-sm mb-0 ldss-special-table">
-                                            <thead class="bg-light">
-                                                <tr>
-                                                    <th>Applicant</th>
-                                                    <th>Application</th>
-                                                    <th>Category + Label</th>
-                                                    <th>Status</th>
-                                                    <th class="text-end">Action</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody id="specialConsiderationTableBody">
-                                                <tr>
-                                                    <td colspan="5" class="text-center py-4 text-muted">Loading active school year settings.</td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive ldss-applications-table-wrap">
+                                    <table class="table table-sm mb-0 ldss-special-table ldss-applications-table ldss-uniform-data-table ldss-special-allowed-table">
+                                        <thead class="bg-light">
+                                            <tr>
+                                                <th>Applicant</th>
+                                                <th>Application</th>
+                                                <th>Category + Label</th>
+                                                <th>Status</th>
+                                                <th class="text-end">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="specialConsiderationTableBody">
+                                            <tr>
+                                                <td colspan="5" class="text-center py-4 text-muted">Loading active school year settings.</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                         </div>

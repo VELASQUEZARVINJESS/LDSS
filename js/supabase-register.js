@@ -110,13 +110,31 @@
         return target.toString();
     }
 
+    function upperText(value) {
+        return (value || "").toString().trim().toUpperCase();
+    }
+
+    function bindUppercaseInput(inputId) {
+        const input = document.getElementById(inputId);
+        if (!input) {
+            return;
+        }
+
+        input.addEventListener("input", function () {
+            const upperValue = upperText(input.value);
+            if (input.value !== upperValue) {
+                input.value = upperValue;
+            }
+        });
+    }
+
     async function onRegisterSubmit(client, event) {
         event.preventDefault();
         setStatus("");
 
         const helper = authHelper();
-        const firstName = (document.getElementById("firstName")?.value || "").trim();
-        const lastName = (document.getElementById("lastName")?.value || "").trim();
+        const firstName = upperText(document.getElementById("firstName")?.value || "");
+        const lastName = upperText(document.getElementById("lastName")?.value || "");
         const email = helper && typeof helper.normalizeEmailAddress === "function"
             ? helper.normalizeEmailAddress(document.getElementById("email")?.value || "")
             : (document.getElementById("email")?.value || "").trim().toLowerCase();
@@ -215,6 +233,8 @@
         }
         bindPasswordToggle("password", "passwordToggle");
         bindPasswordToggle("confirmPassword", "confirmPasswordToggle");
+        bindUppercaseInput("firstName");
+        bindUppercaseInput("lastName");
 
         const url = window.LDSS_SUPABASE_URL || "";
         const anonKey = window.LDSS_SUPABASE_ANON_KEY || "";

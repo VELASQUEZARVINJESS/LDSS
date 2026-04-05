@@ -5,8 +5,10 @@
     const APPLICATION_STAFF_FLAGS_TABLE = "application_staff_flags";
     const LEGACY_RESERVED_SLOT_TAG = "reserved_slot_exception";
     const SPECIAL_TAG_DELIMITER = "::";
+    const SPECIAL_APPLICATION_BATCH_SIZE = 500;
+    const SPECIAL_FLAG_BATCH_SIZE = 150;
     const PROFILE_BATCH_SIZE = 120;
-    const SPECIAL_RESULT_LIMIT = 8;
+    const SPECIAL_RESULT_LIMIT = 5;
     const DEFAULT_SPECIAL_TAG = "internal_review";
     const SPECIAL_TAG_OPTIONS = Object.freeze([
         { value: "internal_review", label: "Priority Review" },
@@ -266,6 +268,10 @@
             .replace(/'/g, "&#039;");
     }
 
+    function upperText(value) {
+        return (value || "").toString().trim().toUpperCase();
+    }
+
     function normalizeStatus(value) {
         return (value || "").toString().trim().toLowerCase();
     }
@@ -362,9 +368,9 @@
             return "";
         }
         return [
-            (profile.first_name || "").trim(),
-            (profile.middle_name || "").trim(),
-            (profile.last_name || "").trim()
+            upperText(profile.first_name || ""),
+            upperText(profile.middle_name || ""),
+            upperText(profile.last_name || "")
         ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     }
 
@@ -648,6 +654,31 @@
             });
     }
 
+    function specialSearchQuery() {
+        return (byId("specialConsiderationSearchInput") ? byId("specialConsiderationSearchInput").value : "")
+            .toString()
+            .trim()
+            .toLowerCase();
+    }
+
+    function matchesSpecialSearch(row, query) {
+        const normalizedQuery = (query || "").toString().trim().toLowerCase();
+        if (!normalizedQuery) {
+            return true;
+        }
+
+        const haystack = [
+            row && row.applicant_name ? row.applicant_name : "",
+            row && row.application_no ? row.application_no : "",
+            row && row.scholarship_type ? row.scholarship_type : "",
+            row && row.status ? row.status : "",
+            row && row.special_label ? row.special_label : "",
+            row && row.special_level ? specialTagLabel(row.special_level) : ""
+        ].join(" ").toLowerCase();
+
+        return haystack.includes(normalizedQuery);
+    }
+
     function setLoadingState(message) {
         const searchResults = byId("specialConsiderationSearchResults");
         const tableBody = byId("specialConsiderationTableBody");
@@ -686,10 +717,71 @@
         return profileMap;
     }
 
+    async function fetchApplicationsForSpecialConsideration(context, schoolYear) {
+        const rows = [];
+        let start = 0;
+
+        while (true) {
+            const result = await context.client
+                .from("applications")
+                .select("id, application_no, applicant_id, school_year, scholarship_type, status, submitted_at, created_at, updated_at")
+                .eq("school_year", schoolYear)
+                .neq("status", "draft")
+                .order("updated_at", { ascending: false })
+                .range(start, start + SPECIAL_APPLICATION_BATCH_SIZE - 1);
+
+            if (result.error) {
+                throw new Error("Failed to load special consideration candidates: " + result.error.message);
+            }
+
+            const batch = Array.isArray(result.data) ? result.data : [];
+            rows.push.apply(rows, batch);
+
+            if (batch.length < SPECIAL_APPLICATION_BATCH_SIZE) {
+                break;
+            }
+
+            start += SPECIAL_APPLICATION_BATCH_SIZE;
+        }
+
+        return rows;
+    }
+
+    async function fetchSpecialConsiderationFlags(context, applicationIds) {
+        const flagMap = {};
+        const ids = Array.isArray(applicationIds) ? applicationIds.filter(Boolean) : [];
+
+        for (let index = 0; index < ids.length; index += SPECIAL_FLAG_BATCH_SIZE) {
+            const batch = ids.slice(index, index + SPECIAL_FLAG_BATCH_SIZE);
+            const result = await context.client
+                .from(APPLICATION_STAFF_FLAGS_TABLE)
+                .select("application_id, special_consideration_tag, updated_at, created_at")
+                .in("application_id", batch);
+
+            if (result.error) {
+                throw result.error;
+            }
+
+            (result.data || []).forEach(function (row) {
+                const applicationId = row && row.application_id ? row.application_id : "";
+                const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+                if (!applicationId || !tag) {
+                    return;
+                }
+                flagMap[applicationId] = {
+                    tag: tag,
+                    updated_at: row.updated_at || row.created_at || null
+                };
+            });
+        }
+
+        return flagMap;
+    }
+
     function renderSearchResults() {
         const target = byId("specialConsiderationSearchResults");
         const schoolYear = currentSchoolYear();
-        const query = (byId("specialConsiderationSearchInput") ? byId("specialConsiderationSearchInput").value : "").toString().trim().toLowerCase();
+        const query = specialSearchQuery();
         const options = specialOptionEntries();
 
         if (!target) {
@@ -715,22 +807,24 @@
         let matches = specialCandidates.filter(function (row) {
             return !row.is_reserved_slot;
         });
+        let alreadyAllowedMatches = specialRows();
 
         if (query) {
             matches = matches.filter(function (row) {
-                const haystack = [
-                    row.applicant_name,
-                    row.application_no,
-                    row.scholarship_type,
-                    row.status
-                ].join(" ").toLowerCase();
-                return haystack.includes(query);
+                return matchesSpecialSearch(row, query);
+            });
+            alreadyAllowedMatches = alreadyAllowedMatches.filter(function (row) {
+                return matchesSpecialSearch(row, query);
             });
         }
 
         matches = matches.slice(0, SPECIAL_RESULT_LIMIT);
 
         if (!matches.length) {
+            if (query && alreadyAllowedMatches.length) {
+                target.innerHTML = '<div class="px-3 pb-3 small text-muted">Matching student records are already on the allowed list below. Use the table action buttons there if you need to edit or remove them.</div>';
+                return;
+            }
             target.innerHTML = '<div class="px-3 pb-3 small text-muted">No matching students are available to add.</div>';
             return;
         }
@@ -771,24 +865,38 @@
         }
 
         tableBody.innerHTML = rows.map(function (row) {
+            const applicantName = row.applicant_name || "Unknown Applicant";
+            const scholarshipType = row.scholarship_type || "-";
+            const applicationNo = row.application_no || "-";
+            const updatedDate = formatDateDisplay((row.flag_updated_at || row.updated_at || "").slice(0, 10));
+            const statusLabel = formatStatusLabel(row.status);
             return [
-                "<tr>",
-                "<td>",
-                '<div class="fw-600">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>",
-                '<div class="small text-muted">' + escapeHtml(row.scholarship_type || "-") + "</div>",
+                '<tr class="ldss-secretary-app-row" tabindex="0">',
+                '<td data-label="Applicant">',
+                '<div class="ldss-queue-applicant">',
+                '<div class="ldss-queue-applicant-body">',
+                '<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + "</span>",
+                '<span class="ldss-queue-applicant-note">' + escapeHtml(scholarshipType) + "</span>",
+                "</div>",
+                "</div>",
                 "</td>",
-                "<td>",
-                '<div class="fw-600">' + escapeHtml(row.application_no || "-") + "</div>",
-                '<div class="small text-muted">Updated ' + escapeHtml(formatDateDisplay((row.flag_updated_at || row.updated_at || "").slice(0, 10))) + "</div>",
+                '<td data-label="Application">',
+                '<div class="fw-600">' + escapeHtml(applicationNo) + "</div>",
+                '<div class="small text-muted">Updated ' + escapeHtml(updatedDate) + "</div>",
                 "</td>",
-                "<td>",
+                '<td data-label="Category + Label">',
                 specialTagBadgeMarkup(row.special_level),
                 '<div class="ldss-special-table-label">' + escapeHtml(row.special_label || "-") + "</div>",
                 "</td>",
-                "<td>",
-                '<span class="ldss-chip ldss-chip-neutral">' + escapeHtml(formatStatusLabel(row.status)) + "</span>",
+                '<td data-label="Status">',
+                '<span class="ldss-chip ldss-chip-neutral">' + escapeHtml(statusLabel) + "</span>",
                 "</td>",
-                '<td class="text-end"><button class="btn btn-dark btn-sm me-2" type="button" data-special-consideration-edit="' + escapeHtml(row.id) + '">Edit</button><button class="btn btn-outline-dark btn-sm" type="button" data-special-consideration-remove="' + escapeHtml(row.id) + '">Remove</button></td>',
+                '<td class="ldss-actions-cell text-end" data-label="Action">',
+                '<div class="ldss-special-action-row">',
+                '<button class="btn btn-dark btn-sm" type="button" data-special-consideration-edit="' + escapeHtml(row.id) + '">Edit</button>',
+                '<button class="btn btn-outline-dark btn-sm" type="button" data-special-consideration-remove="' + escapeHtml(row.id) + '">Remove</button>',
+                "</div>",
+                "</td>",
                 "</tr>"
             ].join("");
         }).join("");
@@ -1061,26 +1169,23 @@
 
         setLoadingState("Loading special consideration student list...");
 
-        const applicationResult = await context.client
-            .from("applications")
-            .select("id, application_no, applicant_id, school_year, scholarship_type, status, submitted_at, created_at, updated_at")
-            .eq("school_year", schoolYear)
-            .neq("status", "draft")
-            .order("updated_at", { ascending: false })
-            .limit(500);
-
         if (loadToken !== specialLoadToken) {
             return;
         }
 
-        if (applicationResult.error) {
+        let applicationRows = [];
+        try {
+            applicationRows = await fetchApplicationsForSpecialConsideration(context, schoolYear);
+        } catch (error) {
             specialCandidates = [];
             specialApplicationsById = {};
             setLoadingState("Unable to load application records for this school year.");
-            throw new Error("Failed to load special consideration candidates: " + applicationResult.error.message);
+            throw error;
         }
 
-        const applicationRows = applicationResult.data || [];
+        if (loadToken !== specialLoadToken) {
+            return;
+        }
         const applicantIds = Array.from(new Set(applicationRows.map(function (row) {
             return row.applicant_id;
         }).filter(Boolean)));
@@ -1092,35 +1197,22 @@
 
         let flagMap = {};
         if (specialFlagsAvailable && applicationRows.length) {
-            const flagResult = await context.client
-                .from(APPLICATION_STAFF_FLAGS_TABLE)
-                .select("application_id, special_consideration_tag, updated_at, created_at")
-                .in("application_id", applicationRows.map(function (row) { return row.id; }));
-
-            if (loadToken !== specialLoadToken) {
-                return;
-            }
-
-            if (flagResult.error) {
-                if (/does not exist|relation|schema cache/i.test(flagResult.error.message || "")) {
+            try {
+                flagMap = await fetchSpecialConsiderationFlags(context, applicationRows.map(function (row) {
+                    return row.id;
+                }));
+                specialFlagsAvailable = true;
+            } catch (error) {
+                if (/does not exist|relation|schema cache/i.test(error && error.message ? error.message : "")) {
                     specialFlagsAvailable = false;
                     showManagerStatus("Special consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.", "alert-warning");
                 } else {
-                    throw new Error("Failed to load special consideration records: " + flagResult.error.message);
+                    throw new Error("Failed to load special consideration records: " + (error && error.message ? error.message : "Bad Request"));
                 }
-            } else {
-                specialFlagsAvailable = true;
-                (flagResult.data || []).forEach(function (row) {
-                    const applicationId = row && row.application_id ? row.application_id : "";
-                    const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
-                    if (!applicationId || !tag) {
-                        return;
-                    }
-                    flagMap[applicationId] = {
-                        tag: tag,
-                        updated_at: row.updated_at || row.created_at || null
-                    };
-                });
+            }
+
+            if (loadToken !== specialLoadToken) {
+                return;
             }
         }
 

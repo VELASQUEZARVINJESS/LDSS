@@ -61,11 +61,31 @@
     let authContext = null;
     let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
     let walkInModalInstance = null;
+    let bulkForExamModalInstance = null;
     let walkInSubmitting = false;
+    let bulkForExamSubmitting = false;
     let applicationsLoadToken = 0;
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function upperText(value) {
+        return (value || "").toString().trim().toUpperCase();
+    }
+
+    function bindUppercaseInput(inputId) {
+        const input = byId(inputId);
+        if (!input) {
+            return;
+        }
+
+        input.addEventListener("input", function () {
+            const upperValue = (input.value || "").toString().toUpperCase();
+            if (input.value !== upperValue) {
+                input.value = upperValue;
+            }
+        });
     }
 
     function workflow() {
@@ -251,10 +271,20 @@
         return walkInModalInstance;
     }
 
+    function getBulkForExamModal() {
+        if (!bulkForExamModalInstance) {
+            const modalEl = byId("secretaryBulkForExamModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                bulkForExamModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return bulkForExamModalInstance;
+    }
+
     function buildPersonName(person) {
-        const first = (person && person.first_name ? person.first_name : person && person.firstName ? person.firstName : "").trim();
-        const middle = (person && person.middle_name ? person.middle_name : person && person.middleName ? person.middleName : "").trim();
-        const last = (person && person.last_name ? person.last_name : person && person.lastName ? person.lastName : "").trim();
+        const first = upperText(person && person.first_name ? person.first_name : person && person.firstName ? person.firstName : "");
+        const middle = upperText(person && person.middle_name ? person.middle_name : person && person.middleName ? person.middleName : "");
+        const last = upperText(person && person.last_name ? person.last_name : person && person.lastName ? person.lastName : "");
         return [first, middle, last].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     }
 
@@ -347,9 +377,9 @@
 
     function collectWalkInPayload() {
         const payload = {
-            firstName: (byId("secretaryWalkInFirstName") && byId("secretaryWalkInFirstName").value || "").trim(),
-            middleName: (byId("secretaryWalkInMiddleName") && byId("secretaryWalkInMiddleName").value || "").trim(),
-            lastName: (byId("secretaryWalkInLastName") && byId("secretaryWalkInLastName").value || "").trim(),
+            firstName: upperText(byId("secretaryWalkInFirstName") && byId("secretaryWalkInFirstName").value || ""),
+            middleName: upperText(byId("secretaryWalkInMiddleName") && byId("secretaryWalkInMiddleName").value || ""),
+            lastName: upperText(byId("secretaryWalkInLastName") && byId("secretaryWalkInLastName").value || ""),
             email: (byId("secretaryWalkInEmail") && byId("secretaryWalkInEmail").value || "").trim().toLowerCase(),
             mobileNumber: (byId("secretaryWalkInMobile") && byId("secretaryWalkInMobile").value || "").trim(),
             schoolYear: (byId("secretaryWalkInSchoolYear") && byId("secretaryWalkInSchoolYear").value || "").trim(),
@@ -387,7 +417,7 @@
                 '<div class="border rounded-3 bg-white p-3 mt-3">' +
                 '<div class="small text-muted">Temporary Password</div>' +
                 '<div class="fw-semibold font-monospace mt-1">' + escapeHtml(temporaryPassword) + "</div>" +
-                '<div class="small text-muted mt-2">Share this securely with the applicant so they can sign in later and change the password.</div>' +
+                '<div class="small text-muted mt-2">Share this securely with the applicant so they can sign in later and change the password. If the office forgets it later, System Administrator can generate a new office temporary password until the account is claimed.</div>' +
                 "</div>"
             )
             : '<div class="small text-muted mt-3">No temporary password was generated because this walk-in used an existing applicant account.</div>';
@@ -578,9 +608,9 @@
     }
 
     function buildApplicantName(profile) {
-        const first = (profile && profile.first_name ? profile.first_name : "").trim();
-        const middle = (profile && profile.middle_name ? profile.middle_name : "").trim();
-        const last = (profile && profile.last_name ? profile.last_name : "").trim();
+        const first = upperText(profile && profile.first_name ? profile.first_name : "");
+        const middle = upperText(profile && profile.middle_name ? profile.middle_name : "");
+        const last = upperText(profile && profile.last_name ? profile.last_name : "");
         const joined = [first, middle, last].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
         if (joined) {
             return joined;
@@ -999,6 +1029,206 @@
             );
         }).join("");
     }
+
+    function bulkPendingExamRows() {
+        return filteredRows.filter(function (row) {
+            return normalizeStatus(row.status) === "submitted" && row.id && row.applicant_id;
+        });
+    }
+
+    function renderBulkForExamAction() {
+        const button = byId("secretaryBulkForExamBtn");
+        const meta = byId("secretaryBulkForExamMeta");
+        const rows = bulkPendingExamRows();
+
+        if (button) {
+            button.disabled = bulkForExamSubmitting || rows.length === 0;
+            button.textContent = bulkForExamSubmitting ? "Moving..." : "Mass Set to Examination";
+        }
+
+        if (!meta) {
+            return;
+        }
+
+        if (!rows.length) {
+            meta.textContent = "Mass set uses currently filtered Submitted applications only.";
+            return;
+        }
+
+        meta.textContent = String(rows.length) + " currently filtered submitted application(s) can be moved to Pending Exam at once.";
+    }
+
+    function populateBulkForExamModal(rows) {
+        const count = byId("secretaryBulkForExamCount");
+        const note = byId("secretaryBulkForExamNote");
+        if (count) {
+            count.textContent = String((rows || []).length);
+        }
+        if (note) {
+            note.textContent = "Only applications still in Submitted status at save time will be updated. Applicant notifications will be created after the bulk move succeeds.";
+        }
+    }
+
+    async function bulkMoveApplicationsToPendingExam(rows) {
+        const movedRows = [];
+        const sourceRows = Array.isArray(rows) ? rows : [];
+
+        for (let start = 0; start < sourceRows.length; start += 100) {
+            const chunk = sourceRows.slice(start, start + 100);
+            const applicationIds = chunk.map(function (row) {
+                return row.id;
+            }).filter(Boolean);
+
+            if (!applicationIds.length) {
+                continue;
+            }
+
+            const result = await authContext.client
+                .from("applications")
+                .update({
+                    status: "pending_exam",
+                    secretary_reviewer_id: authContext.user.id
+                })
+                .in("id", applicationIds)
+                .eq("status", "submitted")
+                .select("id, applicant_id, application_no");
+
+            if (result.error) {
+                throw new Error("Failed to move applications to Pending Exam: " + result.error.message);
+            }
+
+            movedRows.push.apply(movedRows, result.data || []);
+        }
+
+        return movedRows;
+    }
+
+    async function bulkNotifyPendingExamApplicants(rows) {
+        const sourceRows = Array.isArray(rows) ? rows : [];
+        let notificationCount = 0;
+
+        for (let start = 0; start < sourceRows.length; start += 100) {
+            const chunk = sourceRows.slice(start, start + 100)
+                .filter(function (row) {
+                    return row && row.id && row.applicant_id;
+                })
+                .map(function (row) {
+                    return {
+                        recipient_user_id: row.applicant_id,
+                        sender_user_id: authContext.user.id,
+                        notification_type: "application",
+                        title: "Application Ready for Examination",
+                        message: "Your application passed secretary checking and is now waiting for examination scheduling.",
+                        related_application_id: row.id,
+                        related_url: "application-detail.html?id=" + encodeURIComponent(row.id)
+                    };
+                });
+
+            if (!chunk.length) {
+                continue;
+            }
+
+            const result = await authContext.client
+                .from("notifications")
+                .insert(chunk);
+
+            if (result.error) {
+                throw new Error(result.error.message || "Failed to notify applicants.");
+            }
+
+            notificationCount += chunk.length;
+        }
+
+        return notificationCount;
+    }
+
+    function openBulkForExamModal() {
+        const rows = bulkPendingExamRows();
+        if (!rows.length) {
+            showStatus("No currently filtered submitted applications are ready for bulk move to Pending Exam.", "alert-warning");
+            return;
+        }
+
+        populateBulkForExamModal(rows);
+        const modal = getBulkForExamModal();
+        if (modal) {
+            modal.show();
+        }
+    }
+
+    async function handleBulkForExamConfirm() {
+        if (bulkForExamSubmitting) {
+            return;
+        }
+
+        const rows = bulkPendingExamRows();
+        if (!rows.length) {
+            showStatus("No currently filtered submitted applications are ready for bulk move to Pending Exam.", "alert-warning");
+            return;
+        }
+
+        const proceedBtn = byId("secretaryBulkForExamProceedBtn");
+        const cancelBtn = byId("secretaryBulkForExamCancelBtn");
+        bulkForExamSubmitting = true;
+        renderBulkForExamAction();
+        showStatus("");
+
+        if (proceedBtn) {
+            proceedBtn.disabled = true;
+            proceedBtn.textContent = "Moving...";
+        }
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+        }
+
+        try {
+            const movedRows = await bulkMoveApplicationsToPendingExam(rows);
+            if (!movedRows.length) {
+                throw new Error("No filtered submitted applications were still eligible to move. Refresh the queue and try again.");
+            }
+
+            let notificationCount = 0;
+            let notificationWarning = "";
+            try {
+                notificationCount = await bulkNotifyPendingExamApplicants(movedRows);
+            } catch (notificationError) {
+                notificationWarning = notificationError && notificationError.message
+                    ? notificationError.message
+                    : "Applicant notification failed.";
+            }
+
+            const modal = getBulkForExamModal();
+            if (modal) {
+                modal.hide();
+            }
+
+            await loadApplications(authContext);
+            if (notificationWarning) {
+                showStatus(
+                    String(movedRows.length) + " application(s) moved to Pending Exam, but notification failed: " + notificationWarning,
+                    "alert-warning"
+                );
+            } else {
+                showStatus(
+                    String(movedRows.length) + " application(s) moved to Pending Exam and " + String(notificationCount) + " applicant notification(s) were sent.",
+                    "alert-success"
+                );
+            }
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Bulk move to Pending Exam failed.", "alert-danger");
+        } finally {
+            bulkForExamSubmitting = false;
+            renderBulkForExamAction();
+            if (proceedBtn) {
+                proceedBtn.disabled = false;
+                proceedBtn.textContent = "Move to Pending Exam";
+            }
+            if (cancelBtn) {
+                cancelBtn.disabled = false;
+            }
+        }
+    }
+
     function applyFiltersAndRender(resetPage) {
         if (resetPage) {
             currentPage = 1;
@@ -1021,6 +1251,7 @@
         renderTable(pageRows);
         renderPaginationInfo(filteredRows.length);
         renderPagination(filteredRows.length);
+        renderBulkForExamAction();
     }
 
     async function loadApplications(context) {
@@ -1104,9 +1335,16 @@
         const yearFilter = byId("secretaryApplicationsYearFilter");
         const pagination = byId("secretaryApplicationsPagination");
         const pageSizeSelect = byId("secretaryApplicationsPageSize");
+        const bulkForExamBtn = byId("secretaryBulkForExamBtn");
+        const bulkForExamProceedBtn = byId("secretaryBulkForExamProceedBtn");
+        const bulkForExamModalEl = byId("secretaryBulkForExamModal");
         const walkInBtn = byId("secretaryWalkInBtn");
         const walkInForm = byId("secretaryWalkInForm");
         const walkInModalEl = byId("secretaryWalkInModal");
+
+        bindUppercaseInput("secretaryWalkInFirstName");
+        bindUppercaseInput("secretaryWalkInMiddleName");
+        bindUppercaseInput("secretaryWalkInLastName");
 
         if (applyBtn) {
             applyBtn.addEventListener("click", function () {
@@ -1181,6 +1419,31 @@
             });
         }
 
+        if (bulkForExamBtn) {
+            bulkForExamBtn.addEventListener("click", openBulkForExamModal);
+        }
+
+        if (bulkForExamProceedBtn) {
+            bulkForExamProceedBtn.addEventListener("click", handleBulkForExamConfirm);
+        }
+
+        if (bulkForExamModalEl) {
+            bulkForExamModalEl.addEventListener("hidden.bs.modal", function () {
+                if (bulkForExamSubmitting) {
+                    return;
+                }
+                const proceedBtn = byId("secretaryBulkForExamProceedBtn");
+                const cancelBtn = byId("secretaryBulkForExamCancelBtn");
+                if (proceedBtn) {
+                    proceedBtn.disabled = false;
+                    proceedBtn.textContent = "Move to Pending Exam";
+                }
+                if (cancelBtn) {
+                    cancelBtn.disabled = false;
+                }
+            });
+        }
+
         if (walkInBtn) {
             walkInBtn.addEventListener("click", handleOpenWalkInModal);
         }
@@ -1212,6 +1475,7 @@
 
         bindEvents();
         applyWalkInDefaults();
+        renderBulkForExamAction();
         syncWalkInAction();
         await loadApplications(context);
     }

@@ -4,13 +4,13 @@
 
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+    const APPLICANT_PHOTO_MAX_DIMENSION = 640;
+    const APPLICANT_PHOTO_JPEG_QUALITY = 0.82;
     const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const APPLICATION_STAFF_FLAGS_TABLE = "application_staff_flags";
     const LEGACY_RESERVED_SLOT_TAG = "reserved_slot_exception";
     const SPECIAL_TAG_DELIMITER = "::";
-    const INTERNAL_REVIEW_UI_VALUE = "__internal_review__";
-    const INTERNAL_REVIEW_TAG = "Internal Review";
     const DAET_MUNICIPALITY = "DAET";
     const DAET_BARANGAYS = [
         "Alawihao",
@@ -43,6 +43,7 @@
         allow_special_endorsement: true,
         allow_secretary_applicant_edits: false,
         allow_secretary_special_consideration: false,
+        show_secretary_special_consideration_control: false,
         special_consideration_options: []
     };
     const SPECIAL_CONSIDERATION_LEVEL_META = {
@@ -122,7 +123,9 @@
     let documentNotesById = {};
     let notesModalInstance = null;
     let applicantEditModalInstance = null;
+    let forExamConfirmModalInstance = null;
     let returnCorrectionModalInstance = null;
+    let forExamConfirmResolver = null;
     let activeNotesDocId = "";
     let counselorOptions = DEFAULT_COUNSELOR_OPTIONS.slice();
     let selectedCounselor = "";
@@ -138,9 +141,88 @@
     let selectedSpecialConsiderationTag = "";
     let specialConsiderationToastInstance = null;
     let shownSpecialConsiderationToastKeys = {};
+    let isSavingSpecialConsideration = false;
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function replaceFileExtension(name, extension) {
+        const baseName = (name || "applicant-photo")
+            .toString()
+            .replace(/\.[^./\\]+$/, "")
+            .trim() || "applicant-photo";
+        return baseName + extension;
+    }
+
+    function loadImageFromObjectUrl(objectUrl) {
+        return new Promise(function (resolve, reject) {
+            const image = new Image();
+            image.onload = function () {
+                resolve(image);
+            };
+            image.onerror = function () {
+                reject(new Error("Failed to load selected image."));
+            };
+            image.src = objectUrl;
+        });
+    }
+
+    async function optimizeApplicantPhotoForUpload(file) {
+        if (!file || !/^image\//i.test((file.type || "").toString())) {
+            return file;
+        }
+
+        let objectUrl = "";
+        try {
+            objectUrl = URL.createObjectURL(file);
+            const image = await loadImageFromObjectUrl(objectUrl);
+            const naturalWidth = image.naturalWidth || image.width || 0;
+            const naturalHeight = image.naturalHeight || image.height || 0;
+
+            if (!naturalWidth || !naturalHeight) {
+                return file;
+            }
+
+            const scale = Math.min(1, APPLICANT_PHOTO_MAX_DIMENSION / Math.max(naturalWidth, naturalHeight));
+            const targetWidth = Math.max(1, Math.round(naturalWidth * scale));
+            const targetHeight = Math.max(1, Math.round(naturalHeight * scale));
+            const canvas = document.createElement("canvas");
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+
+            const context2d = canvas.getContext("2d", { alpha: false });
+            if (!context2d) {
+                return file;
+            }
+
+            context2d.fillStyle = "#ffffff";
+            context2d.fillRect(0, 0, targetWidth, targetHeight);
+            context2d.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+            const jpegBlob = await new Promise(function (resolve) {
+                canvas.toBlob(resolve, "image/jpeg", APPLICANT_PHOTO_JPEG_QUALITY);
+            });
+
+            if (!jpegBlob) {
+                return file;
+            }
+
+            return new File(
+                [jpegBlob],
+                replaceFileExtension(file.name, ".jpg"),
+                {
+                    type: "image/jpeg",
+                    lastModified: Date.now()
+                }
+            );
+        } catch (_error) {
+            return file;
+        } finally {
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        }
     }
 
     function escapeRegExp(value) {
@@ -252,6 +334,16 @@
             }
         }
         return returnCorrectionModalInstance;
+    }
+
+    function getForExamConfirmModal() {
+        if (!forExamConfirmModalInstance) {
+            const modalEl = byId("verificationForExamConfirmModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                forExamConfirmModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return forExamConfirmModalInstance;
     }
 
     function getNotesModal() {
@@ -679,6 +771,99 @@
         }
     }
 
+    function resolveForExamConfirmation(confirmed) {
+        if (!forExamConfirmResolver) {
+            return;
+        }
+        const resolve = forExamConfirmResolver;
+        forExamConfirmResolver = null;
+        resolve(Boolean(confirmed));
+    }
+
+    function forExamConfirmationDetails() {
+        const currentStatus = normalizedApplicationStatus();
+        const alreadyPendingExam = currentStatus === "pending_exam";
+
+        if (alreadyPendingExam) {
+            return {
+                kicker: "Pending Exam",
+                title: "Save updates for this Pending Exam record?",
+                copy: "This will save the latest secretary checking details while keeping the application in Pending Exam.",
+                currentStatusLabel: "Pending Exam",
+                targetStatusLabel: "Pending Exam",
+                note: "Use this when the office updated remarks, interview details, or document checking while the applicant is already waiting for exam scheduling.",
+                confirmLabel: "Agree and Save",
+                fallbackConfirm: "This will save the latest secretary checking details and keep the application in Pending Exam. Continue?"
+            };
+        }
+
+        return {
+            kicker: "Set for Examination",
+            title: "Move this application to Pending Exam?",
+            copy: "This will save the current secretary checking details, move the application to Pending Exam, and notify the applicant that examination scheduling will follow.",
+            currentStatusLabel: statusMeta(currentStatus).label,
+            targetStatusLabel: "Pending Exam",
+            note: "Once you agree, this record will leave the secretary checking queue and appear in Exam Management.",
+            confirmLabel: "Agree and Continue",
+            fallbackConfirm: "This will move the application to Pending Exam and notify the applicant. Continue?"
+        };
+    }
+
+    function populateForExamConfirmModal() {
+        const details = forExamConfirmationDetails();
+        const kicker = byId("verificationForExamConfirmKicker");
+        const title = byId("verificationForExamConfirmModalLabel");
+        const copy = byId("verificationForExamConfirmCopy");
+        const applicant = byId("verificationForExamConfirmApplicant");
+        const applicationNo = byId("verificationForExamConfirmApplicationNo");
+        const currentStatus = byId("verificationForExamConfirmCurrentStatus");
+        const targetStatus = byId("verificationForExamConfirmTargetStatus");
+        const note = byId("verificationForExamConfirmNote");
+        const proceedBtn = byId("verificationForExamConfirmProceedBtn");
+
+        if (kicker) {
+            kicker.textContent = details.kicker;
+        }
+        if (title) {
+            title.textContent = details.title;
+        }
+        if (copy) {
+            copy.textContent = details.copy;
+        }
+        if (applicant) {
+            applicant.textContent = buildApplicantName(currentProfile);
+        }
+        if (applicationNo) {
+            applicationNo.textContent = valueOrDash(currentApplication ? currentApplication.application_no : "");
+        }
+        if (currentStatus) {
+            currentStatus.textContent = valueOrDash(details.currentStatusLabel);
+        }
+        if (targetStatus) {
+            targetStatus.textContent = details.targetStatusLabel;
+        }
+        if (note) {
+            note.textContent = details.note;
+        }
+        if (proceedBtn) {
+            proceedBtn.textContent = details.confirmLabel;
+        }
+    }
+
+    function requestForExamConfirmation() {
+        const details = forExamConfirmationDetails();
+        const modal = getForExamConfirmModal();
+        if (!modal) {
+            return Promise.resolve(window.confirm(details.fallbackConfirm));
+        }
+
+        populateForExamConfirmModal();
+        return new Promise(function (resolve) {
+            forExamConfirmResolver = resolve;
+            modal.show();
+        });
+    }
+
     function isSecretaryCheckingStage(status) {
         return ["submitted", "pending_exam", "returned_for_correction"].includes((status || "").toString().toLowerCase());
     }
@@ -737,6 +922,13 @@
         return DOCUMENT_STATUS_META[status] || DOCUMENT_STATUS_META.pending;
     }
 
+    function missingDocumentHelpText(definition) {
+        if ((definition && definition.type) === "applicant_photo") {
+            return "Use Photo Action > Upload / Replace Photo if the office already has the applicant's 1x1 photo.";
+        }
+        return "Applicant must upload this requirement.";
+    }
+
     function showStatus(message, type) {
         const box = byId("secretaryVerificationStatus");
         if (!box) {
@@ -779,7 +971,6 @@
     }
 
     function hasApplicationUpdatedSinceNotice(application, notice) {
-        const status = normalizeStatus(application && application.status);
         const noticeAt = new Date(notice && notice.created_at ? notice.created_at : 0).getTime();
         const applicationUpdatedAt = new Date(
             (application && (application.updated_at || application.created_at)) || 0
@@ -789,8 +980,7 @@
             notice &&
             noticeAt &&
             applicationUpdatedAt &&
-            applicationUpdatedAt > noticeAt &&
-            status !== "returned_for_correction"
+            applicationUpdatedAt > noticeAt
         );
     }
 
@@ -824,8 +1014,10 @@
         const prevBtn = byId("verificationPrevBtn");
         const nextBtn = byId("verificationNextBtn");
         const forExamBtn = byId("verificationForExamBtn");
+        const backToCheckingBtn = byId("verificationBackToCheckingBtn");
         const hasPrevious = currentNavigationIndex > 0;
         const hasNext = currentNavigationIndex > -1 && currentNavigationIndex < applicationNavigationIds.length - 1;
+        const canMoveBackToChecking = normalizeStatus(currentApplication && currentApplication.status) === "returned_for_correction";
 
         if (prevBtn) {
             prevBtn.disabled = isProcessing || !hasPrevious;
@@ -835,6 +1027,18 @@
         }
         if (forExamBtn) {
             forExamBtn.disabled = isProcessing || !currentApplication || isDraftReadOnlyMode();
+        }
+        if (backToCheckingBtn) {
+            backToCheckingBtn.disabled = isProcessing || !currentApplication || isDraftReadOnlyMode() || !canMoveBackToChecking;
+            if (!currentApplication) {
+                backToCheckingBtn.title = "Load an application first.";
+            } else if (isDraftReadOnlyMode()) {
+                backToCheckingBtn.title = "Back to Checking is not available while previewing a draft.";
+            } else if (!canMoveBackToChecking) {
+                backToCheckingBtn.title = "Available only for applications currently marked Returned for Correction.";
+            } else {
+                backToCheckingBtn.removeAttribute("title");
+            }
         }
         syncDraftReadOnlyState();
     }
@@ -849,6 +1053,7 @@
         const recommendationSelect = byId("verificationRecommendationDecision");
         const specialConsiderationSelect = byId("verificationSpecialConsiderationTag");
         const hardCopyToggle = byId("verificationHardCopyVerified");
+        const applicantPhotoInput = byId("verificationApplicantPhotoFile");
         const verifiedPhotoInput = byId("verificationVerifiedPhotoFile");
         const cameraStartBtn = byId("verificationStartCameraBtn");
         const cameraCaptureBtn = byId("verificationCapturePhotoBtn");
@@ -857,9 +1062,11 @@
         const notesSaveBtn = byId("verificationDocNotesSaveBtn");
         const saveBtn = byId("verificationSaveBtn");
         const complianceBtn = byId("verificationComplianceBtn");
+        const backToCheckingBtn = byId("verificationBackToCheckingBtn");
         const returnBtn = byId("verificationReturnBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const photoActionBtn = byId("verificationPhotoActionBtn");
+        const uploadApplicantPhotoBtn = byId("verificationUploadApplicantPhotoBtn");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
         const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
         const editApplicantSaveBtn = byId("verificationApplicantEditSaveBtn");
@@ -890,10 +1097,13 @@
             recommendationSelect.disabled = draftMode;
         }
         if (specialConsiderationSelect) {
-            specialConsiderationSelect.disabled = draftMode || isProcessing || !currentApplication || !specialConsiderationInputEnabled();
+            specialConsiderationSelect.disabled = draftMode || isProcessing || isSavingSpecialConsideration || !currentApplication || !specialConsiderationInputEnabled();
         }
         if (hardCopyToggle) {
             hardCopyToggle.disabled = draftMode;
+        }
+        if (applicantPhotoInput) {
+            applicantPhotoInput.disabled = draftMode;
         }
         if (verifiedPhotoInput) {
             verifiedPhotoInput.disabled = draftMode;
@@ -919,6 +1129,9 @@
         if (complianceBtn) {
             complianceBtn.disabled = draftMode || isProcessing || !currentApplication;
         }
+        if (backToCheckingBtn) {
+            backToCheckingBtn.disabled = draftMode || isProcessing || !currentApplication || normalizeStatus(currentApplication && currentApplication.status) !== "returned_for_correction";
+        }
         if (returnBtn) {
             returnBtn.disabled = draftMode || isProcessing || !currentApplication;
         }
@@ -927,6 +1140,9 @@
         }
         if (photoActionBtn) {
             photoActionBtn.disabled = draftMode || isProcessing;
+        }
+        if (uploadApplicantPhotoBtn) {
+            uploadApplicantPhotoBtn.disabled = draftMode || isProcessing;
         }
         if (approvePhotoBtn) {
             approvePhotoBtn.disabled = draftMode || isProcessing;
@@ -1029,9 +1245,9 @@
     }
 
     function buildApplicantName(profile) {
-        const first = (profile && profile.first_name ? profile.first_name : "").trim();
-        const middle = (profile && profile.middle_name ? profile.middle_name : "").trim();
-        const last = (profile && profile.last_name ? profile.last_name : "").trim();
+        const first = upperTextOrNull(profile && profile.first_name ? profile.first_name : "") || "";
+        const middle = upperTextOrNull(profile && profile.middle_name ? profile.middle_name : "") || "";
+        const last = upperTextOrNull(profile && profile.last_name ? profile.last_name : "") || "";
         const full = [first, middle, last].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
         if (full) {
             return full;
@@ -1306,12 +1522,72 @@
         return [];
     }
 
+    function encodeSpecialConsiderationTag(level, label) {
+        const normalizedLevel = normalizeSpecialConsiderationLevel(level);
+        const normalizedLabel = normalizeTag(label);
+        if (!normalizedLevel) {
+            return "";
+        }
+        return normalizedLabel
+            ? (normalizedLevel + SPECIAL_TAG_DELIMITER + normalizedLabel)
+            : normalizedLevel;
+    }
+
+    function specialConsiderationOptionLabel(level, label, includeCurrentSuffix) {
+        const normalizedLevel = normalizeSpecialConsiderationLevel(level) || "internal_review";
+        const levelMeta = SPECIAL_CONSIDERATION_LEVEL_META[normalizedLevel] || SPECIAL_CONSIDERATION_LEVEL_META.internal_review;
+        const base = normalizeTag(label)
+            ? (normalizeTag(label) + " - " + (levelMeta.label || "Special Consideration"))
+            : (levelMeta.label || "Special Consideration");
+        return includeCurrentSuffix ? (base + " (Current)") : base;
+    }
+
+    function secretarySpecialConsiderationEntries() {
+        const currentTag = currentSpecialConsiderationTag();
+        const entries = [];
+        const seen = new Set();
+
+        specialConsiderationOptionsFromControls(workflowControls).forEach(function (value) {
+            const decoded = decodeSpecialConsiderationTag(value);
+            const encoded = encodeSpecialConsiderationTag(decoded.level, decoded.label);
+            if (!encoded || !decoded.label) {
+                return;
+            }
+            const key = encoded.toLowerCase();
+            if (seen.has(key)) {
+                return;
+            }
+            seen.add(key);
+            entries.push({
+                value: encoded,
+                level: decoded.level,
+                label: decoded.label,
+                optionLabel: specialConsiderationOptionLabel(decoded.level, decoded.label, false)
+            });
+        });
+
+        if (currentTag) {
+            const currentKey = currentTag.toLowerCase();
+            const currentDecoded = decodeSpecialConsiderationTag(currentTag);
+            if (!seen.has(currentKey) && currentDecoded.level) {
+                entries.unshift({
+                    value: currentTag,
+                    level: currentDecoded.level,
+                    label: currentDecoded.label || "",
+                    optionLabel: specialConsiderationOptionLabel(currentDecoded.level, currentDecoded.label, true)
+                });
+            }
+        }
+
+        return entries;
+    }
+
     function currentSpecialConsiderationTag() {
         return normalizeTag(selectedSpecialConsiderationTag || (currentStaffFlags && currentStaffFlags.special_consideration_tag) || "");
     }
 
     function specialConsiderationInputEnabled() {
-        return workflowControls.allow_secretary_special_consideration === true
+        return workflowControls.show_secretary_special_consideration_control === true
             && applicationStaffFlagsAvailable;
     }
 
@@ -1357,16 +1633,16 @@
 
         toastHeader.classList.remove("text-warning", "text-danger", "text-success", "text-info");
         if (tone === "warning") {
-            toastTitle.textContent = "Internal Review Unavailable";
+            toastTitle.textContent = "Special Consideration Unavailable";
             toastHeader.classList.add("text-warning");
         } else if (tone === "danger") {
-            toastTitle.textContent = "Review Error";
+            toastTitle.textContent = "Special Consideration Error";
             toastHeader.classList.add("text-danger");
         } else if (tone === "success") {
-            toastTitle.textContent = "Review Updated";
+            toastTitle.textContent = "Special Consideration Updated";
             toastHeader.classList.add("text-success");
         } else {
-            toastTitle.textContent = "Review Notice";
+            toastTitle.textContent = "Special Consideration";
             toastHeader.classList.add("text-info");
         }
 
@@ -1379,18 +1655,30 @@
     }
 
     function renderSpecialConsiderationControl() {
+        const section = byId("verificationSpecialConsiderationSection");
         const select = byId("verificationSpecialConsiderationTag");
         const specialWrap = byId("verificationSpecialConsiderationWrap");
         const specialBadge = byId("verificationSpecialConsiderationBadge");
-        const help = byId("verificationSpecialConsiderationHelp");
         const selectedTag = currentSpecialConsiderationTag();
         const selectedMeta = decodeSpecialConsiderationTag(selectedTag);
+        const entries = secretarySpecialConsiderationEntries();
         const draftMode = isDraftReadOnlyMode();
+        const sectionVisible = workflowControls.show_secretary_special_consideration_control === true
+            && applicationStaffFlagsAvailable
+            && Boolean(currentApplication);
 
         if (select) {
-            select.innerHTML = '<option value="">Regular Review</option><option value="' + INTERNAL_REVIEW_UI_VALUE + '">Internal Review</option>';
-            select.value = selectedTag ? INTERNAL_REVIEW_UI_VALUE : "";
-            select.disabled = draftMode || isProcessing || !currentApplication || !specialConsiderationInputEnabled();
+            const optionMarkup = ['<option value="">Regular Review</option>'].concat(entries.map(function (entry) {
+                const selected = entry.value.toLowerCase() === selectedTag.toLowerCase() ? ' selected' : '';
+                return '<option value="' + escapeHtml(entry.value) + '"' + selected + '>' + escapeHtml(entry.optionLabel) + '</option>';
+            }));
+            select.innerHTML = optionMarkup.join("");
+            select.value = selectedTag || "";
+            select.disabled = draftMode || isProcessing || isSavingSpecialConsideration || !currentApplication || !specialConsiderationInputEnabled() || (!entries.length && !selectedTag);
+        }
+
+        if (section) {
+            section.classList.toggle("d-none", !sectionVisible);
         }
 
         if (specialWrap && specialBadge) {
@@ -1404,30 +1692,6 @@
                 specialBadge.textContent = "Regular";
             }
         }
-
-        if (!help) {
-            return;
-        }
-        if (!applicationStaffFlagsAvailable) {
-            help.textContent = "Special Consideration unavailable on this setup.";
-            showSpecialConsiderationToast(
-                "Special Consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.",
-                "warning",
-                "special-consideration-storage-missing"
-            );
-            return;
-        }
-        if (selectedMeta.level) {
-            help.textContent = selectedMeta.label
-                ? ("Special Consideration: " + selectedMeta.label + ".")
-                : "Marked for Special Consideration.";
-            return;
-        }
-        if (workflowControls.allow_secretary_special_consideration !== true) {
-            help.textContent = "Special Consideration is disabled in settings.";
-            return;
-        }
-        help.textContent = "No Special Consideration is assigned to this applicant.";
     }
 
     async function fetchApplicationStaffFlags(applicationId) {
@@ -1446,7 +1710,7 @@
                 applicationStaffFlagsAvailable = false;
                 return null;
             }
-            throw new Error("Failed to load Internal Review tag: " + result.error.message);
+            throw new Error("Failed to load Special Consideration tag: " + result.error.message);
         }
 
         const row = result.data || null;
@@ -1467,7 +1731,7 @@
     function ensureSpecialConsiderationReady(tag) {
         const normalizedTag = normalizeTag(tag);
         if (normalizedTag && !applicationStaffFlagsAvailable) {
-            throw new Error("Internal Review storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.");
+            throw new Error("Special Consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.");
         }
     }
 
@@ -1506,9 +1770,9 @@
             if (isMissingTableError(result.error, APPLICATION_STAFF_FLAGS_TABLE)) {
                 applicationStaffFlagsAvailable = false;
                 renderSpecialConsiderationControl();
-                throw new Error("Internal Review storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.");
+                throw new Error("Special Consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.");
             }
-            throw new Error("Failed to save Internal Review tag: " + result.error.message);
+            throw new Error("Failed to save Special Consideration tag: " + result.error.message);
         }
 
         currentStaffFlags = normalizedTag
@@ -1519,6 +1783,61 @@
             }
             : null;
         renderSpecialConsiderationControl();
+    }
+
+    function syncSavedSpecialConsiderationInSnapshot(tag) {
+        if (!currentFormSnapshot) {
+            currentFormSnapshot = buildFormSnapshot();
+            return;
+        }
+
+        try {
+            const snapshot = JSON.parse(currentFormSnapshot);
+            snapshot.specialConsiderationTag = normalizeTag(tag);
+            currentFormSnapshot = JSON.stringify(snapshot);
+        } catch (_error) {
+            currentFormSnapshot = buildFormSnapshot();
+        }
+    }
+
+    async function handleSpecialConsiderationSelectionChange() {
+        const select = byId("verificationSpecialConsiderationTag");
+        const previousTag = currentSpecialConsiderationTag();
+        const nextTag = normalizeTag(select && select.value ? select.value : "");
+
+        if (!currentApplication || isDraftReadOnlyMode() || isProcessing || isSavingSpecialConsideration) {
+            renderSpecialConsiderationControl();
+            return;
+        }
+        if (nextTag === previousTag) {
+            renderSpecialConsiderationControl();
+            return;
+        }
+
+        selectedSpecialConsiderationTag = nextTag;
+        isSavingSpecialConsideration = true;
+        renderSpecialConsiderationControl();
+
+        try {
+            await persistApplicationStaffFlags(nextTag);
+            syncSavedSpecialConsiderationInSnapshot(nextTag);
+            if (nextTag) {
+                const decoded = decodeSpecialConsiderationTag(nextTag);
+                showStatus("Special Consideration set to " + specialConsiderationOptionLabel(decoded.level, decoded.label, false) + ".", "alert-success");
+            } else {
+                showStatus("Special Consideration cleared. This applicant is back to regular review.", "alert-success");
+            }
+        } catch (error) {
+            selectedSpecialConsiderationTag = previousTag;
+            if (currentStaffFlags) {
+                currentStaffFlags.special_consideration_tag = previousTag || null;
+            }
+            renderSpecialConsiderationControl();
+            showStatus(error && error.message ? error.message : "Failed to save Special Consideration.", "alert-danger");
+        } finally {
+            isSavingSpecialConsideration = false;
+            renderSpecialConsiderationControl();
+        }
     }
 
     function normalizeAwardList(awards) {
@@ -2446,7 +2765,7 @@
                 "<td>" + fileCell + "</td>" +
                 "<td>" + escapeHtml(uploadedAt) + "</td>" +
                 '<td><span class="ldss-chip ' + docMeta.chipClass + '">' + docMeta.label + "</span></td>" +
-                '<td><span class="small text-muted">Applicant must upload this requirement.</span></td>' +
+                '<td><span class="small text-muted">' + escapeHtml(missingDocumentHelpText(definition)) + "</span></td>" +
                 "</tr>"
             );
         }
@@ -2496,6 +2815,27 @@
         tbody.innerHTML = verificationDocumentDefinitions().map(documentRowMarkup).join("");
         Object.keys(documentNotesById).forEach(function (docId) {
             updateDocNotePreview(docId);
+        });
+    }
+
+    function restoreDocumentTableState(savedDocStateRows, excludedType) {
+        (savedDocStateRows || []).forEach(function (row) {
+            if (!row || !row.exists || row.type === excludedType) {
+                return;
+            }
+
+            const latestRow = latestDocumentByType[row.type] || null;
+            if (!latestRow || !latestRow.id) {
+                return;
+            }
+
+            const statusEl = byId("verificationDocStatus-" + latestRow.id);
+            if (statusEl) {
+                statusEl.value = row.status || "pending";
+            }
+
+            documentNotesById[latestRow.id] = row.notes || "";
+            updateDocNotePreview(latestRow.id);
         });
     }
 
@@ -2610,10 +2950,12 @@
     function actionButtonState(isLoading, activeButtonId, loadingText) {
         const saveBtn = byId("verificationSaveBtn");
         const complianceBtn = byId("verificationComplianceBtn");
+        const backToCheckingBtn = byId("verificationBackToCheckingBtn");
         const returnBtn = byId("verificationReturnBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const forExamBtn = byId("verificationForExamBtn");
         const photoActionBtn = byId("verificationPhotoActionBtn");
+        const uploadApplicantPhotoBtn = byId("verificationUploadApplicantPhotoBtn");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
         const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
 
@@ -2633,13 +2975,17 @@
 
         setState(saveBtn, "Save Checking");
         setState(complianceBtn, "Send Compliance Notice");
+        setState(backToCheckingBtn, "Back to Checking");
         setState(returnBtn, "Return for Correction");
         setState(returnConfirmBtn, "Return and Redirect");
         setState(forExamBtn, "Set for Examination");
+        setState(uploadApplicantPhotoBtn, "Upload / Replace Photo");
         if (photoActionBtn) {
             photoActionBtn.disabled = isLoading;
             if (!isLoading) {
                 photoActionBtn.textContent = "Photo Action";
+            } else if (activeButtonId === "verificationUploadApplicantPhotoBtn") {
+                photoActionBtn.textContent = "Uploading...";
             } else if (activeButtonId === "verificationApprovePhotoBtn") {
                 photoActionBtn.textContent = "Approving...";
             } else if (activeButtonId === "verificationRequestPhotoChangeBtn") {
@@ -2684,6 +3030,164 @@
 
         fileInput.value = "";
         return storagePath;
+    }
+
+    async function saveApplicantPhotoPath(storagePath) {
+        if (!storagePath || !currentApplication || !currentApplication.applicant_id) {
+            return currentProfile;
+        }
+
+        let result = await authContext.client
+            .from("profiles")
+            .update({ applicant_photo_path: storagePath })
+            .eq("id", currentApplication.applicant_id)
+            .select(profileSelectFields())
+            .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            result = await authContext.client
+                .from("profiles")
+                .update({ applicant_photo_path: storagePath })
+                .eq("id", currentApplication.applicant_id)
+                .select(profileSelectFields())
+                .maybeSingle();
+        }
+
+        if (result.error) {
+            throw new Error("Applicant photo uploaded but profile photo sync failed: " + result.error.message);
+        }
+
+        if (result.data) {
+            currentProfile = result.data;
+            return result.data;
+        }
+
+        currentProfile = Object.assign({}, currentProfile || {}, {
+            applicant_photo_path: storagePath
+        });
+        return currentProfile;
+    }
+
+    async function upsertApplicantPhotoDocument(storagePath, file) {
+        const selectFields = "id, application_id, document_type, storage_path, original_filename, mime_type, file_size_bytes, verification_status, verification_notes, created_at";
+        const existingRow = latestDocumentByType.applicant_photo || null;
+        const payload = {
+            application_id: currentApplication.id,
+            document_type: "applicant_photo",
+            storage_path: storagePath,
+            original_filename: file.name || "applicant-photo",
+            mime_type: file.type || "application/octet-stream",
+            file_size_bytes: file.size,
+            verification_status: "pending",
+            verification_notes: null,
+            uploaded_by: authContext.user.id,
+            verified_by: null
+        };
+
+        let result = null;
+        if (existingRow && existingRow.id) {
+            result = await authContext.client
+                .from("application_documents")
+                .update(payload)
+                .eq("id", existingRow.id)
+                .eq("application_id", currentApplication.id)
+                .select(selectFields)
+                .maybeSingle();
+        } else {
+            result = await authContext.client
+                .from("application_documents")
+                .insert(payload)
+                .select(selectFields)
+                .maybeSingle();
+        }
+
+        if (result.error) {
+            throw new Error("Applicant photo uploaded but document record update failed: " + result.error.message);
+        }
+
+        return {
+            row: result.data || Object.assign({}, existingRow || {}, payload),
+            previousDocumentPath: existingRow && existingRow.storage_path ? existingRow.storage_path : ""
+        };
+    }
+
+    async function handleApplicantPhotoUpload() {
+        const fileInput = byId("verificationApplicantPhotoFile");
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            return "";
+        }
+        if (!currentApplication || !currentApplication.id || !currentApplication.applicant_id) {
+            throw new Error("No application is loaded for applicant photo upload.");
+        }
+        if (!authContext || !authContext.user) {
+            throw new Error("Please sign in again before uploading the applicant photo.");
+        }
+        if (!window.ldssUploads || typeof window.ldssUploads.uploadFile !== "function") {
+            throw new Error("Applicant photo upload client is not available.");
+        }
+
+        const priorDocStateRows = documentVerificationState();
+        const hadUnsavedChangesBefore = hasUnsavedVerificationChanges();
+        const selectedFile = fileInput.files[0];
+        const mime = (selectedFile.type || "").toLowerCase();
+        if (!mime.startsWith("image/")) {
+            throw new Error("Applicant photo must be an image file.");
+        }
+
+        const uploadFile = await optimizeApplicantPhotoForUpload(selectedFile);
+        if (uploadFile.size > MAX_IMAGE_SIZE_BYTES) {
+            throw new Error("Applicant photo exceeds 10MB limit.");
+        }
+
+        const previousProfilePath = (currentProfile && currentProfile.applicant_photo_path) || "";
+        const uploadResult = await window.ldssUploads.uploadFile(authContext, uploadFile, {
+            applicationId: currentApplication.id,
+            documentType: "applicant_photo"
+        });
+        const storagePath = uploadResult && uploadResult.path ? uploadResult.path : "";
+        if (!storagePath) {
+            throw new Error("Applicant photo upload failed: upload server did not return a file path.");
+        }
+
+        const documentResult = await upsertApplicantPhotoDocument(storagePath, uploadFile);
+        await saveApplicantPhotoPath(storagePath);
+
+        latestDocumentByType.applicant_photo = documentResult.row;
+        signedDocumentUrlByType.applicant_photo = await createSignedUrl(storagePath);
+
+        renderDocumentTable();
+        restoreDocumentTableState(priorDocStateRows, "applicant_photo");
+        setPhotoArea(
+            "verificationApplicantPhotoPreview",
+            "verificationApplicantPhotoPlaceholder",
+            "verificationApplicantPhotoLink",
+            signedDocumentUrlByType.applicant_photo || "",
+            "No Photo"
+        );
+
+        if (!hadUnsavedChangesBefore) {
+            markCurrentFormSnapshot();
+        }
+
+        const cleanupPaths = Array.from(new Set([
+            documentResult.previousDocumentPath,
+            previousProfilePath
+        ].filter(function (pathValue) {
+            return pathValue && pathValue !== storagePath;
+        })));
+
+        if (cleanupPaths.length && window.ldssUploads && typeof window.ldssUploads.deleteFiles === "function") {
+            try {
+                await window.ldssUploads.deleteFiles(authContext, cleanupPaths);
+            } catch (_cleanupError) {
+                // Best-effort cleanup only. The newly saved photo remains valid.
+            }
+        }
+
+        return previousProfilePath || documentResult.previousDocumentPath
+            ? "Applicant photo replaced successfully."
+            : "Applicant photo uploaded successfully.";
     }
 
     async function persistDocumentUpdates(docStateRows) {
@@ -2936,6 +3440,12 @@
             return currentStatus;
         }
 
+        if (currentStatus === "returned_for_correction") {
+            return hasApplicationUpdatedSinceNotice(currentApplication, latestCorrectionNotice)
+                ? "submitted"
+                : "returned_for_correction";
+        }
+
         if (isSecretaryCheckingStage(currentStatus)) {
             return currentStatus || "submitted";
         }
@@ -2993,7 +3503,16 @@
         const previousStatus = normalizedApplicationStatus();
         const docStates = documentVerificationState();
         const targetStatus = deriveSaveStatus(formValues, docStates);
-        const result = await persistVerification(targetStatus, null, false);
+        await persistVerification(targetStatus, null, false);
+
+        if (previousStatus === "returned_for_correction" && targetStatus === "submitted") {
+            await notifyApplicant(
+                "application",
+                "Application Back in Secretary Checking",
+                "The scholarship office received your corrected application and moved it back to secretary checking for review."
+            );
+            return "Secretary checking saved. Application moved back to For Checking.";
+        }
 
         if (targetStatus === "pending_exam" && previousStatus !== "pending_exam") {
             await notifyApplicant(
@@ -3012,6 +3531,23 @@
         return targetStatus === "pending_exam"
             ? "Secretary checking saved. Application moved to Pending Exam."
             : "Secretary checking details saved successfully.";
+    }
+
+    async function handleBackToChecking() {
+        const currentStatus = normalizedApplicationStatus();
+        if (currentStatus !== "returned_for_correction") {
+            showStatus("This application is not currently marked Returned for Correction.", "alert-warning");
+            return;
+        }
+
+        await persistVerification("submitted", null, false);
+        await notifyApplicant(
+            "application",
+            "Application Back in Secretary Checking",
+            "The scholarship office moved your application back to secretary checking for review."
+        );
+
+        return "Application moved back to For Checking.";
     }
 
     async function handleSetForExamination() {
@@ -3258,12 +3794,18 @@
         const printBtn = byId("verificationPrintBtn");
         const saveBtn = byId("verificationSaveBtn");
         const complianceBtn = byId("verificationComplianceBtn");
+        const backToCheckingBtn = byId("verificationBackToCheckingBtn");
         const returnBtn = byId("verificationReturnBtn");
+        const forExamConfirmModalEl = byId("verificationForExamConfirmModal");
+        const forExamConfirmCancelBtn = byId("verificationForExamConfirmCancelBtn");
+        const forExamConfirmProceedBtn = byId("verificationForExamConfirmProceedBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const correctionTargetInputs = document.querySelectorAll("input[name='verificationCorrectionTargets']");
         const forExamBtn = byId("verificationForExamBtn");
         const prevBtn = byId("verificationPrevBtn");
         const nextBtn = byId("verificationNextBtn");
+        const uploadApplicantPhotoBtn = byId("verificationUploadApplicantPhotoBtn");
+        const applicantPhotoInput = byId("verificationApplicantPhotoFile");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
         const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
         const editApplicantBtn = byId("verificationEditApplicantBtn");
@@ -3300,8 +3842,58 @@
             });
         }
 
+        if (backToCheckingBtn) {
+            backToCheckingBtn.addEventListener("click", function () {
+                runAction("verificationBackToCheckingBtn", "Moving...", handleBackToChecking);
+            });
+        }
+
+        if (forExamConfirmCancelBtn) {
+            forExamConfirmCancelBtn.addEventListener("click", function () {
+                resolveForExamConfirmation(false);
+            });
+        }
+
+        if (forExamConfirmProceedBtn) {
+            forExamConfirmProceedBtn.addEventListener("click", function () {
+                resolveForExamConfirmation(true);
+                const modal = getForExamConfirmModal();
+                if (modal) {
+                    modal.hide();
+                }
+            });
+        }
+
+        if (forExamConfirmModalEl) {
+            forExamConfirmModalEl.addEventListener("hidden.bs.modal", function () {
+                resolveForExamConfirmation(false);
+            });
+        }
+
         if (forExamBtn) {
-            forExamBtn.addEventListener("click", function () {
+            forExamBtn.addEventListener("click", async function () {
+                const previousStatus = normalizedApplicationStatus();
+
+                if (isProcessing) {
+                    return;
+                }
+                if (!currentApplication || !currentApplication.id) {
+                    showStatus("No application is loaded yet.", "alert-warning");
+                    return;
+                }
+                if (isDraftReadOnlyMode()) {
+                    showStatus("Draft preview only. Submit the application first before setting it for examination.", "alert-warning");
+                    return;
+                }
+                if (!isSecretaryCheckingStage(previousStatus) && previousStatus !== "pending_exam") {
+                    showStatus("This application is no longer in secretary checking stage.", "alert-warning");
+                    return;
+                }
+
+                const confirmed = await requestForExamConfirmation();
+                if (!confirmed) {
+                    return;
+                }
                 runAction("verificationForExamBtn", "Sending...", handleSetForExamination);
             });
         }
@@ -3338,6 +3930,45 @@
         if (approvePhotoBtn) {
             approvePhotoBtn.addEventListener("click", function () {
                 runAction("verificationApprovePhotoBtn", "Approving...", handleApprovePhoto);
+            });
+        }
+
+        if (uploadApplicantPhotoBtn && applicantPhotoInput) {
+            uploadApplicantPhotoBtn.addEventListener("click", function () {
+                if (!currentApplication) {
+                    showStatus("No application is loaded yet.", "alert-warning");
+                    return;
+                }
+                if (isDraftReadOnlyMode()) {
+                    showStatus("Draft preview only. Submit the application first before uploading the applicant photo here.", "alert-warning");
+                    return;
+                }
+                applicantPhotoInput.value = "";
+                applicantPhotoInput.click();
+            });
+
+            applicantPhotoInput.addEventListener("change", async function () {
+                const hasFile = applicantPhotoInput.files && applicantPhotoInput.files[0];
+                if (!hasFile || isProcessing) {
+                    return;
+                }
+
+                isProcessing = true;
+                actionButtonState(true, "verificationUploadApplicantPhotoBtn", "Uploading...");
+                showStatus("");
+
+                try {
+                    const resultMessage = await handleApplicantPhotoUpload();
+                    if (resultMessage) {
+                        showStatus(resultMessage, "alert-success");
+                    }
+                } catch (error) {
+                    showStatus(error && error.message ? error.message : "Applicant photo upload failed. Please try again.", "alert-danger");
+                } finally {
+                    applicantPhotoInput.value = "";
+                    isProcessing = false;
+                    actionButtonState(false);
+                }
             });
         }
 
@@ -3398,10 +4029,9 @@
 
         if (specialConsiderationSelect) {
             specialConsiderationSelect.addEventListener("change", function () {
-                selectedSpecialConsiderationTag = specialConsiderationSelect.value === INTERNAL_REVIEW_UI_VALUE
-                    ? INTERNAL_REVIEW_TAG
-                    : "";
-                renderSpecialConsiderationControl();
+                handleSpecialConsiderationSelectionChange().catch(function (error) {
+                    showStatus(error && error.message ? error.message : "Failed to save Special Consideration.", "alert-danger");
+                });
             });
         }
         if (hardCopyToggle) {

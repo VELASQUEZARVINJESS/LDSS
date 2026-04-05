@@ -8,6 +8,7 @@
     const USER_VERIFICATION_STATUS_BATCH_SIZE = 150;
     const USER_APPLICATION_LOOKUP_BATCH_SIZE = 200;
     const MIN_PASSWORD_LENGTH = 12;
+    const CLAIM_ACCOUNT_PASSWORD_LENGTH = 16;
     const APPLICATION_STATUS_META = {
         draft: { label: "Draft", chipClass: "ldss-chip-neutral" },
         submitted: { label: "Submitted", chipClass: "ldss-chip-success" },
@@ -34,6 +35,8 @@
     let authContext = null;
     let currentPage = 1;
     let pageSize = 10;
+    let claimAccountModalInstance = null;
+    let claimAccountTargetUserId = "";
 
     function authEmailHelper() {
         return window.LDSSAuthEmailHelper || null;
@@ -45,6 +48,23 @@
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function setInputValue(id, value) {
+        const input = byId(id);
+        if (input) {
+            input.value = value == null ? "" : String(value);
+        }
+    }
+
+    function getClaimAccountModal() {
+        if (!claimAccountModalInstance) {
+            const modalEl = byId("userMgmtClaimAccountModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                claimAccountModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return claimAccountModalInstance;
     }
 
     function escapeHtml(value) {
@@ -120,6 +140,45 @@
             return "Password must include at least one symbol.";
         }
         return "";
+    }
+
+    function randomIndex(max) {
+        if (max <= 0) {
+            return 0;
+        }
+        if (window.crypto && typeof window.crypto.getRandomValues === "function") {
+            const values = new Uint32Array(1);
+            window.crypto.getRandomValues(values);
+            return values[0] % max;
+        }
+        return Math.floor(Math.random() * max);
+    }
+
+    function generateTemporaryClaimPassword() {
+        const uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+        const lowercase = "abcdefghijkmnopqrstuvwxyz";
+        const digits = "23456789";
+        const symbols = "!@#$%^&*";
+        const all = uppercase + lowercase + digits + symbols;
+        const required = [
+            uppercase[randomIndex(uppercase.length)],
+            lowercase[randomIndex(lowercase.length)],
+            digits[randomIndex(digits.length)],
+            symbols[randomIndex(symbols.length)]
+        ];
+
+        while (required.length < CLAIM_ACCOUNT_PASSWORD_LENGTH) {
+            required.push(all[randomIndex(all.length)]);
+        }
+
+        for (let index = required.length - 1; index > 0; index -= 1) {
+            const swapIndex = randomIndex(index + 1);
+            const temp = required[index];
+            required[index] = required[swapIndex];
+            required[swapIndex] = temp;
+        }
+
+        return required.join("");
     }
 
     async function getAccessToken() {
@@ -241,6 +300,228 @@
             return name !== "-" ? name + " (" + row.email + ")" : row.email;
         }
         return name;
+    }
+
+    function setClaimAccountStatus(message, type) {
+        const box = byId("userMgmtClaimAccountStatus");
+        if (!box) {
+            return;
+        }
+        if (!message) {
+            box.className = "alert d-none";
+            box.textContent = "";
+            return;
+        }
+        box.className = "alert " + (type || "alert-info");
+        box.textContent = message;
+    }
+
+    function setClaimWalkInStatus(message, type) {
+        const box = byId("userMgmtClaimWalkInStatus");
+        if (!box) {
+            return;
+        }
+        if (!message) {
+            box.className = "alert d-none";
+            box.textContent = "";
+            return;
+        }
+        box.className = "alert " + (type || "alert-info");
+        box.textContent = message;
+    }
+
+    function setClaimWalkInLoading(isLoading) {
+        const button = byId("userMgmtClaimWalkInGenerateBtn");
+        if (!button) {
+            return;
+        }
+        button.disabled = isLoading;
+        button.textContent = isLoading ? "Generating..." : "Generate New Office Password";
+    }
+
+    function resetClaimWalkInSection() {
+        const section = byId("userMgmtClaimWalkInSection");
+        const meta = byId("userMgmtClaimWalkInMeta");
+        const helper = byId("userMgmtClaimWalkInHelper");
+
+        if (section) {
+            section.classList.add("d-none");
+        }
+        if (meta) {
+            meta.textContent = "";
+        }
+        if (helper) {
+            helper.textContent = "";
+        }
+        setInputValue("userMgmtClaimWalkInTempPassword", "");
+        setClaimWalkInStatus("");
+        setClaimWalkInLoading(false);
+    }
+
+    function renderClaimWalkInSection(status) {
+        const section = byId("userMgmtClaimWalkInSection");
+        const meta = byId("userMgmtClaimWalkInMeta");
+        const helper = byId("userMgmtClaimWalkInHelper");
+        const button = byId("userMgmtClaimWalkInGenerateBtn");
+
+        if (!section || !meta || !helper || !button) {
+            return;
+        }
+
+        setClaimWalkInStatus("");
+        setInputValue("userMgmtClaimWalkInTempPassword", "");
+
+        if (!status || status.is_walk_in_account !== true) {
+            section.classList.add("d-none");
+            meta.textContent = "";
+            helper.textContent = "";
+            return;
+        }
+
+        section.classList.remove("d-none");
+        meta.textContent = status.walk_in_created_at
+            ? ("Walk-in created " + formatDateTime(status.walk_in_created_at) + ".")
+            : "Office-created walk-in account detected.";
+
+        if (status.has_office_temp_access) {
+            helper.textContent = "Available while this walk-in account is still unclaimed. Generating a new password will replace the previous office temporary password.";
+            button.disabled = false;
+            return;
+        }
+
+        button.disabled = true;
+        helper.textContent = status.claimed_at
+            ? ("Office temporary password access already closed when the account was claimed on " + formatDateTime(status.claimed_at) + ".")
+            : "Office temporary password is not available for this walk-in account.";
+    }
+
+    function setClaimAccountLoading(isLoading) {
+        const submitBtn = byId("userMgmtClaimAccountSubmitBtn");
+        const generateBtn = byId("userMgmtClaimGeneratePasswordBtn");
+        const walkInGenerateBtn = byId("userMgmtClaimWalkInGenerateBtn");
+        const cancelBtn = byId("userMgmtClaimAccountCancelBtn");
+        const newEmail = byId("userMgmtClaimNewEmail");
+        const password = byId("userMgmtClaimPassword");
+        const confirmPassword = byId("userMgmtClaimConfirmPassword");
+
+        if (submitBtn) {
+            submitBtn.disabled = isLoading;
+            submitBtn.textContent = isLoading ? "Saving..." : "Save Claimed Login";
+        }
+        if (generateBtn) {
+            generateBtn.disabled = isLoading;
+        }
+        if (walkInGenerateBtn) {
+            walkInGenerateBtn.disabled = isLoading;
+        }
+        if (cancelBtn) {
+            cancelBtn.disabled = isLoading;
+        }
+        [newEmail, password, confirmPassword].forEach(function (input) {
+            if (input) {
+                input.disabled = isLoading;
+            }
+        });
+    }
+
+    function resetClaimAccountForm() {
+        claimAccountTargetUserId = "";
+        setClaimAccountStatus("");
+        byId("userMgmtClaimAccountTarget") && (byId("userMgmtClaimAccountTarget").textContent = "-");
+        setInputValue("userMgmtClaimCurrentEmail", "");
+        setInputValue("userMgmtClaimNewEmail", "");
+        setInputValue("userMgmtClaimPassword", "");
+        setInputValue("userMgmtClaimConfirmPassword", "");
+        resetClaimWalkInSection();
+        setClaimAccountLoading(false);
+    }
+
+    async function loadClaimWalkInStatus(userId) {
+        const section = byId("userMgmtClaimWalkInSection");
+        const meta = byId("userMgmtClaimWalkInMeta");
+        const helper = byId("userMgmtClaimWalkInHelper");
+
+        if (!userId || !section || !meta || !helper) {
+            return;
+        }
+
+        section.classList.remove("d-none");
+        meta.textContent = "Checking walk-in office access...";
+        helper.textContent = "";
+        setInputValue("userMgmtClaimWalkInTempPassword", "");
+        setClaimWalkInStatus("");
+        setClaimWalkInLoading(true);
+
+        try {
+            const payload = await requestJson(USER_CONFIRM_EMAIL_API_BASE + "/" + encodeURIComponent(userId) + "/walk-in-status", {
+                method: "GET",
+                notFoundMessage: "Walk-in status API route was not found. Open the site through the Node server."
+            });
+            renderClaimWalkInSection(payload && payload.status ? payload.status : null);
+        } catch (error) {
+            resetClaimWalkInSection();
+            setClaimAccountStatus(error && error.message ? error.message : "Failed to load walk-in office access.", "alert-warning");
+        }
+    }
+
+    async function openClaimAccountModal(userId) {
+        const row = userRows.find(function (item) {
+            return item && item.id === userId;
+        }) || null;
+
+        if (!row || row.role !== "applicant") {
+            showStatus("Only applicant accounts can use the claim-account action.", "alert-warning");
+            return;
+        }
+
+        claimAccountTargetUserId = userId;
+        setClaimAccountStatus("");
+        if (byId("userMgmtClaimAccountTarget")) {
+            byId("userMgmtClaimAccountTarget").textContent = displayTarget(row);
+        }
+        setInputValue("userMgmtClaimCurrentEmail", row.email || "");
+        setInputValue("userMgmtClaimNewEmail", row.email || "");
+        setInputValue("userMgmtClaimPassword", "");
+        setInputValue("userMgmtClaimConfirmPassword", "");
+        resetClaimWalkInSection();
+        setClaimAccountLoading(false);
+
+        const modal = getClaimAccountModal();
+        if (!modal) {
+            showStatus("Claim account modal is unavailable on this page copy. Refresh and try again.", "alert-warning");
+            return;
+        }
+        modal.show();
+        await loadClaimWalkInStatus(userId);
+    }
+
+    async function generateWalkInTemporaryPassword() {
+        const targetUserId = claimAccountTargetUserId;
+        const row = userRows.find(function (item) {
+            return item && item.id === targetUserId;
+        }) || null;
+
+        if (!targetUserId || !row || row.role !== "applicant") {
+            setClaimAccountStatus("Select a valid applicant account first.", "alert-warning");
+            return;
+        }
+
+        setClaimWalkInStatus("");
+        setClaimWalkInLoading(true);
+
+        try {
+            const payload = await requestJson(USER_CONFIRM_EMAIL_API_BASE + "/" + encodeURIComponent(targetUserId) + "/reset-walk-in-password", {
+                method: "POST",
+                notFoundMessage: "Walk-in temporary password API route was not found. Open the site through the Node server."
+            });
+
+            renderClaimWalkInSection(payload && payload.status ? payload.status : null);
+            setInputValue("userMgmtClaimWalkInTempPassword", payload && payload.temporary_password ? payload.temporary_password : "");
+            setClaimWalkInStatus("New office temporary password generated. Share it securely with the applicant. This replaces the previous office password.", "alert-success");
+        } catch (error) {
+            setClaimWalkInStatus(error && error.message ? error.message : "Failed to generate the office temporary password.", "alert-danger");
+            await loadClaimWalkInStatus(targetUserId);
+        }
     }
 
     function userNameMarkup(row) {
@@ -715,19 +996,25 @@
         const suspendOrActivateAction = row.is_active === false ? "activate" : "suspend";
         const verificationState = verificationStateForRow(row);
         const verificationActions = [];
+        const accountActions = [];
+
+        if (row.role === "applicant") {
+            accountActions.push('<li><button class="dropdown-item" type="button" data-action="claim-account" data-id="' + escapeHtml(row.id) + '">Claim / Replace Login</button></li>');
+        }
 
         if (row.email && verificationState !== "verified") {
             verificationActions.push('<li><button class="dropdown-item" type="button" data-action="resend-verification" data-id="' + escapeHtml(row.id) + '">Resend Verification Email</button></li>');
             verificationActions.push('<li><button class="dropdown-item" type="button" data-action="confirm-email" data-id="' + escapeHtml(row.id) + '">Confirm Email Login</button></li>');
         }
-        const verificationDivider = verificationActions.length ? '<li><hr class="dropdown-divider"></li>' : "";
+        const topActions = accountActions.concat(verificationActions);
+        const verificationDivider = topActions.length ? '<li><hr class="dropdown-divider"></li>' : "";
 
         return (
             '<div class="ldss-row-actions">' +
             '<div class="dropdown w-100">' +
             '<button class="btn btn-outline-dark btn-sm dropdown-toggle w-100" type="button" data-bs-toggle="dropdown" aria-expanded="false">Options</button>' +
             '<ul class="dropdown-menu dropdown-menu-end">' +
-            verificationActions.join("") +
+            topActions.join("") +
             verificationDivider +
             '<li><button class="dropdown-item" type="button" data-action="' + suspendOrActivateAction + '" data-id="' + escapeHtml(row.id) + '">' + suspendOrActivateLabel + '</button></li>' +
             '<li><hr class="dropdown-divider"></li>' +
@@ -983,6 +1270,74 @@
         await loadUsers();
     }
 
+    async function submitClaimAccount() {
+        const targetUserId = claimAccountTargetUserId;
+        const row = userRows.find(function (item) {
+            return item && item.id === targetUserId;
+        }) || null;
+        const newEmail = ((byId("userMgmtClaimNewEmail") ? byId("userMgmtClaimNewEmail").value : "") || "").trim().toLowerCase();
+        const newPassword = ((byId("userMgmtClaimPassword") ? byId("userMgmtClaimPassword").value : "") || "").toString();
+        const confirmPassword = ((byId("userMgmtClaimConfirmPassword") ? byId("userMgmtClaimConfirmPassword").value : "") || "").toString();
+
+        if (!targetUserId || !row || row.role !== "applicant") {
+            setClaimAccountStatus("Select a valid applicant account first.", "alert-warning");
+            return;
+        }
+        if (!newEmail) {
+            setClaimAccountStatus("Final login email is required.", "alert-warning");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+            setClaimAccountStatus("Enter a valid final login email address.", "alert-warning");
+            return;
+        }
+        if (!newPassword) {
+            setClaimAccountStatus("New password is required.", "alert-warning");
+            return;
+        }
+        const passwordError = validatePasswordSecurity(newPassword);
+        if (passwordError) {
+            setClaimAccountStatus(passwordError, "alert-warning");
+            return;
+        }
+        if (confirmPassword !== newPassword) {
+            setClaimAccountStatus("Password confirmation does not match.", "alert-warning");
+            return;
+        }
+
+        setClaimAccountLoading(true);
+        setClaimAccountStatus("");
+
+        try {
+            const payload = await requestJson(USER_CONFIRM_EMAIL_API_BASE + "/" + encodeURIComponent(targetUserId) + "/claim-account", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    newEmail: newEmail,
+                    newPassword: newPassword
+                }),
+                notFoundMessage: "Claim account API route was not found. Open the site through the Node server."
+            });
+
+            const updatedEmail = payload && payload.user && payload.user.email
+                ? payload.user.email
+                : newEmail;
+
+            const modal = getClaimAccountModal();
+            if (modal) {
+                modal.hide();
+            }
+            showStatus("Applicant login updated successfully to " + updatedEmail + ".", "alert-success");
+            await loadUsers();
+        } catch (error) {
+            setClaimAccountStatus(error && error.message ? error.message : "Failed to claim applicant account.", "alert-danger");
+        } finally {
+            setClaimAccountLoading(false);
+        }
+    }
+
     async function deleteUser(userId) {
         const row = userRows.find(function (item) {
             return item && item.id === userId;
@@ -1058,7 +1413,9 @@
 
         trigger.disabled = true;
         try {
-            if (action === "confirm-email") {
+            if (action === "claim-account") {
+                await openClaimAccountModal(userId);
+            } else if (action === "confirm-email") {
                 await confirmUserEmailLogin(userId);
             } else if (action === "resend-verification") {
                 await resendVerificationEmail(userId);
@@ -1081,6 +1438,10 @@
         const createForm = byId("secretaryCreateForm");
         const pageSizeInput = byId("userMgmtPageSize");
         const pagination = byId("userMgmtPagination");
+        const claimModalEl = byId("userMgmtClaimAccountModal");
+        const claimSubmitBtn = byId("userMgmtClaimAccountSubmitBtn");
+        const claimGenerateBtn = byId("userMgmtClaimGeneratePasswordBtn");
+        const walkInGenerateBtn = byId("userMgmtClaimWalkInGenerateBtn");
 
         ["userMgmtSearch", "userMgmtRoleFilter", "userMgmtStatusFilter", "userMgmtVerificationFilter", "userMgmtSubmissionFilter"].forEach(function (id) {
             const input = byId(id);
@@ -1151,6 +1512,33 @@
                 createSecretaryAccount(event).catch(function (error) {
                     showStatus(error && error.message ? error.message : "Failed to create secretary account.", "alert-danger");
                 });
+            });
+        }
+
+        if (claimGenerateBtn) {
+            claimGenerateBtn.addEventListener("click", function () {
+                const generated = generateTemporaryClaimPassword();
+                setInputValue("userMgmtClaimPassword", generated);
+                setInputValue("userMgmtClaimConfirmPassword", generated);
+                setClaimAccountStatus("Temporary password generated. Share it securely with the applicant.", "alert-info");
+            });
+        }
+
+        if (walkInGenerateBtn) {
+            walkInGenerateBtn.addEventListener("click", function () {
+                generateWalkInTemporaryPassword();
+            });
+        }
+
+        if (claimSubmitBtn) {
+            claimSubmitBtn.addEventListener("click", function () {
+                submitClaimAccount();
+            });
+        }
+
+        if (claimModalEl) {
+            claimModalEl.addEventListener("hidden.bs.modal", function () {
+                resetClaimAccountForm();
             });
         }
     }
