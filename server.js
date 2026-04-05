@@ -877,17 +877,21 @@ async function loadExamScheduleRecipientsForBatch(request, batchId, targetApplic
     const applicationIds = Array.from(new Set(scheduledRecords.map(function (row) {
         return row.application_id;
     }).filter(Boolean)));
+    const applicationRows = [];
+    for (let start = 0; start < applicationIds.length; start += 200) {
+        const chunk = applicationIds.slice(start, start + 200);
+        const applicationsResult = await request.auth.client
+            .from("applications")
+            .select("id, application_no, applicant_id, status")
+            .in("id", chunk);
 
-    const applicationsResult = await request.auth.client
-        .from("applications")
-        .select("id, application_no, applicant_id, status")
-        .in("id", applicationIds);
+        if (applicationsResult.error) {
+            throw new Error(applicationsResult.error.message || "Failed to load scheduled applications.");
+        }
 
-    if (applicationsResult.error) {
-        throw new Error(applicationsResult.error.message || "Failed to load scheduled applications.");
+        applicationRows.push.apply(applicationRows, applicationsResult.data || []);
     }
 
-    const applicationRows = applicationsResult.data || [];
     const applicationMap = {};
     const applicantIds = [];
     applicationRows.forEach(function (row) {
@@ -898,19 +902,22 @@ async function loadExamScheduleRecipientsForBatch(request, batchId, targetApplic
     });
 
     const uniqueApplicantIds = Array.from(new Set(applicantIds.filter(Boolean)));
-    const profilesResult = await request.auth.client
-        .from("profiles")
-        .select("id, first_name, middle_name, last_name, email")
-        .in("id", uniqueApplicantIds);
-
-    if (profilesResult.error) {
-        throw new Error(profilesResult.error.message || "Failed to load applicant profiles.");
-    }
-
     const profileMap = {};
-    (profilesResult.data || []).forEach(function (row) {
-        profileMap[row.id] = row;
-    });
+    for (let start = 0; start < uniqueApplicantIds.length; start += 200) {
+        const chunk = uniqueApplicantIds.slice(start, start + 200);
+        const profilesResult = await request.auth.client
+            .from("profiles")
+            .select("id, first_name, middle_name, last_name, email")
+            .in("id", chunk);
+
+        if (profilesResult.error) {
+            throw new Error(profilesResult.error.message || "Failed to load applicant profiles.");
+        }
+
+        (profilesResult.data || []).forEach(function (row) {
+            profileMap[row.id] = row;
+        });
+    }
 
     const baseUrl = resolveBaseUrl(request);
     const recipients = scheduledRecords.map(function (record) {
@@ -3808,6 +3815,14 @@ app.post("/api/notifications/exam-schedule", authenticate, async function (reque
 
         if (!mailServerConfigured()) {
             writeJsonError(response, 503, "Server email is not configured. Add SMTP settings in the Node app environment first.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(
+                response,
+                503,
+                "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY. The queued exam schedule sender needs the Supabase service role key."
+            );
             return;
         }
 
