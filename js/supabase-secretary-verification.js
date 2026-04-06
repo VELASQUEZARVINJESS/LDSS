@@ -92,6 +92,7 @@
     const INTERVIEW_VENUE_STORAGE_KEY = "ldss:default-interview-venue:v1";
     const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
     const COMPLIANCE_EMAIL_API_PATH = "/api/notifications/compliance-email";
+    const APPLICANT_LOGIN_EMAIL_API_BASE = "/api/secretary/applicants";
     const DEFAULT_COUNSELOR_OPTIONS = [];
     const PHOTO_CHANGE_REMARK = "Please replace your applicant 1x1 photo with a clear picture on a white background while wearing formal attire or your school uniform.";
     const COMPLIANCE_NOTICE_TITLE = "Compliance Notice: Update Your Application";
@@ -121,6 +122,7 @@
     let latestDocumentByType = {};
     let signedDocumentUrlByType = {};
     let documentNotesById = {};
+    let loginEmailModalInstance = null;
     let notesModalInstance = null;
     let applicantEditModalInstance = null;
     let forExamConfirmModalInstance = null;
@@ -142,6 +144,7 @@
     let specialConsiderationToastInstance = null;
     let shownSpecialConsiderationToastKeys = {};
     let isSavingSpecialConsideration = false;
+    let isLoginEmailSubmitting = false;
 
     function byId(id) {
         return document.getElementById(id);
@@ -288,8 +291,11 @@
     }
 
     async function requestJson(path, options) {
+        const requestOptions = Object.assign({}, options || {});
+        const notFoundMessage = requestOptions.notFoundMessage || "";
+        delete requestOptions.notFoundMessage;
         const token = await getAccessToken();
-        const fetchOptions = Object.assign({ method: "GET" }, options || {});
+        const fetchOptions = Object.assign({ method: "GET" }, requestOptions);
         const headers = new Headers(fetchOptions.headers || {});
         headers.set("Authorization", "Bearer " + token);
         fetchOptions.headers = headers;
@@ -308,12 +314,22 @@
 
         if (!response.ok) {
             const fallbackMessage = response.status === 404
-                ? "Compliance email API route was not found. Open the site through the Node server."
+                ? (notFoundMessage || "Compliance email API route was not found. Open the site through the Node server.")
                 : "Request failed.";
             throw new Error(payload && payload.error ? payload.error : fallbackMessage);
         }
 
         return payload || {};
+    }
+
+    function getLoginEmailModal() {
+        if (!loginEmailModalInstance) {
+            const modalEl = byId("verificationLoginEmailModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                loginEmailModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return loginEmailModalInstance;
     }
 
     function getApplicantEditModal() {
@@ -354,6 +370,39 @@
             }
         }
         return notesModalInstance;
+    }
+
+    function setLoginEmailStatus(message, type) {
+        const box = byId("verificationLoginEmailStatus");
+        if (!box) {
+            return;
+        }
+        if (!message) {
+            box.className = "alert d-none";
+            box.textContent = "";
+            return;
+        }
+        box.className = "alert " + (type || "alert-info");
+        box.textContent = message;
+    }
+
+    function setLoginEmailLoading(isLoading, busyLabel) {
+        const nextBusy = Boolean(isLoading);
+        const submitBtn = byId("verificationLoginEmailSubmitBtn");
+        const input = byId("verificationLoginEmailNew");
+        const checkbox = byId("verificationLoginEmailSendReset");
+        isLoginEmailSubmitting = nextBusy;
+
+        if (submitBtn) {
+            submitBtn.disabled = nextBusy;
+            submitBtn.textContent = nextBusy ? (busyLabel || "Saving...") : "Save Email Change";
+        }
+        if (input) {
+            input.disabled = nextBusy;
+        }
+        if (checkbox) {
+            checkbox.disabled = nextBusy;
+        }
     }
 
     function setApplicantEditStatus(message, type) {
@@ -2282,7 +2331,23 @@
         if (!window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
             return "";
         }
-        return window.ldssUploads.createObjectUrl(authContext, path);
+        try {
+            return await window.ldssUploads.createObjectUrl(authContext, path);
+        } catch (error) {
+            const message = error && error.message ? error.message : "";
+            const isHostedPreviewRouteIssue =
+                message.includes("Upload API route was not found")
+                || message.includes("Upload API returned an HTML page")
+                || message.includes("Upload server is not available right now")
+                || message.includes("Failed to fetch");
+
+            // Do not block secretary verification or applicant-detail edits just
+            // because an older hosted file preview cannot be opened right now.
+            if (isHostedPreviewRouteIssue) {
+                return "";
+            }
+            throw error;
+        }
     }
 
     function latestDocumentsByType(rows) {
@@ -2523,6 +2588,103 @@
         setText("verificationSheetSpouseName", aux.spouseName || "");
         setText("verificationSheetSpouseChildrenCount", aux.spouseChildrenCount || "");
         setText("verificationSheetSpouseOccupation", aux.spouseOccupation || "");
+    }
+
+    function applicantLoginEmailApiUrl(userId) {
+        return APPLICANT_LOGIN_EMAIL_API_BASE + "/" + encodeURIComponent(userId || "") + "/replace-login-email";
+    }
+
+    function populateLoginEmailForm() {
+        const profile = currentProfile || {};
+        const target = byId("verificationLoginEmailTarget");
+        const currentInput = byId("verificationLoginEmailCurrent");
+        const newInput = byId("verificationLoginEmailNew");
+        const sendResetToggle = byId("verificationLoginEmailSendReset");
+
+        if (target) {
+            target.textContent = buildApplicantName(profile);
+        }
+        if (currentInput) {
+            currentInput.value = profile.email || "";
+        }
+        if (newInput) {
+            newInput.value = profile.email || "";
+        }
+        if (sendResetToggle) {
+            sendResetToggle.checked = true;
+        }
+
+        setLoginEmailStatus("");
+        setLoginEmailLoading(false);
+    }
+
+    async function submitLoginEmailChange() {
+        if (!currentApplication || !currentApplication.applicant_id) {
+            setLoginEmailStatus("Applicant account is not loaded yet.", "alert-warning");
+            return;
+        }
+        if (isLoginEmailSubmitting) {
+            return;
+        }
+
+        const newEmail = ((byId("verificationLoginEmailNew") ? byId("verificationLoginEmailNew").value : "") || "").trim().toLowerCase();
+        const sendAccessEmail = Boolean(byId("verificationLoginEmailSendReset") && byId("verificationLoginEmailSendReset").checked);
+
+        if (!newEmail) {
+            setLoginEmailStatus("Corrected login email is required.", "alert-warning");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+            setLoginEmailStatus("Enter a valid corrected login email address.", "alert-warning");
+            return;
+        }
+
+        setLoginEmailLoading(true, sendAccessEmail ? "Saving and Sending..." : "Saving...");
+        setLoginEmailStatus("");
+
+        try {
+            const payload = await requestJson(applicantLoginEmailApiUrl(currentApplication.applicant_id), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    newEmail: newEmail,
+                    sendAccessEmail: sendAccessEmail
+                }),
+                notFoundMessage: "Login email replacement API route was not found. Open the site through the Node server."
+            });
+
+            const updatedEmail = payload && payload.user && payload.user.email
+                ? payload.user.email
+                : newEmail;
+            const accessEmail = payload && payload.access_email ? payload.access_email : null;
+            const currentInput = byId("verificationLoginEmailCurrent");
+            const newInput = byId("verificationLoginEmailNew");
+            let statusMessage = "Applicant login email updated successfully to " + updatedEmail + ".";
+            let statusType = "alert-success";
+
+            if (accessEmail && accessEmail.requested && accessEmail.sent) {
+                statusMessage += " Password reset email sent to " + updatedEmail + " successfully.";
+            } else if (accessEmail && accessEmail.requested && accessEmail.warning) {
+                statusMessage += " " + accessEmail.warning;
+                statusType = "alert-warning";
+            }
+
+            await loadPageData(currentApplication.id);
+            if (currentInput) {
+                currentInput.value = updatedEmail;
+            }
+            if (newInput) {
+                newInput.value = updatedEmail;
+            }
+            setLoginEmailStatus(statusMessage, statusType);
+            showStatus(statusMessage, statusType);
+        } catch (error) {
+            setLoginEmailStatus(error && error.message ? error.message : "Failed to replace applicant login email.", "alert-danger");
+        } finally {
+            setLoginEmailLoading(false);
+        }
     }
 
     function syncApplicantEditAccess() {
@@ -3808,6 +3970,9 @@
         const applicantPhotoInput = byId("verificationApplicantPhotoFile");
         const approvePhotoBtn = byId("verificationApprovePhotoBtn");
         const photoChangeBtn = byId("verificationRequestPhotoChangeBtn");
+        const fixLoginEmailBtn = byId("verificationFixLoginEmailBtn");
+        const loginEmailSubmitBtn = byId("verificationLoginEmailSubmitBtn");
+        const loginEmailModalEl = byId("verificationLoginEmailModal");
         const editApplicantBtn = byId("verificationEditApplicantBtn");
         const editApplicantSaveBtn = byId("verificationApplicantEditSaveBtn");
         const counselorSelect = byId("verificationCounselorEndorsement");
@@ -3975,6 +4140,32 @@
         if (photoChangeBtn) {
             photoChangeBtn.addEventListener("click", function () {
                 runAction("verificationRequestPhotoChangeBtn", "Sending...", handleRequestPhotoChange);
+            });
+        }
+
+        if (fixLoginEmailBtn) {
+            fixLoginEmailBtn.addEventListener("click", function () {
+                if (!currentApplication || !currentApplication.applicant_id || !currentProfile) {
+                    showStatus("Applicant account details are not loaded yet.", "alert-warning");
+                    return;
+                }
+                populateLoginEmailForm();
+                const modal = getLoginEmailModal();
+                if (modal) {
+                    modal.show();
+                }
+            });
+        }
+
+        if (loginEmailSubmitBtn) {
+            loginEmailSubmitBtn.addEventListener("click", function () {
+                submitLoginEmailChange();
+            });
+        }
+
+        if (loginEmailModalEl) {
+            loginEmailModalEl.addEventListener("hidden.bs.modal", function () {
+                setLoginEmailStatus("");
             });
         }
 

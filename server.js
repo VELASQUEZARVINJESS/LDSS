@@ -791,6 +791,25 @@ function normalizeEmailAddress(value) {
     return (value || "").toString().trim().toLowerCase();
 }
 
+function buildPasswordResetRedirectUrl(baseUrl) {
+    if (!baseUrl) {
+        return "";
+    }
+    return assetUrl(baseUrl, "reset-password.html");
+}
+
+async function sendApplicantAccessResetEmail(email, baseUrl) {
+    const anonClient = createSupabaseClient();
+    const redirectTo = buildPasswordResetRedirectUrl(baseUrl);
+    const options = redirectTo
+        ? { redirectTo: redirectTo }
+        : undefined;
+    const result = await anonClient.auth.resetPasswordForEmail(email, options);
+    if (result.error) {
+        throw new Error(result.error.message || "Failed to send the password reset email.");
+    }
+}
+
 function uniqueNonBlankStrings(values) {
     return Array.from(new Set((values || []).map(function (value) {
         return (value || "").toString().trim();
@@ -3455,6 +3474,215 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Public exam room lookup failed.");
+    }
+});
+
+app.post("/api/secretary/applicants/:userId/replace-login-email", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can replace applicant login email.");
+            return;
+        }
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const userId = nullIfBlank(request.params && request.params.userId);
+        const newEmail = normalizeEmailAddress((request.body && request.body.newEmail) || "");
+        const sendAccessEmail = !request.body || request.body.sendAccessEmail !== false;
+
+        if (!userId || !isUuid(userId)) {
+            writeJsonError(response, 400, "A valid applicant user ID is required.");
+            return;
+        }
+        if (!newEmail) {
+            writeJsonError(response, 400, "Corrected login email is required.");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+            writeJsonError(response, 400, "Enter a valid corrected login email address.");
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email, first_name, middle_name, last_name, mobile_number, is_active")
+            .eq("id", userId)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            writeJsonError(response, 400, profileResult.error.message || "Failed to load the selected applicant profile.");
+            return;
+        }
+        if (!profileResult.data) {
+            writeJsonError(response, 404, "Selected applicant account was not found.");
+            return;
+        }
+        if (profileResult.data.role !== "applicant") {
+            writeJsonError(response, 400, "Only applicant accounts can use the login email replacement action.");
+            return;
+        }
+
+        const existingProfileResult = await adminClient
+            .from("profiles")
+            .select("id, role, email")
+            .eq("email", newEmail)
+            .maybeSingle();
+
+        if (existingProfileResult.error) {
+            writeJsonError(response, 400, existingProfileResult.error.message || "Failed to check the corrected login email.");
+            return;
+        }
+        if (existingProfileResult.data && existingProfileResult.data.id !== userId) {
+            writeJsonError(response, 400, "Email address is already used by another account.");
+            return;
+        }
+
+        const authUsers = await listAllAuthUsers(adminClient);
+        const authUser = authUsers.find(function (user) {
+            return user && user.id === userId;
+        }) || null;
+        if (!authUser) {
+            writeJsonError(response, 404, "The selected applicant does not have an Auth login record.");
+            return;
+        }
+
+        const duplicateAuthUser = authUsers.find(function (user) {
+            return user &&
+                user.id !== userId &&
+                normalizeEmailAddress(user.email || "") === newEmail;
+        }) || null;
+        if (duplicateAuthUser) {
+            writeJsonError(response, 400, "Email address is already registered.");
+            return;
+        }
+
+        const previousProfileEmail = normalizeEmailAddress(profileResult.data.email || "");
+        const previousAuthEmail = normalizeEmailAddress(authUser.email || "");
+        const shouldUpdateProfileEmail = newEmail !== previousProfileEmail;
+        const shouldUpdateAuthEmail = newEmail !== previousAuthEmail;
+
+        if (!shouldUpdateProfileEmail && !shouldUpdateAuthEmail && !sendAccessEmail) {
+            writeJsonError(response, 400, "The corrected email already matches the current applicant login.");
+            return;
+        }
+
+        if (shouldUpdateProfileEmail) {
+            const profileUpdateResult = await adminClient
+                .from("profiles")
+                .update({ email: newEmail })
+                .eq("id", userId);
+
+            if (profileUpdateResult.error) {
+                writeJsonError(response, 400, explainAccountClaimError(profileUpdateResult.error.message || "Failed to update applicant profile email."));
+                return;
+            }
+        }
+
+        let updatedUser = authUser;
+        if (shouldUpdateAuthEmail) {
+            const updateResult = await adminClient.auth.admin.updateUserById(userId, {
+                email: newEmail,
+                email_confirm: true
+            });
+
+            updatedUser = updateResult && updateResult.data
+                ? (updateResult.data.user || updateResult.data)
+                : null;
+
+            if (updateResult.error || !updatedUser) {
+                if (shouldUpdateProfileEmail) {
+                    try {
+                        await adminClient
+                            .from("profiles")
+                            .update({ email: previousProfileEmail || null })
+                            .eq("id", userId);
+                    } catch (_rollbackError) {
+                        // Best effort only; keep the primary auth error below.
+                    }
+                }
+
+                writeJsonError(
+                    response,
+                    400,
+                    explainAccountClaimError((updateResult.error && updateResult.error.message) || "Login email replacement failed.")
+                );
+                return;
+            }
+        }
+
+        const responseUser = {
+            id: profileResult.data.id,
+            role: profileResult.data.role,
+            email: normalizeEmailAddress(updatedUser && updatedUser.email ? updatedUser.email : newEmail),
+            first_name: profileResult.data.first_name || "",
+            middle_name: profileResult.data.middle_name || "",
+            last_name: profileResult.data.last_name || "",
+            mobile_number: profileResult.data.mobile_number || "",
+            email_confirmed_at: updatedUser && (updatedUser.email_confirmed_at || updatedUser.confirmed_at)
+                ? (updatedUser.email_confirmed_at || updatedUser.confirmed_at)
+                : null
+        };
+
+        const accessEmail = {
+            requested: sendAccessEmail,
+            sent: false,
+            type: sendAccessEmail ? "password_reset" : "none",
+            warning: ""
+        };
+
+        if (sendAccessEmail) {
+            try {
+                await sendApplicantAccessResetEmail(responseUser.email, resolveBaseUrl(request));
+                accessEmail.sent = true;
+            } catch (error) {
+                accessEmail.warning = error && error.message
+                    ? "Password reset email could not be sent right now: " + error.message
+                    : "Password reset email could not be sent right now.";
+            }
+        }
+
+        await writeAuditLogEntry(adminClient, {
+            module: "user_management",
+            action: "replace_applicant_login_email",
+            actor_id: request.auth.user.id,
+            actor_role: request.auth.role,
+            target_user_id: profileResult.data.id,
+            target_role: profileResult.data.role,
+            target_email: responseUser.email,
+            target_label: buildFullName(
+                profileResult.data.first_name || "",
+                profileResult.data.middle_name || "",
+                profileResult.data.last_name || ""
+            ),
+            record_type: "user",
+            record_id: profileResult.data.id,
+            summary: "Replaced applicant login email for " + (responseUser.email || "selected applicant") + ".",
+            details: {
+                previous_profile_email: previousProfileEmail || "",
+                previous_auth_email: previousAuthEmail || "",
+                updated_email: responseUser.email || "",
+                password_reset_email_sent: accessEmail.sent,
+                password_reset_email_requested: accessEmail.requested,
+                password_reset_email_warning: accessEmail.warning || "",
+                email_confirmed_at: responseUser.email_confirmed_at
+            }
+        });
+
+        response.status(200).json({
+            ok: true,
+            user: responseUser,
+            access_email: accessEmail
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Login email replacement failed.");
     }
 });
 
