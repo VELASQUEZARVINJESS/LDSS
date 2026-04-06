@@ -110,8 +110,12 @@
         return target.toString();
     }
 
-    function upperText(value) {
-        return (value || "").toString().trim().toUpperCase();
+    function normalizeNameForSubmit(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s+/g, " ")
+            .trim()
+            .toUpperCase();
     }
 
     function bindUppercaseInput(inputId) {
@@ -121,9 +125,16 @@
         }
 
         input.addEventListener("input", function () {
-            const upperValue = upperText(input.value);
+            const upperValue = (input.value || "").toString().toUpperCase();
             if (input.value !== upperValue) {
                 input.value = upperValue;
+            }
+        });
+
+        input.addEventListener("blur", function () {
+            const normalizedValue = normalizeNameForSubmit(input.value);
+            if (input.value !== normalizedValue) {
+                input.value = normalizedValue;
             }
         });
     }
@@ -133,8 +144,8 @@
         setStatus("");
 
         const helper = authHelper();
-        const firstName = upperText(document.getElementById("firstName")?.value || "");
-        const lastName = upperText(document.getElementById("lastName")?.value || "");
+        const firstName = normalizeNameForSubmit(document.getElementById("firstName")?.value || "");
+        const lastName = normalizeNameForSubmit(document.getElementById("lastName")?.value || "");
         const email = helper && typeof helper.normalizeEmailAddress === "function"
             ? helper.normalizeEmailAddress(document.getElementById("email")?.value || "")
             : (document.getElementById("email")?.value || "").trim().toLowerCase();

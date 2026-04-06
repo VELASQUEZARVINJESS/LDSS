@@ -954,6 +954,27 @@ async function loadExamScheduleRecipientsForBatch(request, batchId, targetApplic
     };
 }
 
+function buildExamScheduleNotificationEntry(item, senderUserId) {
+    let message = "Your scholarship exam is now scheduled on " + (item.scheduleLabel || "the posted date") + " at " + (item.venue || "the assigned venue") + ".";
+    if (item.roomLabel) {
+        message += " Room: " + item.roomLabel + ".";
+    }
+    if (item.examControlNo) {
+        message += " Control No.: " + item.examControlNo + ".";
+    }
+    message += " Please check your email for the full exam instructions.";
+
+    return {
+        recipient_user_id: item.applicantId,
+        sender_user_id: senderUserId,
+        notification_type: "application",
+        title: "Exam Schedule Available",
+        message: message,
+        related_application_id: item.applicationId,
+        related_url: "application-detail.html?id=" + encodeURIComponent(item.applicationId)
+    };
+}
+
 function reminderSubjectForState(state) {
     if (state === "draft_only") {
         return "Complete Your LDSP Application";
@@ -3959,24 +3980,7 @@ app.post("/api/notifications/exam-schedule", authenticate, async function (reque
         let notificationError = "";
         try {
             const notificationPayload = recipients.map(function (item) {
-                let message = "Your scholarship exam is now scheduled on " + (item.scheduleLabel || "the posted date") + " at " + (item.venue || "the assigned venue") + ".";
-                if (item.roomLabel) {
-                    message += " Room: " + item.roomLabel + ".";
-                }
-                if (item.examControlNo) {
-                    message += " Control No.: " + item.examControlNo + ".";
-                }
-                message += " Please check your email for the full exam instructions.";
-
-                return {
-                    recipient_user_id: item.applicantId,
-                    sender_user_id: request.auth.user.id,
-                    notification_type: "application",
-                    title: "Exam Schedule Available",
-                    message: message,
-                    related_application_id: item.applicationId,
-                    related_url: "application-detail.html?id=" + encodeURIComponent(item.applicationId)
-                };
+                return buildExamScheduleNotificationEntry(item, request.auth.user.id);
             });
 
             for (let start = 0; start < notificationPayload.length; start += 100) {
@@ -4019,6 +4023,126 @@ app.post("/api/notifications/exam-schedule", authenticate, async function (reque
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Exam schedule email failed.");
+    }
+});
+
+app.post("/api/notifications/exam-schedule/single", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send direct exam schedule emails.");
+            return;
+        }
+
+        if (!mailServerConfigured()) {
+            writeJsonError(response, 503, "Server email is not configured. Add SMTP settings in the Node app environment first.");
+            return;
+        }
+
+        const batchId = nullIfBlank(request.body && request.body.batchId);
+        const applicationId = nullIfBlank(request.body && request.body.applicationId);
+        const customMessage = nullIfBlank(request.body && request.body.customMessage);
+
+        if (!batchId) {
+            writeJsonError(response, 400, "Batch ID is required.");
+            return;
+        }
+        if (!applicationId) {
+            writeJsonError(response, 400, "Application ID is required.");
+            return;
+        }
+        if (customMessage && customMessage.length > 500) {
+            writeJsonError(response, 400, "Exam schedule email note must stay within 500 characters.");
+            return;
+        }
+
+        let scheduleData;
+        try {
+            scheduleData = await loadExamScheduleRecipientsForBatch(request, batchId, [applicationId]);
+        } catch (scheduleError) {
+            const message = scheduleError && scheduleError.message ? scheduleError.message : "Failed to load the selected scheduled examinee.";
+            writeJsonError(response, /not found/i.test(message) ? 404 : 400, message);
+            return;
+        }
+
+        const batch = scheduleData.batch;
+        const recipient = scheduleData.recipients[0] || null;
+        if (!recipient) {
+            writeJsonError(response, 404, "The selected scheduled examinee was not found in this batch.");
+            return;
+        }
+        if (!recipient.email) {
+            writeJsonError(response, 400, "The selected examinee does not have an email address on file.");
+            return;
+        }
+
+        await sendExamScheduleEmailMail({
+            email: recipient.email,
+            applicantName: recipient.applicantName,
+            applicationNo: recipient.applicationNo,
+            batchLabel: recipient.batchLabel,
+            scheduleLabel: recipient.scheduleLabel,
+            venue: recipient.venue,
+            roomLabel: recipient.roomLabel,
+            seatNo: recipient.seatNo,
+            examControlNo: recipient.examControlNo,
+            customMessage: customMessage || "",
+            detailUrl: recipient.detailUrl,
+            lookupUrl: recipient.lookupUrl
+        });
+
+        let statusUpdated = false;
+        let statusUpdateError = "";
+        try {
+            const updateResult = await request.auth.client
+                .from("applications")
+                .update({
+                    status: "exam_scheduled",
+                    secretary_reviewer_id: request.auth.user.id
+                })
+                .eq("id", recipient.applicationId);
+
+            if (updateResult.error) {
+                throw new Error(updateResult.error.message || "Failed to update application status.");
+            }
+            statusUpdated = true;
+        } catch (updateError) {
+            statusUpdateError = updateError && updateError.message
+                ? updateError.message
+                : "Failed to update application status.";
+        }
+
+        let notificationSaved = false;
+        let notificationError = "";
+        try {
+            const insertResult = await request.auth.client
+                .from("notifications")
+                .insert([buildExamScheduleNotificationEntry(recipient, request.auth.user.id)]);
+
+            if (insertResult.error) {
+                throw new Error(insertResult.error.message || "Failed to save applicant notification.");
+            }
+            notificationSaved = true;
+        } catch (insertError) {
+            notificationError = insertError && insertError.message
+                ? insertError.message
+                : "Failed to save applicant notification.";
+        }
+
+        response.json({
+            ok: true,
+            batch_id: batch.id,
+            batch_label: batch.batch_label || "Exam Batch",
+            application_id: recipient.applicationId,
+            application_no: recipient.applicationNo,
+            applicant_name: recipient.applicantName,
+            sent_to_email: recipient.email,
+            status_updated: statusUpdated,
+            status_update_error: statusUpdateError,
+            notification_saved: notificationSaved,
+            notification_error: notificationError
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Direct exam schedule email failed.");
     }
 });
 

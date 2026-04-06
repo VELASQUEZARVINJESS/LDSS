@@ -7,6 +7,7 @@
     const LOCKED_RECORD_STATUS = "scheduled";
     const LEGACY_LOCKED_RECORD_STATUS = "exam_scheduled";
     const EXAM_SCHEDULE_EMAIL_API_PATH = "/api/notifications/exam-schedule";
+    const EXAM_SCHEDULE_SINGLE_EMAIL_API_PATH = "/api/notifications/exam-schedule/single";
     const EXAM_SCHEDULE_TEST_EMAIL_API_PATH = "/api/notifications/exam-schedule/test";
     const DEFAULT_CONTROL_START = 1001;
     const DEFAULT_ROOM_CAPACITY = 25;
@@ -14,6 +15,7 @@
     const EXAM_EMAIL_QUEUE_REFRESH_INTERVAL_MS = 15000;
     const DEFAULT_EXAM_SCHEDULE_EMAIL_NOTE = "Please bring your school ID or any valid ID for identification, and please bring one black ballpen on exam day.";
     const BATCH_META_MARKER = "[LDSS_BATCH_META]";
+    const LONG_BOND_PDF_FORMAT = [612, 936];
     const PDF_BRAND_ASSETS = [
         { key: "lgu", src: "../img/daet-lgu.png", label: "LGU DAET", width: 960, height: 960 }
     ];
@@ -33,6 +35,8 @@
     let resetConfirmResolver = null;
     let deleteConfirmModalInstance = null;
     let deleteConfirmResolver = null;
+    let manualAssignModalInstance = null;
+    let manualAssignmentContext = null;
     let currentEmailQueueJob = null;
     let emailQueueStatusAvailable = true;
     let emailQueueRefreshTimer = 0;
@@ -132,6 +136,16 @@
             }
         }
         return deleteConfirmModalInstance;
+    }
+
+    function getManualAssignModal() {
+        if (!manualAssignModalInstance) {
+            const modalEl = byId("examManagementManualAssignModal");
+            if (modalEl && window.bootstrap && window.bootstrap.Modal) {
+                manualAssignModalInstance = new window.bootstrap.Modal(modalEl);
+            }
+        }
+        return manualAssignModalInstance;
     }
 
     function workflow() {
@@ -458,6 +472,235 @@
             }
         });
         return max > 0 ? max : DEFAULT_ROOM_CAPACITY;
+    }
+
+    function plannedRoomLabelsFromConfig(roomCount, roomPrefix) {
+        const normalizedCount = Number(roomCount);
+        const normalizedPrefix = (roomPrefix || "Room").toString().trim() || "Room";
+        const labels = [];
+        for (let roomIndex = 1; roomIndex <= normalizedCount; roomIndex += 1) {
+            labels.push(normalizedPrefix + " " + String(roomIndex));
+        }
+        return labels;
+    }
+
+    function assignmentContextValues() {
+        const roomCountInput = Number((byId("examRoomCount") ? byId("examRoomCount").value : "").trim());
+        const roomCapacityInput = Number((byId("examRoomCapacity") ? byId("examRoomCapacity").value : "").trim());
+        const roomPrefixInput = (byId("examRoomPrefix") ? byId("examRoomPrefix").value : "").trim();
+
+        return {
+            roomCount: Number.isInteger(roomCountInput) && roomCountInput > 0
+                ? roomCountInput
+                : Math.max(plannedRoomCountForBatch(currentBatchId), 1),
+            roomCapacity: Number.isInteger(roomCapacityInput) && roomCapacityInput > 0
+                ? roomCapacityInput
+                : roomCapacityForBatch(currentBatchId),
+            roomPrefix: roomPrefixInput || roomPrefixForBatch(currentBatchId) || "Room"
+        };
+    }
+
+    function assignmentRoomLabels(batchId, values) {
+        const labels = [];
+        plannedRoomLabelsFromConfig(values.roomCount, values.roomPrefix).forEach(function (label) {
+            if (!labels.includes(label)) {
+                labels.push(label);
+            }
+        });
+        batchRecords(batchId).forEach(function (record) {
+            const label = (record.room_label || "").toString().trim();
+            if (label && !labels.includes(label)) {
+                labels.push(label);
+            }
+        });
+        return labels.sort(compareRoomLabels);
+    }
+
+    function batchEditable(batchId) {
+        return !batchRecords(batchId).some(function (record) {
+            return !isScheduledExamRecordStatus(record.status);
+        });
+    }
+
+    function existingBatchAssignment(batchId, applicationId) {
+        const targetBatchId = batchId || currentBatchId;
+        if (!targetBatchId || !applicationId) {
+            return null;
+        }
+        for (let index = 0; index < examRecords.length; index += 1) {
+            const record = examRecords[index];
+            if (record.batch_id === targetBatchId && record.application_id === applicationId) {
+                return record;
+            }
+        }
+        return null;
+    }
+
+    function nextAppendControlNumberForBatch(batchId) {
+        let maxInBatch = 0;
+        batchRecords(batchId).forEach(function (record) {
+            const numeric = Number((record.exam_control_no || "").toString().trim());
+            if (!Number.isNaN(numeric) && numeric > maxInBatch) {
+                maxInBatch = numeric;
+            }
+        });
+        if (maxInBatch > 0) {
+            return maxInBatch + 1;
+        }
+        return controlStartForBatch(batchId);
+    }
+
+    function scheduledSeatUsageForBatch(batchId, excludeApplicationId) {
+        const usage = {};
+        batchRecords(batchId).forEach(function (record) {
+            const label = (record.room_label || "").toString().trim();
+            const seatNo = Number(record.room_seat_no || 0);
+            if (!isScheduledExamRecordStatus(record.status) || !label || seatNo <= 0) {
+                return;
+            }
+            if (excludeApplicationId && record.application_id === excludeApplicationId) {
+                return;
+            }
+            if (!usage[label]) {
+                usage[label] = new Set();
+            }
+            usage[label].add(seatNo);
+        });
+        return usage;
+    }
+
+    function nextOpenSeatForRoom(seatUsage, roomLabel, roomCapacity) {
+        const usedSeats = seatUsage[roomLabel] || new Set();
+        for (let seatNo = 1; seatNo <= roomCapacity; seatNo += 1) {
+            if (!usedSeats.has(seatNo)) {
+                return seatNo;
+            }
+        }
+        return 0;
+    }
+
+    function markSeatAsUsed(seatUsage, roomLabel, seatNo) {
+        if (!seatUsage[roomLabel]) {
+            seatUsage[roomLabel] = new Set();
+        }
+        seatUsage[roomLabel].add(seatNo);
+    }
+
+    function nextAutomaticSeatTarget(roomLabels, seatUsage, roomCapacity) {
+        for (let index = 0; index < roomLabels.length; index += 1) {
+            const roomLabel = roomLabels[index];
+            const seatNo = nextOpenSeatForRoom(seatUsage, roomLabel, roomCapacity);
+            if (seatNo > 0) {
+                return {
+                    roomLabel: roomLabel,
+                    seatNo: seatNo
+                };
+            }
+        }
+        return null;
+    }
+
+    function validateEditableBatchState(targetBatchId) {
+        if (targetBatchId && !batchEditable(targetBatchId)) {
+            throw new Error("This batch already contains completed or encoded exam records, so room changes are locked for safety.");
+        }
+    }
+
+    function buildAssignmentPayload(applicationId, batchId, scheduledAt, target, nextControlRef) {
+        const existingRecord = existingBatchAssignment(batchId, applicationId);
+        const controlNo = existingRecord && existingRecord.exam_control_no
+            ? existingRecord.exam_control_no
+            : String(nextControlRef.value).padStart(4, "0");
+
+        if (!(existingRecord && existingRecord.exam_control_no)) {
+            nextControlRef.value += 1;
+        }
+
+        return {
+            application_id: applicationId,
+            batch_id: batchId,
+            exam_control_no: controlNo,
+            scheduled_at: existingRecord && existingRecord.scheduled_at ? existingRecord.scheduled_at : scheduledAt,
+            status: LOCKED_RECORD_STATUS,
+            room_label: target.roomLabel,
+            room_seat_no: target.seatNo
+        };
+    }
+
+    function resolveAssignmentTarget(batchId, values, options, applicationId) {
+        const roomLabels = assignmentRoomLabels(batchId, values);
+        const seatUsage = scheduledSeatUsageForBatch(batchId, applicationId);
+        const selectedRoom = (options && options.roomLabel ? options.roomLabel : "").toString().trim();
+        const mode = (options && options.mode ? options.mode : "append").toString().trim().toLowerCase() === "exact"
+            ? "exact"
+            : "append";
+
+        if (!roomLabels.length) {
+            throw new Error("Set at least one planned room before assigning an examinee.");
+        }
+
+        if (mode === "append") {
+            if (selectedRoom) {
+                if (!roomLabels.includes(selectedRoom)) {
+                    throw new Error("Choose a room from the current saved room plan first.");
+                }
+                const nextSeatInRoom = nextOpenSeatForRoom(seatUsage, selectedRoom, values.roomCapacity);
+                if (!nextSeatInRoom) {
+                    throw new Error(selectedRoom + " is already full. Choose another room or increase the examinees per room.");
+                }
+                return {
+                    roomLabel: selectedRoom,
+                    seatNo: nextSeatInRoom
+                };
+            }
+
+            const automaticTarget = nextAutomaticSeatTarget(roomLabels, seatUsage, values.roomCapacity);
+            if (!automaticTarget) {
+                throw new Error("No open seats remain in the planned room sequence. Increase Number of Rooms or Examinees Per Room first.");
+            }
+            return automaticTarget;
+        }
+
+        if (!selectedRoom) {
+            throw new Error("Choose a target room first.");
+        }
+        if (!roomLabels.includes(selectedRoom)) {
+            throw new Error("Choose a room from the current saved room plan first.");
+        }
+
+        const seatNo = Number(options && options.seatNo);
+        if (!Number.isInteger(seatNo) || seatNo <= 0) {
+            throw new Error("Seat number must be a whole number greater than zero.");
+        }
+        if (seatNo > values.roomCapacity) {
+            throw new Error("Seat number cannot exceed the configured examinees per room for this batch.");
+        }
+        if (seatUsage[selectedRoom] && seatUsage[selectedRoom].has(seatNo)) {
+            throw new Error(selectedRoom + " seat " + seatNo + " is already assigned. Choose another seat or use append mode.");
+        }
+        return {
+            roomLabel: selectedRoom,
+            seatNo: seatNo
+        };
+    }
+
+    function buildAppendAssignments(rows, values, batchId) {
+        const assignments = [];
+        const roomLabels = assignmentRoomLabels(batchId, values);
+        const seatUsage = scheduledSeatUsageForBatch(batchId, "");
+        const nextControlRef = { value: nextAppendControlNumberForBatch(batchId) };
+
+        for (let index = 0; index < rows.length; index += 1) {
+            const row = rows[index];
+            const automaticTarget = nextAutomaticSeatTarget(roomLabels, seatUsage, values.roomCapacity);
+            if (!automaticTarget) {
+                throw new Error("The checked Pending Exam applicants exceed the remaining room capacity. Increase Number of Rooms or Examinees Per Room first.");
+            }
+            assignments.push(buildAssignmentPayload(row.id, batchId, values.scheduledAt, automaticTarget, nextControlRef));
+            markSeatAsUsed(seatUsage, automaticTarget.roomLabel, automaticTarget.seatNo);
+        }
+
+        return assignments;
     }
 
     function selectableRow(row) {
@@ -939,12 +1182,19 @@
             const disabled = !selectableRow(row);
             const checked = selectedApplicationIds.has(row.id);
             const hint = disabled ? '<div class="small text-muted mt-1">Locked by completed or encoded exam records.</div>' : "";
-            const canSendIndividualTestEmail = Boolean(
+            const scheduledInCurrentBatch = Boolean(
                 currentBatchId
                 && currentBatchMemberIds.has(row.id)
                 && hasScheduledRecordInBatch(currentBatchId, row.id)
             );
+            const canSendIndividualTestEmail = Boolean(
+                currentBatchId
+                && scheduledInCurrentBatch
+            );
             const actionButtons = [
+                !disabled
+                    ? '<button class="btn btn-outline-dark btn-sm" type="button" data-assign-application-id="' + escapeHtml(row.id) + '">' + (scheduledInCurrentBatch ? "Edit Assignment" : "Assign Room") + "</button>"
+                    : "",
                 canSendIndividualTestEmail
                     ? '<button class="btn btn-outline-dark btn-sm" type="button" data-test-email-application-id="' + escapeHtml(row.id) + '">Send Test Email</button>'
                     : "",
@@ -1335,7 +1585,7 @@
                                             "<td><div class=\"fw-700\">" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div><div class=\"small text-muted\">" + escapeHtml(row.school_name || "-") + "</div></td>" +
                                             "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
                                             "<td>" + escapeHtml(row.room_seat_no || "-") + "</td>" +
-                                            '<td><div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-dark btn-sm" type="button" data-test-email-application-id="' + escapeHtml(row.application_id) + '">Send Test Email</button><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(buildVerificationUrl(row.application_id)) + '">Open Details</a></div></td>' +
+                                            '<td><div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-dark btn-sm" type="button" data-assign-application-id="' + escapeHtml(row.application_id) + '">Edit Assignment</button><button class="btn btn-outline-dark btn-sm" type="button" data-test-email-application-id="' + escapeHtml(row.application_id) + '">Send Test Email</button><a class="btn btn-outline-dark btn-sm" href="' + escapeHtml(buildVerificationUrl(row.application_id)) + '">Open Details</a></div></td>' +
                                         "</tr>"
                                     );
                                 }).join("") +
@@ -2404,6 +2654,320 @@
         });
     }
 
+    async function sendSingleExamScheduleEmail(batchId, applicationId, customMessage) {
+        return requestJson(EXAM_SCHEDULE_SINGLE_EMAIL_API_PATH, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                batchId: batchId || "",
+                applicationId: applicationId || "",
+                customMessage: (customMessage || "").trim()
+            })
+        });
+    }
+
+    function checkedPendingRowsForAppend() {
+        return selectedSelectableRows().filter(function (row) {
+            return normalizeStatus(row.status) === "pending_exam" && !hasScheduledRecordInBatch(currentBatchId, row.id);
+        });
+    }
+
+    function manualAssignmentSummary(values, applicationId) {
+        const modeInput = byId("examManualAssignMode");
+        const roomInput = byId("examManualAssignRoom");
+        const seatInput = byId("examManualAssignSeat");
+        const noteEl = byId("examManagementManualAssignNote");
+        const roomMetaEl = byId("examManagementManualAssignRoomMeta");
+        const seatField = byId("examManualAssignSeatField");
+        const mode = (modeInput ? modeInput.value : "append").toString().trim().toLowerCase() === "exact" ? "exact" : "append";
+        const roomLabel = (roomInput ? roomInput.value : "").toString().trim();
+
+        if (seatField) {
+            seatField.classList.toggle("d-none", mode !== "exact");
+        }
+
+        if (!noteEl || !roomMetaEl) {
+            return;
+        }
+
+        if (mode === "exact") {
+            roomMetaEl.textContent = "Pick a saved room, then choose the exact seat number for this examinee.";
+            noteEl.textContent = "Exact mode blocks duplicate seats in the same room and keeps the current exam control number if this applicant was already scheduled.";
+            return;
+        }
+
+        roomMetaEl.textContent = roomLabel
+            ? "The system will use the next open seat inside " + roomLabel + "."
+            : "Leave this on auto to place the examinee in the earliest room that still has an open seat.";
+
+        try {
+            const target = resolveAssignmentTarget(currentBatchId, values, {
+                mode: "append",
+                roomLabel: roomLabel
+            }, applicationId);
+            noteEl.textContent = "Append mode will place this examinee in " + target.roomLabel + ", seat " + target.seatNo + ".";
+        } catch (error) {
+            noteEl.textContent = error && error.message
+                ? error.message
+                : "Append mode uses the next open seat from the current room plan.";
+        }
+
+        if (seatInput) {
+            seatInput.value = "";
+        }
+    }
+
+    function populateManualAssignRoomOptions(selectedRoom) {
+        const roomInput = byId("examManualAssignRoom");
+        const values = assignmentContextValues();
+        const labels = assignmentRoomLabels(currentBatchId, values);
+
+        if (!roomInput) {
+            return;
+        }
+
+        const options = ['<option value="">Auto choose next open room</option>'];
+        labels.forEach(function (label) {
+            options.push('<option value="' + escapeHtml(label) + '">' + escapeHtml(label) + "</option>");
+        });
+        roomInput.innerHTML = options.join("");
+        roomInput.value = selectedRoom && labels.includes(selectedRoom) ? selectedRoom : "";
+    }
+
+    function openManualAssignModal(applicationId) {
+        const application = appById(applicationId);
+        const modal = getManualAssignModal();
+        const existingRecord = existingBatchAssignment(currentBatchId, applicationId);
+        const titleEl = byId("examManagementManualAssignTitle");
+        const copyEl = byId("examManagementManualAssignCopy");
+        const applicantEl = byId("examManagementManualAssignApplicant");
+        const applicantMetaEl = byId("examManagementManualAssignApplicantMeta");
+        const batchEl = byId("examManagementManualAssignBatch");
+        const batchMetaEl = byId("examManagementManualAssignBatchMeta");
+        const modeInput = byId("examManualAssignMode");
+        const roomInput = byId("examManualAssignRoom");
+        const seatInput = byId("examManualAssignSeat");
+        const values = assignmentContextValues();
+        const batch = batchById(currentBatchId);
+
+        if (!application) {
+            showStatus("The selected applicant could not be found in the exam list.", "alert-warning");
+            return;
+        }
+        if (!modal) {
+            showStatus("Manual room assignment modal is not available in this browser session.", "alert-warning");
+            return;
+        }
+
+        manualAssignmentContext = {
+            applicationId: application.id
+        };
+
+        if (titleEl) {
+            titleEl.textContent = existingRecord ? "Edit room assignment" : "Assign examinee to a room";
+        }
+        if (copyEl) {
+            copyEl.textContent = existingRecord
+                ? "Update this examinee's saved room placement without regenerating the whole room list."
+                : "Use the current room settings to place this examinee in the saved batch without regenerating the whole room list.";
+        }
+        if (applicantEl) {
+            applicantEl.textContent = application.applicant_name || "Unknown Applicant";
+        }
+        if (applicantMetaEl) {
+            applicantMetaEl.textContent = "LDSP No. " + (application.application_no || "-");
+        }
+        if (batchEl) {
+            batchEl.textContent = batch ? (batch.batch_label || "Saved Batch") : "Current room settings";
+        }
+        if (batchMetaEl) {
+            batchMetaEl.textContent = batch
+                ? "Changes will be saved into the currently loaded safe batch."
+                : "If no saved batch is loaded yet, the current form values will be used when you save.";
+        }
+
+        populateManualAssignRoomOptions(existingRecord && existingRecord.room_label ? existingRecord.room_label : "");
+
+        if (modeInput) {
+            modeInput.value = existingRecord ? "exact" : "append";
+        }
+        if (roomInput) {
+            roomInput.value = existingRecord && existingRecord.room_label ? existingRecord.room_label : roomInput.value;
+        }
+        if (seatInput) {
+            seatInput.value = existingRecord && existingRecord.room_seat_no ? String(existingRecord.room_seat_no) : "";
+        }
+
+        manualAssignmentSummary(values, applicationId);
+        modal.show();
+    }
+
+    async function handleAppendChecked() {
+        if (!roomHotfixAvailable) {
+            showStatus("Apply supabase/exam_room_assignment_hotfix_2026_03_28.sql first so room assignments can be saved.", "alert-warning");
+            return;
+        }
+
+        const values = readFormValues();
+        if (values.error) {
+            showStatus(values.error, "alert-warning");
+            return;
+        }
+
+        const pendingRows = checkedPendingRowsForAppend();
+        const button = byId("examAppendCheckedBtn");
+        const ignoredCount = selectedSelectableRows().length - pendingRows.length;
+
+        if (!pendingRows.length) {
+            showStatus("Check at least one Pending Exam applicant first before appending to the batch.", "alert-warning");
+            return;
+        }
+
+        if (button) {
+            button.disabled = true;
+            button.textContent = "Appending...";
+        }
+
+        try {
+            validateEditableBatchState(currentBatchId);
+            const batch = await createOrUpdateBatch(values);
+            currentBatchId = batch.id;
+
+            const assignments = buildAppendAssignments(pendingRows, values, batch.id);
+            await saveAssignments(assignments);
+            await updateApplicationStatuses(assignments.map(function (row) { return row.application_id; }), "exam_scheduled");
+
+            await loadData(batch.id);
+            showStatus(
+                "Late-examinee append complete. " + assignments.length + " applicant(s) were added to " + (batch.batch_label || "the selected batch") + " without regenerating the saved room list." + (ignoredCount > 0 ? " " + ignoredCount + " checked row(s) were ignored because they were already scheduled or not eligible for append." : ""),
+                "alert-success"
+            );
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to append the checked examinees.", "alert-danger");
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = "Append Checked to Batch";
+            }
+        }
+    }
+
+    async function handleManualAssignment(sendEmailAfterSave) {
+        const context = manualAssignmentContext;
+        const modeInput = byId("examManualAssignMode");
+        const roomInput = byId("examManualAssignRoom");
+        const seatInput = byId("examManualAssignSeat");
+        const noteInput = byId("examScheduleEmailNote");
+        const saveBtn = byId("examManagementManualAssignSaveBtn");
+        const saveEmailBtn = byId("examManagementManualAssignSaveEmailBtn");
+        const customMessage = noteInput ? noteInput.value.trim() : "";
+
+        if (!context || !context.applicationId) {
+            showStatus("Choose an examinee first before saving a manual room assignment.", "alert-warning");
+            return;
+        }
+        if (!roomHotfixAvailable) {
+            showStatus("Apply supabase/exam_room_assignment_hotfix_2026_03_28.sql first so room assignments can be saved.", "alert-warning");
+            return;
+        }
+
+        const values = readFormValues();
+        if (values.error) {
+            showStatus(values.error, "alert-warning");
+            return;
+        }
+
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = "Saving...";
+        }
+        if (saveEmailBtn) {
+            saveEmailBtn.disabled = true;
+            saveEmailBtn.textContent = sendEmailAfterSave ? "Sending..." : "Save and Email Applicant";
+        }
+
+        try {
+            validateEditableBatchState(currentBatchId);
+            const batch = await createOrUpdateBatch(values);
+            currentBatchId = batch.id;
+
+            const target = resolveAssignmentTarget(batch.id, values, {
+                mode: modeInput ? modeInput.value : "append",
+                roomLabel: roomInput ? roomInput.value : "",
+                seatNo: seatInput ? seatInput.value : ""
+            }, context.applicationId);
+            const assignment = buildAssignmentPayload(
+                context.applicationId,
+                batch.id,
+                values.scheduledAt,
+                target,
+                { value: nextAppendControlNumberForBatch(batch.id) }
+            );
+
+            await saveAssignments([assignment]);
+            await updateApplicationStatuses([context.applicationId], "exam_scheduled");
+
+            let emailResponse = null;
+            let emailError = null;
+            if (sendEmailAfterSave) {
+                try {
+                    emailResponse = await sendSingleExamScheduleEmail(batch.id, context.applicationId, customMessage);
+                } catch (error) {
+                    emailError = error;
+                }
+            }
+
+            const application = appById(context.applicationId);
+            const modal = getManualAssignModal();
+            if (modal) {
+                modal.hide();
+            }
+
+            await loadData(batch.id);
+
+            if (emailError) {
+                showStatus(
+                    "Room assignment saved for " + (application && application.applicant_name ? application.applicant_name : "the selected examinee") + " in " + target.roomLabel + ", seat " + target.seatNo + ", but the email could not be sent: " + emailError.message,
+                    "alert-warning"
+                );
+                return;
+            }
+
+            if (emailResponse && (emailResponse.status_update_error || emailResponse.notification_error)) {
+                const warningParts = [];
+                if (emailResponse.status_update_error) {
+                    warningParts.push(emailResponse.status_update_error);
+                }
+                if (emailResponse.notification_error) {
+                    warningParts.push(emailResponse.notification_error);
+                }
+                showStatus(
+                    "Room assignment saved for " + (application && application.applicant_name ? application.applicant_name : "the selected examinee") + " in " + target.roomLabel + ", seat " + target.seatNo + ", and the email was sent, but follow-up updates need review: " + warningParts.join(" "),
+                    "alert-warning"
+                );
+                return;
+            }
+
+            showStatus(
+                "Room assignment saved for " + (application && application.applicant_name ? application.applicant_name : "the selected examinee") + " in " + target.roomLabel + ", seat " + target.seatNo + "." + (emailResponse ? " The exam schedule email was sent immediately." : " You can now use Send Schedule Emails or Send Test Email for this applicant."),
+                "alert-success"
+            );
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to save the manual room assignment.", "alert-danger");
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = "Save Assignment";
+            }
+            if (saveEmailBtn) {
+                saveEmailBtn.disabled = false;
+                saveEmailBtn.textContent = "Save and Email Applicant";
+            }
+        }
+    }
+
     async function handleSendScheduleEmails() {
         const batch = batchById(currentBatchId);
         const recipients = scheduledRowsForBatch(currentBatchId);
@@ -2622,7 +3186,18 @@
 
     function buildPrintHtml(mode, batch, rows) {
         const lguHref = new URL("../img/daet-lgu.png", window.location.href).href;
+        const isAttendanceMode = mode === "attendance";
+        const isRoomSectionMode = mode === "rooms" || isAttendanceMode;
         const roomCollections = roomCollectionsForBatch(batch.id, rows);
+        const printableRoomCollections = isAttendanceMode
+            ? roomCollections.filter(function (room) { return room.rows.length; })
+            : roomCollections;
+        const pageCss = isAttendanceMode
+            ? "@page{size:8.5in 13in;margin:0.3in;}"
+            : "@page{size:legal portrait;margin:0.4in;}";
+        const titleText = isAttendanceMode
+            ? "Official Examination Attendance Sheet"
+            : (mode === "rooms" ? "Official Examination Room List" : "Official Examination Masterlist");
         const headerHtml =
             '<div class="print-official-header">' +
                 '<div class="print-logo-row">' +
@@ -2630,7 +3205,7 @@
                 "</div>" +
                 '<div class="print-title-block">' +
                     '<div class="print-title-kicker">LGU Daet Scholarship System</div>' +
-                    '<div class="print-title-main">' + escapeHtml(mode === "rooms" ? "Official Examination Room List" : "Official Examination Masterlist") + "</div>" +
+                    '<div class="print-title-main">' + escapeHtml(titleText) + "</div>" +
                 "</div>" +
                 '<div class="print-meta">' +
                     '<div><strong>Batch:</strong> ' + escapeHtml(batch.batch_label || "-") + '</div>' +
@@ -2639,16 +3214,28 @@
                 "</div>" +
             "</div>";
 
-        const roomSections = roomCollections.map(function (room) {
+        const roomSections = printableRoomCollections.map(function (room) {
             const roomRows = room.rows;
             return (
                 '<section class="room-section">' +
                 headerHtml +
                 '<div class="room-banner">' + escapeHtml(upperRoomLabel(room.roomLabel)) + "</div>" +
                 (roomRows.length
-                    ? '<table class="print-table"><thead><tr><th>Applicant Full Name</th><th>LDSP No.</th><th>Seat No.</th></tr></thead><tbody>' +
+                    ? ('<table class="print-table"><thead><tr>' +
+                        '<th>Applicant Full Name</th>' +
+                        '<th>LDSP No.</th>' +
+                        '<th>Seat No.</th>' +
+                        (isAttendanceMode ? '<th>Signature</th>' : "") +
+                        '</tr></thead><tbody>') +
                         roomRows.map(function (row) {
-                            return "<tr><td>" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</td><td>" + escapeHtml(row.application_no || "-") + "</td><td>" + escapeHtml(row.room_seat_no || "-") + "</td></tr>";
+                            return (
+                                "<tr>" +
+                                    "<td>" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</td>" +
+                                    "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
+                                    "<td>" + escapeHtml(row.room_seat_no || "-") + "</td>" +
+                                    (isAttendanceMode ? '<td class="print-signature-cell"></td>' : "") +
+                                "</tr>"
+                            );
                         }).join("") +
                         "</tbody></table>"
                     : '<div class="print-empty-room">No examinees assigned to this room yet.</div>') +
@@ -2666,9 +3253,9 @@
 
         return [
             "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\" /><title>LDSP Exam Print</title><style>",
-            "@page{size:legal portrait;margin:0.4in;} body{font-family:Arial,sans-serif;margin:0;color:#0f172a;} .print-official-header{margin-bottom:10px;border-bottom:1.2px solid #0f172a;padding-bottom:8px;} .print-logo-row{display:flex;justify-content:center;align-items:flex-start;margin-bottom:6px;} .print-logo-stack{width:116px;text-align:center;font-size:8px;font-weight:800;letter-spacing:0.05em;color:#334155;line-height:1.15;} .print-logo-stack div{white-space:nowrap;} .print-logo-frame{height:46px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;} .print-logo{display:block;object-fit:contain;width:auto;height:auto;} .print-logo-lgu{width:42px;height:42px;} .print-title-block{text-align:center;margin-bottom:8px;} .print-title-kicker{font-size:9px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:2px;} .print-title-main{font-size:15px;font-weight:800;letter-spacing:0.01em;margin-bottom:0;} .print-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;font-size:10px;} .print-meta div{padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;} .room-section{margin-bottom:10px;page-break-after:always;page-break-inside:avoid;} .room-section:last-child{page-break-after:auto;} .room-banner,.master-banner{margin:0 0 6px;padding:6px 10px;border:1.2px solid #0f172a;border-radius:8px;text-align:center;font-size:17px;font-weight:900;letter-spacing:0.08em;background:#f8fafc;} .print-table{width:100%;border-collapse:collapse;font-size:10px;} .print-table th,.print-table td{border:1px solid #94a3b8;padding:5px 6px;text-align:left;vertical-align:top;} .print-table th{background:#e2e8f0;font-size:10px;font-weight:800;letter-spacing:0.02em;text-transform:uppercase;} .print-table tbody tr:nth-child(even){background:#f8fafc;} .print-empty-room{padding:10px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;color:#64748b;font-size:10px;}",
+            pageCss + " body{font-family:Arial,sans-serif;margin:0;color:#0f172a;} .print-official-header{margin-bottom:10px;border-bottom:1.2px solid #0f172a;padding-bottom:8px;} .print-logo-row{display:flex;justify-content:center;align-items:flex-start;margin-bottom:6px;} .print-logo-stack{width:116px;text-align:center;font-size:8px;font-weight:800;letter-spacing:0.05em;color:#334155;line-height:1.15;} .print-logo-stack div{white-space:nowrap;} .print-logo-frame{height:46px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;} .print-logo{display:block;object-fit:contain;width:auto;height:auto;} .print-logo-lgu{width:42px;height:42px;} .print-title-block{text-align:center;margin-bottom:8px;} .print-title-kicker{font-size:9px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:2px;} .print-title-main{font-size:15px;font-weight:800;letter-spacing:0.01em;margin-bottom:0;} .print-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;font-size:10px;} .print-meta div{padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;} .room-section{margin-bottom:10px;page-break-after:always;page-break-inside:avoid;} .room-section:last-child{page-break-after:auto;} .room-banner,.master-banner{margin:0 0 6px;padding:6px 10px;border:1.2px solid #0f172a;border-radius:8px;text-align:center;font-size:17px;font-weight:900;letter-spacing:0.08em;background:#f8fafc;} .print-table{width:100%;border-collapse:collapse;font-size:" + (isAttendanceMode ? "9px" : "10px") + ";} .print-table th,.print-table td{border:1px solid #94a3b8;padding:" + (isAttendanceMode ? "4px 5px" : "5px 6px") + ";text-align:left;vertical-align:top;} .print-table th{background:#e2e8f0;font-size:" + (isAttendanceMode ? "9px" : "10px") + ";font-weight:800;letter-spacing:0.02em;text-transform:uppercase;} .print-table tbody tr:nth-child(even){background:#f8fafc;} .print-empty-room{padding:10px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;color:#64748b;font-size:10px;} .print-signature-cell{width:34%;height:" + (isAttendanceMode ? "24px" : "28px") + ";}",
             "</style></head><body>",
-            mode === "rooms" ? roomSections : masterTable,
+            isRoomSectionMode ? roomSections : masterTable,
             "<script>window.onload=function(){window.print();};<\/script></body></html>"
         ].join("");
     }
@@ -2737,19 +3324,28 @@
 
     function pdfFileName(mode, batch) {
         const batchSlug = fileSlug(batch && batch.batch_label ? batch.batch_label : "", "batch");
-        return "ldss-" + (mode === "rooms" ? "room-list" : "masterlist") + "-" + batchSlug + ".pdf";
+        const suffix = mode === "rooms"
+            ? "room-list"
+            : (mode === "attendance" ? "attendance-sheet" : "masterlist");
+        return "ldss-" + suffix + "-" + batchSlug + ".pdf";
     }
 
-    function drawPdfBrandHeader(doc, titleText, assets) {
+    function drawPdfBrandHeader(doc, titleText, assets, options) {
+        const settings = options || {};
+        const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        const topY = 20;
-        const logoBoxHeight = 40;
-        const logoBoxWidth = 72;
+        const topY = compact ? 14 : 20;
+        const logoBoxHeight = compact ? 26 : 40;
+        const titleTopY = compact ? 56 : 78;
+        const titleFontSize = compact ? 7.5 : 8.5;
+        const mainTitleY = compact ? 68 : 92;
+        const mainTitleFontSize = compact ? 12.5 : 15;
         const logo = assets && assets.length ? assets[0] : null;
         if (logo) {
             const naturalWidth = Math.max(1, Number(logo.width) || 1);
             const naturalHeight = Math.max(1, Number(logo.height) || 1);
-            const scale = Math.min(44 / naturalWidth, 44 / naturalHeight);
+            const maxLogoSize = compact ? 28 : 44;
+            const scale = Math.min(maxLogoSize / naturalWidth, maxLogoSize / naturalHeight);
             const drawWidth = Math.max(18, naturalWidth * scale);
             const drawHeight = Math.max(18, naturalHeight * scale);
             const x = (pageWidth - drawWidth) / 2;
@@ -2758,26 +3354,28 @@
                 doc.addImage(logo.dataUrl, "PNG", x, y, drawWidth, drawHeight);
             }
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(8);
+            doc.setFontSize(compact ? 7 : 8);
             doc.setTextColor(51, 65, 85);
-            doc.text(logo.label, pageWidth / 2, topY + logoBoxHeight + 10, { align: "center" });
+            doc.text(logo.label, pageWidth / 2, topY + logoBoxHeight + (compact ? 8 : 10), { align: "center" });
         }
 
         doc.setTextColor(100, 116, 139);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(8.5);
-        doc.text("LGU DAET SCHOLARSHIP SYSTEM", pageWidth / 2, 78, { align: "center" });
+        doc.setFontSize(titleFontSize);
+        doc.text("LGU DAET SCHOLARSHIP SYSTEM", pageWidth / 2, titleTopY, { align: "center" });
         doc.setTextColor(15, 23, 42);
-        doc.setFontSize(15);
-        doc.text(titleText, pageWidth / 2, 92, { align: "center" });
+        doc.setFontSize(mainTitleFontSize);
+        doc.text(titleText, pageWidth / 2, mainTitleY, { align: "center" });
     }
 
-    function drawPdfBatchMeta(doc, batch, startY) {
+    function drawPdfBatchMeta(doc, batch, startY, options) {
+        const settings = options || {};
+        const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        const marginLeft = 36;
-        const gap = 8;
+        const marginLeft = compact ? 28 : 36;
+        const gap = compact ? 6 : 8;
         const boxWidth = (pageWidth - (marginLeft * 2) - (gap * 2)) / 3;
-        const boxHeight = 28;
+        const boxHeight = compact ? 22 : 28;
         const rows = [
             ["Batch", batch.batch_label || "-"],
             ["Exam Date", formatDateTime(batch.exam_datetime || "")],
@@ -2794,40 +3392,47 @@
             doc.setFillColor(248, 250, 252);
             doc.roundedRect(x, y, boxWidth, boxHeight, 8, 8, "FD");
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(7);
+            doc.setFontSize(compact ? 6 : 7);
             doc.setTextColor(100, 116, 139);
-            doc.text(entry[0].toUpperCase(), x + 8, y + 10);
+            doc.text(entry[0].toUpperCase(), x + 7, y + (compact ? 8 : 10));
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(9.5);
+            doc.setFontSize(compact ? 8.2 : 9.5);
             doc.setTextColor(15, 23, 42);
-            doc.text(entry[1], x + 8, y + 21, { maxWidth: boxWidth - 16 });
+            doc.text(entry[1], x + 7, y + (compact ? 16 : 21), { maxWidth: boxWidth - 14 });
         });
 
-        return startY + boxHeight + 12;
+        return startY + boxHeight + (compact ? 8 : 12);
     }
 
-    function renderPdfHeader(doc, batch, titleText, assets) {
+    function renderPdfHeader(doc, batch, titleText, assets, options) {
+        const settings = options || {};
+        const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        drawPdfBrandHeader(doc, titleText, assets);
-        const metaEndY = drawPdfBatchMeta(doc, batch, 102);
+        const marginLeft = compact ? 28 : 36;
+        drawPdfBrandHeader(doc, titleText, assets, settings);
+        const metaEndY = drawPdfBatchMeta(doc, batch, compact ? 78 : 102, settings);
         doc.setDrawColor(15, 23, 42);
         doc.setLineWidth(0.8);
-        doc.line(36, metaEndY, pageWidth - 36, metaEndY);
-        return metaEndY + 10;
+        doc.line(marginLeft, metaEndY, pageWidth - marginLeft, metaEndY);
+        return metaEndY + (compact ? 8 : 10);
     }
 
-    function drawPdfRoomBanner(doc, roomLabel, startY) {
+    function drawPdfRoomBanner(doc, roomLabel, startY, options) {
+        const settings = options || {};
+        const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        const x = 36;
-        const width = pageWidth - 72;
+        const marginLeft = compact ? 28 : 36;
+        const x = marginLeft;
+        const width = pageWidth - (marginLeft * 2);
+        const height = compact ? 22 : 28;
         doc.setDrawColor(15, 23, 42);
         doc.setFillColor(248, 250, 252);
-        doc.roundedRect(x, startY, width, 28, 8, 8, "FD");
+        doc.roundedRect(x, startY, width, height, 8, 8, "FD");
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(16);
+        doc.setFontSize(compact ? 12.5 : 16);
         doc.setTextColor(15, 23, 42);
-        doc.text(upperRoomLabel(roomLabel), pageWidth / 2, startY + 18, { align: "center" });
-        return startY + 34;
+        doc.text(upperRoomLabel(roomLabel), pageWidth / 2, startY + (compact ? 14 : 18), { align: "center" });
+        return startY + (compact ? 28 : 34);
     }
 
     async function downloadPdf(mode) {
@@ -2848,7 +3453,7 @@
         const doc = new JsPdf({
             orientation: "portrait",
             unit: "pt",
-            format: "legal"
+            format: mode === "attendance" ? LONG_BOND_PDF_FORMAT : "legal"
         });
 
         if (typeof doc.autoTable !== "function") {
@@ -2912,6 +3517,57 @@
                     }
                 });
             });
+        } else if (mode === "attendance") {
+            const roomCollections = roomCollectionsForBatch(currentBatchId, rows).filter(function (room) {
+                return room.rows.length > 0;
+            });
+
+            roomCollections.forEach(function (room, index) {
+                if (index > 0) {
+                    doc.addPage();
+                }
+                let startY = renderPdfHeader(doc, batch, "OFFICIAL EXAMINATION ATTENDANCE SHEET", brandAssets, { compact: true });
+                startY = drawPdfRoomBanner(doc, room.roomLabel, startY, { compact: true });
+
+                doc.autoTable({
+                    startY: startY + 2,
+                    head: [["Applicant Full Name", "LDSP No.", "Seat No.", "Signature"]],
+                    body: room.rows.map(function (row) {
+                        return [
+                            row.applicant_name || "Unknown Applicant",
+                            row.application_no || "-",
+                            row.room_seat_no || "-",
+                            ""
+                        ];
+                    }),
+                    margin: { left: 28, right: 28 },
+                    styles: {
+                        font: "helvetica",
+                        fontSize: 7.4,
+                        cellPadding: 3.2,
+                        minCellHeight: 19,
+                        lineColor: [148, 163, 184],
+                        lineWidth: 0.5,
+                        textColor: [15, 23, 42]
+                    },
+                    headStyles: {
+                        fillColor: [226, 232, 240],
+                        textColor: [15, 23, 42],
+                        fontStyle: "bold",
+                        fontSize: 7.2,
+                        cellPadding: 3.5
+                    },
+                    alternateRowStyles: {
+                        fillColor: [248, 250, 252]
+                    },
+                    columnStyles: {
+                        0: { cellWidth: 210 },
+                        1: { cellWidth: 100 },
+                        2: { cellWidth: 48, halign: "center" },
+                        3: { cellWidth: 154 }
+                    }
+                });
+            });
         } else {
             const startY = renderPdfHeader(doc, batch, "OFFICIAL EXAMINATION MASTERLIST", brandAssets);
             doc.autoTable({
@@ -2952,7 +3608,10 @@
         }
 
         doc.save(pdfFileName(mode, batch));
-        showStatus((mode === "rooms" ? "Room list" : "Masterlist") + " PDF downloaded successfully for " + (batch.batch_label || "the selected batch") + ".", "alert-success");
+        showStatus(
+            (mode === "rooms" ? "Room list" : (mode === "attendance" ? "Attendance sheet" : "Masterlist")) + " PDF downloaded successfully for " + (batch.batch_label || "the selected batch") + ".",
+            "alert-success"
+        );
     }
 
     function openPrint(mode) {
@@ -2996,12 +3655,20 @@
         const headerCheckbox = byId("examManagementSelectAllCheckbox");
         const tableBody = byId("examManagementEligibleTableBody");
         const generateBtn = byId("examGenerateBtn");
+        const appendCheckedBtn = byId("examAppendCheckedBtn");
         const sendScheduleEmailsBtn = byId("examSendScheduleEmailsBtn");
         const sendTestEmailBtn = byId("examSendTestEmailBtn");
         const printRoomsBtn = byId("examPrintRoomsBtn");
         const printMasterBtn = byId("examPrintMasterBtn");
+        const printAttendanceBtn = byId("examPrintAttendanceBtn");
         const testEmailInput = byId("examScheduleTestEmail");
         const previewShell = byId("examManagementRoomPreview");
+        const manualAssignModalEl = byId("examManagementManualAssignModal");
+        const manualAssignCancelBtn = byId("examManagementManualAssignCancelBtn");
+        const manualAssignSaveBtn = byId("examManagementManualAssignSaveBtn");
+        const manualAssignSaveEmailBtn = byId("examManagementManualAssignSaveEmailBtn");
+        const manualAssignModeInput = byId("examManualAssignMode");
+        const manualAssignRoomInput = byId("examManualAssignRoom");
 
         if (refreshBtn) {
             refreshBtn.addEventListener("click", function () {
@@ -3165,6 +3832,14 @@
         }
         if (tableBody) {
             tableBody.addEventListener("click", function (event) {
+                const assignButton = event.target.closest("[data-assign-application-id]");
+                if (assignButton) {
+                    const assignApplicationId = assignButton.getAttribute("data-assign-application-id") || "";
+                    if (assignApplicationId) {
+                        openManualAssignModal(assignApplicationId);
+                    }
+                    return;
+                }
                 const testEmailButton = event.target.closest("[data-test-email-application-id]");
                 if (!testEmailButton) {
                     return;
@@ -3191,6 +3866,14 @@
         }
         if (previewShell) {
             previewShell.addEventListener("click", function (event) {
+                const assignButton = event.target.closest("[data-assign-application-id]");
+                if (assignButton) {
+                    const assignApplicationId = assignButton.getAttribute("data-assign-application-id") || "";
+                    if (assignApplicationId) {
+                        openManualAssignModal(assignApplicationId);
+                    }
+                    return;
+                }
                 const testEmailButton = event.target.closest("[data-test-email-application-id]");
                 if (testEmailButton) {
                     const applicationId = testEmailButton.getAttribute("data-test-email-application-id") || "";
@@ -3210,6 +3893,9 @@
         if (generateBtn) {
             generateBtn.addEventListener("click", handleGenerate);
         }
+        if (appendCheckedBtn) {
+            appendCheckedBtn.addEventListener("click", handleAppendChecked);
+        }
         if (sendScheduleEmailsBtn) {
             sendScheduleEmailsBtn.addEventListener("click", handleSendScheduleEmails);
         }
@@ -3222,9 +3908,48 @@
         if (printMasterBtn) {
             printMasterBtn.addEventListener("click", function () { downloadPdf("master"); });
         }
+        if (printAttendanceBtn) {
+            printAttendanceBtn.addEventListener("click", function () { downloadPdf("attendance"); });
+        }
         if (testEmailInput) {
             testEmailInput.addEventListener("input", function () {
                 testEmailInput.value = (testEmailInput.value || "").toString().replace(/\s+/g, "").toLowerCase();
+            });
+        }
+        if (manualAssignModeInput) {
+            manualAssignModeInput.addEventListener("change", function () {
+                if (!manualAssignmentContext || !manualAssignmentContext.applicationId) {
+                    return;
+                }
+                manualAssignmentSummary(assignmentContextValues(), manualAssignmentContext.applicationId);
+            });
+        }
+        if (manualAssignRoomInput) {
+            manualAssignRoomInput.addEventListener("change", function () {
+                if (!manualAssignmentContext || !manualAssignmentContext.applicationId) {
+                    return;
+                }
+                manualAssignmentSummary(assignmentContextValues(), manualAssignmentContext.applicationId);
+            });
+        }
+        if (manualAssignCancelBtn) {
+            manualAssignCancelBtn.addEventListener("click", function () {
+                manualAssignmentContext = null;
+            });
+        }
+        if (manualAssignSaveBtn) {
+            manualAssignSaveBtn.addEventListener("click", function () {
+                handleManualAssignment(false);
+            });
+        }
+        if (manualAssignSaveEmailBtn) {
+            manualAssignSaveEmailBtn.addEventListener("click", function () {
+                handleManualAssignment(true);
+            });
+        }
+        if (manualAssignModalEl) {
+            manualAssignModalEl.addEventListener("hidden.bs.modal", function () {
+                manualAssignmentContext = null;
             });
         }
     }
