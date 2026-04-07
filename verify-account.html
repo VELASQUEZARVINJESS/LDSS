@@ -20,7 +20,7 @@
                         <img class="ldss-auth-logo mb-2" src="img/daet-lgu.png" alt="LGU Daet Logo" />
                         <h1 class="h4 ldss-auth-title">Verify Account</h1>
                         <p class="ldss-auth-subtitle mb-1">Confirm your email using the OTP code</p>
-                        <p class="small text-muted mb-0">Enter the 6-digit code sent to your email address.</p>
+                        <p class="small text-muted mb-0">Enter the 8-digit code sent to your email address.</p>
                     </div>
                     <div class="alert alert-danger d-none" id="verifyStatus" role="alert"></div>
                     <form id="verifyForm" novalidate>
@@ -30,7 +30,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="small mb-1" for="verifyOtpCode">OTP Code</label>
-                            <input class="form-control" id="verifyOtpCode" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit code" autocomplete="one-time-code" />
+                            <input class="form-control" id="verifyOtpCode" type="text" inputmode="numeric" maxlength="8" placeholder="Enter 8-digit code" autocomplete="one-time-code" />
                         </div>
                         <div class="small text-muted mb-3" id="verifyHelperText">Check your spam or junk folder if the code does not arrive right away.</div>
                         <button class="btn btn-primary w-100 py-2" id="verifySubmitBtn" type="submit">Verify Account</button>
@@ -48,7 +48,7 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="js/supabase-config.js"></script>
         <script src="js/supabase-auth-email-helper.js"></script>
-        <script src="js/supabase-verify-account.js?v=20260322-1"></script>
+        <script src="js/supabase-verify-account.js?v=20260407-1"></script>
         <script src="js/scripts.js"></script>
     </body>
 </html>

@@ -44,6 +44,8 @@
                     controlNo: "-",
                     scoreText: "-",
                     percentageText: "-",
+                    roomLabel: "",
+                    seatNo: "",
                     resultLabel: "Pending",
                     resultChipClass: "ldss-chip-neutral"
                 };
@@ -286,15 +288,33 @@
         return !!(application && !application.is_locked && EDITABLE_STATUSES.includes((application.status || "").toString()));
     }
 
+    function hasMissingExamAssignmentColumns(error) {
+        return !!(error && /room_label|room_seat_no/i.test(error.message || ""));
+    }
+
     async function fetchExamRecord(context, application) {
         const primary = await context.client
             .from("exam_records")
-            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, remarks, updated_at")
+            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, remarks, room_label, room_seat_no, updated_at")
             .eq("application_id", application.id)
             .maybeSingle();
 
         if (!primary.error) {
             return primary.data || null;
+        }
+
+        if (hasMissingExamAssignmentColumns(primary.error)) {
+            const withoutAssignments = await context.client
+                .from("exam_records")
+                .select("application_id, exam_control_no, raw_score, percentage_score, result, status, remarks, updated_at")
+                .eq("application_id", application.id)
+                .maybeSingle();
+
+            if (!withoutAssignments.error) {
+                return withoutAssignments.data
+                    ? Object.assign({ room_label: "", room_seat_no: null }, withoutAssignments.data)
+                    : null;
+            }
         }
 
         // TODO(Supabase): remove fallback once exam_records is deployed in production.
@@ -321,6 +341,8 @@
             exam_control_no: null,
             raw_score: fallback.data.exam_score,
             percentage_score: fallback.data.exam_score,
+            room_label: "",
+            room_seat_no: null,
             result: inferredResult,
             status: "encoded",
             remarks: null,
@@ -433,6 +455,8 @@
 
         const examSummary = workflow().examSummaryFromRecord(examRecord);
         setText("detailExamControlNo", examSummary.controlNo || "-");
+        setText("detailExamRoom", examSummary.roomLabel || "Not posted yet");
+        setText("detailExamSeatNo", examSummary.seatNo || "Not posted yet");
         setText("detailExamRawScore", examSummary.scoreText || "-");
         setText("detailExamPercentage", examSummary.percentageText || "-");
         setChip("detailExamResultChip", examSummary.resultLabel || "Pending", examSummary.resultChipClass || "ldss-chip-neutral");

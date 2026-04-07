@@ -61,6 +61,11 @@
             label: "Created Walk-In Application",
             chipClass: "ldss-chip-success",
             moduleLabel: "Walk-In Intake"
+        },
+        update_applicant_profile: {
+            label: "Updated Applicant Profile",
+            chipClass: "ldss-chip-accent",
+            moduleLabel: "Secretary Verification"
         }
     };
 

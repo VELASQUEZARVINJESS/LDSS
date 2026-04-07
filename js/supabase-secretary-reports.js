@@ -483,7 +483,7 @@
                 statusBody.innerHTML = summary.statusRows.map(function (row) {
                     return (
                         "<tr>" +
-                        "<td><span class=\"" + escapeHtml(row.meta.chipClass || "ldss-chip-neutral") + "\">" + escapeHtml(row.meta.label || row.key) + "</span></td>" +
+                        "<td><span class=\"ldss-chip " + escapeHtml(row.meta.chipClass || "ldss-chip-neutral") + "\">" + escapeHtml(row.meta.label || row.key) + "</span></td>" +
                         "<td class=\"text-end\">" + escapeHtml(String(row.count)) + "</td>" +
                         "</tr>"
                     );

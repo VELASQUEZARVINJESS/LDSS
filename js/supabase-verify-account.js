@@ -2,6 +2,7 @@
     "use strict";
 
     const CONFIG_PLACEHOLDERS = ["YOUR_PROJECT_REF", "YOUR_SUPABASE_ANON_KEY"];
+    const EMAIL_OTP_LENGTH = 8;
     const VERIFY_MESSAGES = {
         register: "Account created successfully. Enter the OTP code sent to your email to activate your LDSP account.",
         login: "Your account is not verified yet. Enter the latest OTP code sent to your email to continue.",
@@ -44,7 +45,7 @@
     }
 
     function sanitizeOtp(value) {
-        return (value || "").toString().replace(/\D/g, "").slice(0, 6);
+        return (value || "").toString().replace(/\D/g, "").slice(0, EMAIL_OTP_LENGTH);
     }
 
     function buildLoginUrl(email, flags) {
@@ -127,8 +128,8 @@
         if (otpInput) {
             otpInput.value = otpCode;
         }
-        if (otpCode.length !== 6) {
-            setStatus("Enter the 6-digit OTP code sent to your email.", "alert-danger");
+        if (otpCode.length !== EMAIL_OTP_LENGTH) {
+            setStatus("Enter the " + EMAIL_OTP_LENGTH + "-digit OTP code sent to your email.", "alert-danger");
             return;
         }
 

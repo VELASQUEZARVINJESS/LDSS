@@ -1979,6 +1979,76 @@
         return base;
     }
 
+    function isMissingRpcFunctionError(error, functionName) {
+        const text = [
+            error && error.message ? error.message : "",
+            error && error.details ? error.details : "",
+            error && error.hint ? error.hint : ""
+        ].join(" ").toLowerCase();
+        const normalizedName = (functionName || "").toString().toLowerCase();
+        if (!text || !normalizedName) {
+            return false;
+        }
+        return text.includes(normalizedName) && /does not exist|function|schema cache|could not find/i.test(text);
+    }
+
+    function hotfixSaveErrorMessage() {
+        return "Secretary applicant profile saving needs the Supabase hotfix `supabase/secretary_applicant_profile_edit_hotfix_2026_04_07.sql`. Apply it in Supabase SQL Editor, then refresh this page and try again.";
+    }
+
+    async function saveApplicantProfilePatch(profilePatch) {
+        const payload = Object.assign({}, profilePatch || {});
+
+        if (!profilesSupportsPlaceOfBirth) {
+            delete payload.place_of_birth;
+        }
+
+        const rpcResult = await authContext.client.rpc("secretary_update_applicant_profile", {
+            p_application_id: currentApplication.id,
+            p_profile_patch: payload
+        });
+
+        if (!rpcResult.error) {
+            if (!rpcResult.data || typeof rpcResult.data !== "object") {
+                throw new Error("Applicant profile update did not return the saved profile record.");
+            }
+            if (profilesSupportsPlaceOfBirth && typeof rpcResult.data.place_of_birth === "undefined") {
+                profilesSupportsPlaceOfBirth = false;
+            }
+            return rpcResult.data;
+        }
+
+        if (!isMissingRpcFunctionError(rpcResult.error, "secretary_update_applicant_profile")) {
+            throw new Error("Failed to save applicant profile corrections: " + rpcResult.error.message);
+        }
+
+        let profileResult = await authContext.client
+            .from("profiles")
+            .update(payload)
+            .eq("id", currentApplication.applicant_id)
+            .select(profileSelectFields())
+            .maybeSingle();
+
+        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(profileResult.error, "place_of_birth")) {
+            profilesSupportsPlaceOfBirth = false;
+            delete payload.place_of_birth;
+            profileResult = await authContext.client
+                .from("profiles")
+                .update(payload)
+                .eq("id", currentApplication.applicant_id)
+                .select(profileSelectFields())
+                .maybeSingle();
+        }
+
+        if (profileResult.error) {
+            throw new Error("Failed to save applicant profile corrections: " + profileResult.error.message);
+        }
+        if (!profileResult.data) {
+            throw new Error(hotfixSaveErrorMessage());
+        }
+        return profileResult.data;
+    }
+
     function isMissingProfilesColumnError(error, columnName) {
         const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
         const normalizedColumn = (columnName || "").toString().toLowerCase();
@@ -2834,28 +2904,7 @@
         }
 
         const payloads = collectApplicantEditPayload();
-
-        let profileResult = await authContext.client
-            .from("profiles")
-            .update(payloads.profilePatch)
-            .eq("id", currentApplication.applicant_id)
-            .select(profileSelectFields())
-            .maybeSingle();
-
-        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(profileResult.error, "place_of_birth")) {
-            profilesSupportsPlaceOfBirth = false;
-            delete payloads.profilePatch.place_of_birth;
-            profileResult = await authContext.client
-                .from("profiles")
-                .update(payloads.profilePatch)
-                .eq("id", currentApplication.applicant_id)
-                .select(profileSelectFields())
-                .maybeSingle();
-        }
-
-        if (profileResult.error) {
-            throw new Error("Failed to save applicant profile corrections: " + profileResult.error.message);
-        }
+        const savedProfile = await saveApplicantProfilePatch(payloads.profilePatch);
 
         const applicationResult = await authContext.client
             .from("applications")
@@ -2867,8 +2916,11 @@
         if (applicationResult.error) {
             throw new Error("Profile corrections were saved, but application detail update failed: " + applicationResult.error.message);
         }
+        if (!applicationResult.data) {
+            throw new Error("Profile corrections were saved, but the application detail update did not return the saved record.");
+        }
 
-        currentProfile = profileResult.data || currentProfile;
+        currentProfile = savedProfile || currentProfile;
         currentApplication = applicationResult.data || currentApplication;
         currentAuxMeta = Object.assign({}, currentAuxMeta || {}, payloads.auxPatch);
         writeAuxMeta(currentApplication.applicant_id, currentApplication.id, currentAuxMeta);

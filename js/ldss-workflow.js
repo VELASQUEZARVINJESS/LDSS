@@ -195,6 +195,8 @@
                 controlNo: "-",
                 scoreText: "-",
                 percentageText: "-",
+                roomLabel: "",
+                seatNo: "",
                 result: "pending",
                 resultLabel: EXAM_RESULT_META.pending.label,
                 resultChipClass: EXAM_RESULT_META.pending.chipClass
@@ -205,11 +207,18 @@
         const percent = examRecord.percentage_score;
         const result = normalizeExamResult(examRecord.result);
         const resultMeta = examResultMeta(result);
+        const roomLabel = (examRecord.room_label || "").toString().trim();
+        const rawSeatNo = examRecord.room_seat_no;
+        const seatNo = rawSeatNo === null || typeof rawSeatNo === "undefined" || String(rawSeatNo).trim() === ""
+            ? ""
+            : String(rawSeatNo);
 
         return {
             controlNo: examRecord.exam_control_no || "-",
             scoreText: score === null || typeof score === "undefined" ? "-" : String(score),
             percentageText: percent === null || typeof percent === "undefined" ? "-" : String(percent) + "%",
+            roomLabel: roomLabel,
+            seatNo: seatNo,
             result: result,
             resultLabel: resultMeta.label,
             resultChipClass: resultMeta.chipClass

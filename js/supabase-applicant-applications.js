@@ -24,6 +24,8 @@
                 return {
                     scoreText: "-",
                     percentageText: "-",
+                    roomLabel: "",
+                    seatNo: "",
                     resultLabel: "Pending",
                     resultChipClass: "ldss-chip-neutral"
                 };
@@ -243,6 +245,20 @@
             return '<span class="ldss-chip ldss-chip-neutral">Not Taken</span>';
         }
 
+        const detailLines = [];
+        if (examSummary.roomLabel || examSummary.seatNo) {
+            const assignmentParts = [];
+            if (examSummary.roomLabel) {
+                assignmentParts.push("Room: " + examSummary.roomLabel);
+            }
+            if (examSummary.seatNo) {
+                assignmentParts.push("Seat No.: " + examSummary.seatNo);
+            }
+            if (assignmentParts.length) {
+                detailLines.push(assignmentParts.join(" | "));
+            }
+        }
+
         let extra = "";
         if (examSummary.scoreText !== "-" && examSummary.percentageText !== "-") {
             extra = "Raw: " + examSummary.scoreText + " | " + examSummary.percentageText;
@@ -254,9 +270,15 @@
             extra = "Result not yet encoded";
         }
 
+        if (extra) {
+            detailLines.push(extra);
+        }
+
         return (
             '<span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span>" +
-            (extra ? '<div class="small text-muted mt-1">' + escapeHtml(extra) + "</div>" : "")
+            detailLines.map(function (line) {
+                return '<div class="small text-muted mt-1">' + escapeHtml(line) + "</div>";
+            }).join("")
         );
     }
 
@@ -464,6 +486,10 @@
         return map;
     }
 
+    function hasMissingExamAssignmentColumns(error) {
+        return !!(error && /room_label|room_seat_no/i.test(error.message || ""));
+    }
+
     async function loadExamMap(context, applicationIds) {
         if (!applicationIds.length) {
             return {};
@@ -471,11 +497,24 @@
 
         const primary = await context.client
             .from("exam_records")
-            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, created_at, updated_at")
+            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, room_label, room_seat_no, created_at, updated_at")
             .in("application_id", applicationIds);
 
         if (!primary.error) {
             return latestRowByApplication(primary.data || []);
+        }
+
+        if (hasMissingExamAssignmentColumns(primary.error)) {
+            const withoutAssignments = await context.client
+                .from("exam_records")
+                .select("application_id, exam_control_no, raw_score, percentage_score, result, status, created_at, updated_at")
+                .in("application_id", applicationIds);
+
+            if (!withoutAssignments.error) {
+                return latestRowByApplication((withoutAssignments.data || []).map(function (row) {
+                    return Object.assign({ room_label: "", room_seat_no: null }, row);
+                }));
+            }
         }
 
         // TODO(Supabase): remove fallback once exam_records is deployed in production.
@@ -494,6 +533,8 @@
                 exam_control_no: null,
                 raw_score: row.exam_score,
                 percentage_score: row.exam_score,
+                room_label: "",
+                room_seat_no: null,
                 result: "pending",
                 status: "encoded",
                 created_at: row.created_at,

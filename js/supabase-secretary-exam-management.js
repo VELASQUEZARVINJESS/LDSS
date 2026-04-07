@@ -3184,16 +3184,28 @@
         }
     }
 
+    function headerMetaEntries(batch, options) {
+        const settings = options || {};
+        const entries = [];
+        if (!settings.hideBatch) {
+            entries.push(["Batch", batch.batch_label || "-"]);
+        }
+        entries.push(["Exam Date", formatDateTime(batch.exam_datetime || "")]);
+        return entries;
+    }
+
     function buildPrintHtml(mode, batch, rows) {
         const lguHref = new URL("../img/daet-lgu.png", window.location.href).href;
         const isAttendanceMode = mode === "attendance";
+        const isRoomListMode = mode === "rooms";
         const isRoomSectionMode = mode === "rooms" || isAttendanceMode;
         const roomCollections = roomCollectionsForBatch(batch.id, rows);
         const printableRoomCollections = isAttendanceMode
             ? roomCollections.filter(function (room) { return room.rows.length; })
             : roomCollections;
+        const metaEntries = headerMetaEntries(batch, { hideBatch: isAttendanceMode });
         const pageCss = isAttendanceMode
-            ? "@page{size:8.5in 13in;margin:0.3in;}"
+            ? "@page{size:8.5in 13in;margin:0.2in;}"
             : "@page{size:legal portrait;margin:0.4in;}";
         const titleText = isAttendanceMode
             ? "Official Examination Attendance Sheet"
@@ -3207,10 +3219,10 @@
                     '<div class="print-title-kicker">LGU Daet Scholarship System</div>' +
                     '<div class="print-title-main">' + escapeHtml(titleText) + "</div>" +
                 "</div>" +
-                '<div class="print-meta">' +
-                    '<div><strong>Batch:</strong> ' + escapeHtml(batch.batch_label || "-") + '</div>' +
-                    '<div><strong>Exam Date:</strong> ' + escapeHtml(formatDateTime(batch.exam_datetime || "")) + '</div>' +
-                    '<div><strong>Venue:</strong> ' + escapeHtml(batch.venue || "-") + '</div>' +
+                '<div class="print-meta" style="grid-template-columns:repeat(' + metaEntries.length + ',minmax(0,1fr));">' +
+                    metaEntries.map(function (entry) {
+                        return '<div><strong>' + escapeHtml(entry[0]) + ":</strong> " + escapeHtml(entry[1]) + "</div>";
+                    }).join("") +
                 "</div>" +
             "</div>";
 
@@ -3221,19 +3233,27 @@
                 headerHtml +
                 '<div class="room-banner">' + escapeHtml(upperRoomLabel(room.roomLabel)) + "</div>" +
                 (roomRows.length
-                    ? ('<table class="print-table"><thead><tr>' +
-                        '<th>Applicant Full Name</th>' +
-                        '<th>LDSP No.</th>' +
-                        '<th>Seat No.</th>' +
-                        (isAttendanceMode ? '<th>Signature</th>' : "") +
+                    ? ('<table class="print-table' + (isAttendanceMode ? ' attendance-table' : "") + '"><thead><tr>' +
+                        (isAttendanceMode
+                            ? '<th class="print-col-seat">Seat No.</th>' +
+                                '<th class="print-col-name">Applicant Full Name</th>' +
+                                '<th class="print-col-ldsp">LDSP No.</th>' +
+                                '<th class="print-col-signature">Signature</th>'
+                            : '<th>Applicant Full Name</th>' +
+                                '<th>LDSP No.</th>' +
+                                '<th>Seat No.</th>') +
                         '</tr></thead><tbody>') +
                         roomRows.map(function (row) {
                             return (
                                 "<tr>" +
-                                    "<td>" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</td>" +
-                                    "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
-                                    "<td>" + escapeHtml(row.room_seat_no || "-") + "</td>" +
-                                    (isAttendanceMode ? '<td class="print-signature-cell"></td>' : "") +
+                                    (isAttendanceMode
+                                        ? '<td class="print-col-seat">' + escapeHtml(row.room_seat_no || "-") + "</td>" +
+                                            '<td class="print-col-name"><strong>' + escapeHtml(row.applicant_name || "Unknown Applicant") + '</strong></td>' +
+                                            '<td class="print-col-ldsp">' + escapeHtml(row.application_no || "-") + "</td>" +
+                                            '<td class="print-signature-cell print-col-signature"></td>'
+                                        : "<td>" + (isRoomListMode ? "<strong>" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</strong>" : escapeHtml(row.applicant_name || "Unknown Applicant")) + "</td>" +
+                                            "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
+                                            "<td>" + escapeHtml(row.room_seat_no || "-") + "</td>") +
                                 "</tr>"
                             );
                         }).join("") +
@@ -3253,7 +3273,7 @@
 
         return [
             "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\" /><title>LDSP Exam Print</title><style>",
-            pageCss + " body{font-family:Arial,sans-serif;margin:0;color:#0f172a;} .print-official-header{margin-bottom:10px;border-bottom:1.2px solid #0f172a;padding-bottom:8px;} .print-logo-row{display:flex;justify-content:center;align-items:flex-start;margin-bottom:6px;} .print-logo-stack{width:116px;text-align:center;font-size:8px;font-weight:800;letter-spacing:0.05em;color:#334155;line-height:1.15;} .print-logo-stack div{white-space:nowrap;} .print-logo-frame{height:46px;display:flex;align-items:center;justify-content:center;margin-bottom:4px;} .print-logo{display:block;object-fit:contain;width:auto;height:auto;} .print-logo-lgu{width:42px;height:42px;} .print-title-block{text-align:center;margin-bottom:8px;} .print-title-kicker{font-size:9px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:2px;} .print-title-main{font-size:15px;font-weight:800;letter-spacing:0.01em;margin-bottom:0;} .print-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;font-size:10px;} .print-meta div{padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;} .room-section{margin-bottom:10px;page-break-after:always;page-break-inside:avoid;} .room-section:last-child{page-break-after:auto;} .room-banner,.master-banner{margin:0 0 6px;padding:6px 10px;border:1.2px solid #0f172a;border-radius:8px;text-align:center;font-size:17px;font-weight:900;letter-spacing:0.08em;background:#f8fafc;} .print-table{width:100%;border-collapse:collapse;font-size:" + (isAttendanceMode ? "9px" : "10px") + ";} .print-table th,.print-table td{border:1px solid #94a3b8;padding:" + (isAttendanceMode ? "4px 5px" : "5px 6px") + ";text-align:left;vertical-align:top;} .print-table th{background:#e2e8f0;font-size:" + (isAttendanceMode ? "9px" : "10px") + ";font-weight:800;letter-spacing:0.02em;text-transform:uppercase;} .print-table tbody tr:nth-child(even){background:#f8fafc;} .print-empty-room{padding:10px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;color:#64748b;font-size:10px;} .print-signature-cell{width:34%;height:" + (isAttendanceMode ? "24px" : "28px") + ";}",
+            pageCss + " body{font-family:Arial,sans-serif;margin:0;color:#0f172a;} .print-official-header{margin-bottom:" + (isAttendanceMode ? "8px" : "10px") + ";border-bottom:1.2px solid #0f172a;padding-bottom:" + (isAttendanceMode ? "6px" : "8px") + ";} .print-logo-row{display:flex;justify-content:center;align-items:flex-start;margin-bottom:" + (isAttendanceMode ? "4px" : "6px") + ";} .print-logo-stack{width:116px;text-align:center;font-size:8px;font-weight:800;letter-spacing:0.05em;color:#334155;line-height:1.15;} .print-logo-stack div{white-space:nowrap;} .print-logo-frame{height:" + (isAttendanceMode ? "40px" : "46px") + ";display:flex;align-items:center;justify-content:center;margin-bottom:" + (isAttendanceMode ? "2px" : "4px") + ";} .print-logo{display:block;object-fit:contain;width:auto;height:auto;} .print-logo-lgu{width:" + (isAttendanceMode ? "36px" : "42px") + ";height:" + (isAttendanceMode ? "36px" : "42px") + ";} .print-title-block{text-align:center;margin-bottom:" + (isAttendanceMode ? "6px" : "8px") + ";} .print-title-kicker{font-size:" + (isAttendanceMode ? "8.5px" : "9px") + ";font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:2px;} .print-title-main{font-size:" + (isAttendanceMode ? "14px" : "15px") + ";font-weight:800;letter-spacing:0.01em;margin-bottom:0;} .print-meta{display:grid;gap:" + (isAttendanceMode ? "4px" : "5px") + ";font-size:" + (isAttendanceMode ? "9.5px" : "10px") + ";} .print-meta div{padding:" + (isAttendanceMode ? "4px 6px" : "5px 7px") + ";border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;} .room-section{margin-bottom:" + (isAttendanceMode ? "6px" : "10px") + ";page-break-after:always;page-break-inside:avoid;} .room-section:last-child{page-break-after:auto;} .room-banner,.master-banner{margin:0 0 " + (isAttendanceMode ? "5px" : "6px") + ";padding:" + (isAttendanceMode ? "5px 10px" : "6px 10px") + ";border:1.2px solid #0f172a;border-radius:8px;text-align:center;font-size:" + (isAttendanceMode ? "18px" : "17px") + ";font-weight:900;letter-spacing:0.08em;background:#f8fafc;} .print-table{width:100%;border-collapse:collapse;font-size:" + (isAttendanceMode ? "11.45px" : "10px") + ";} .print-table th,.print-table td{border:1px solid #94a3b8;padding:" + (isAttendanceMode ? "4.5px 5.5px" : "5px 6px") + ";text-align:left;vertical-align:middle;} .print-table th{background:#e2e8f0;font-size:" + (isAttendanceMode ? "11.1px" : "10px") + ";font-weight:800;letter-spacing:0.02em;text-transform:uppercase;} .print-table tbody tr:nth-child(even){background:#f8fafc;} .print-table.attendance-table .print-col-seat,.print-table.attendance-table .print-col-ldsp{text-align:center;white-space:nowrap;} .print-table.attendance-table .print-col-seat{width:10%;} .print-table.attendance-table .print-col-name{width:42%;} .print-table.attendance-table .print-col-ldsp{width:18%;} .print-table.attendance-table .print-col-signature{width:30%;} .print-empty-room{padding:10px;border:1px dashed #94a3b8;border-radius:8px;background:#f8fafc;color:#64748b;font-size:10px;} .print-signature-cell{height:" + (isAttendanceMode ? "26px" : "28px") + ";}",
             "</style></head><body>",
             isRoomSectionMode ? roomSections : masterTable,
             "<script>window.onload=function(){window.print();};<\/script></body></html>"
@@ -3334,17 +3354,17 @@
         const settings = options || {};
         const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        const topY = compact ? 14 : 20;
-        const logoBoxHeight = compact ? 26 : 40;
-        const titleTopY = compact ? 56 : 78;
-        const titleFontSize = compact ? 7.5 : 8.5;
-        const mainTitleY = compact ? 68 : 92;
-        const mainTitleFontSize = compact ? 12.5 : 15;
+        const topY = compact ? 10 : 20;
+        const logoBoxHeight = compact ? 22 : 40;
+        const titleTopY = compact ? 47 : 78;
+        const titleFontSize = compact ? 7.2 : 8.5;
+        const mainTitleY = compact ? 58 : 92;
+        const mainTitleFontSize = compact ? 12.3 : 15;
         const logo = assets && assets.length ? assets[0] : null;
         if (logo) {
             const naturalWidth = Math.max(1, Number(logo.width) || 1);
             const naturalHeight = Math.max(1, Number(logo.height) || 1);
-            const maxLogoSize = compact ? 28 : 44;
+            const maxLogoSize = compact ? 24 : 44;
             const scale = Math.min(maxLogoSize / naturalWidth, maxLogoSize / naturalHeight);
             const drawWidth = Math.max(18, naturalWidth * scale);
             const drawHeight = Math.max(18, naturalHeight * scale);
@@ -3354,9 +3374,9 @@
                 doc.addImage(logo.dataUrl, "PNG", x, y, drawWidth, drawHeight);
             }
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(compact ? 7 : 8);
+            doc.setFontSize(compact ? 6.6 : 8);
             doc.setTextColor(51, 65, 85);
-            doc.text(logo.label, pageWidth / 2, topY + logoBoxHeight + (compact ? 8 : 10), { align: "center" });
+            doc.text(logo.label, pageWidth / 2, topY + logoBoxHeight + (compact ? 7 : 10), { align: "center" });
         }
 
         doc.setTextColor(100, 116, 139);
@@ -3371,18 +3391,14 @@
     function drawPdfBatchMeta(doc, batch, startY, options) {
         const settings = options || {};
         const compact = Boolean(settings.compact);
+        const metaEntries = headerMetaEntries(batch, { hideBatch: Boolean(settings.hideBatch) });
         const pageWidth = doc.internal.pageSize.getWidth();
-        const marginLeft = compact ? 28 : 36;
-        const gap = compact ? 6 : 8;
-        const boxWidth = (pageWidth - (marginLeft * 2) - (gap * 2)) / 3;
-        const boxHeight = compact ? 22 : 28;
-        const rows = [
-            ["Batch", batch.batch_label || "-"],
-            ["Exam Date", formatDateTime(batch.exam_datetime || "")],
-            ["Venue", batch.venue || "-"]
-        ];
+        const marginLeft = compact ? 20 : 36;
+        const gap = compact ? 5 : 8;
+        const boxWidth = (pageWidth - (marginLeft * 2) - (gap * (metaEntries.length - 1))) / metaEntries.length;
+        const boxHeight = compact ? 20 : 28;
 
-        rows.forEach(function (entry, index) {
+        metaEntries.forEach(function (entry, index) {
             const column = index;
             const row = 0;
             const x = marginLeft + (column * (boxWidth + gap));
@@ -3392,47 +3408,47 @@
             doc.setFillColor(248, 250, 252);
             doc.roundedRect(x, y, boxWidth, boxHeight, 8, 8, "FD");
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(compact ? 6 : 7);
+            doc.setFontSize(compact ? 5.8 : 7);
             doc.setTextColor(100, 116, 139);
-            doc.text(entry[0].toUpperCase(), x + 7, y + (compact ? 8 : 10));
+            doc.text(entry[0].toUpperCase(), x + 7, y + (compact ? 7.5 : 10));
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(compact ? 8.2 : 9.5);
+            doc.setFontSize(compact ? 8 : 9.5);
             doc.setTextColor(15, 23, 42);
-            doc.text(entry[1], x + 7, y + (compact ? 16 : 21), { maxWidth: boxWidth - 14 });
+            doc.text(entry[1], x + 7, y + (compact ? 15 : 21), { maxWidth: boxWidth - 14 });
         });
 
-        return startY + boxHeight + (compact ? 8 : 12);
+        return startY + boxHeight + (compact ? 6 : 12);
     }
 
     function renderPdfHeader(doc, batch, titleText, assets, options) {
         const settings = options || {};
         const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        const marginLeft = compact ? 28 : 36;
+        const marginLeft = compact ? 20 : 36;
         drawPdfBrandHeader(doc, titleText, assets, settings);
-        const metaEndY = drawPdfBatchMeta(doc, batch, compact ? 78 : 102, settings);
+        const metaEndY = drawPdfBatchMeta(doc, batch, compact ? 68 : 102, settings);
         doc.setDrawColor(15, 23, 42);
         doc.setLineWidth(0.8);
         doc.line(marginLeft, metaEndY, pageWidth - marginLeft, metaEndY);
-        return metaEndY + (compact ? 8 : 10);
+        return metaEndY + (compact ? 6 : 10);
     }
 
     function drawPdfRoomBanner(doc, roomLabel, startY, options) {
         const settings = options || {};
         const compact = Boolean(settings.compact);
         const pageWidth = doc.internal.pageSize.getWidth();
-        const marginLeft = compact ? 28 : 36;
+        const marginLeft = compact ? 20 : 36;
         const x = marginLeft;
         const width = pageWidth - (marginLeft * 2);
-        const height = compact ? 22 : 28;
+        const height = compact ? 20 : 28;
         doc.setDrawColor(15, 23, 42);
         doc.setFillColor(248, 250, 252);
         doc.roundedRect(x, startY, width, height, 8, 8, "FD");
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(compact ? 12.5 : 16);
+        doc.setFontSize(compact ? 12.8 : 16);
         doc.setTextColor(15, 23, 42);
-        doc.text(upperRoomLabel(roomLabel), pageWidth / 2, startY + (compact ? 14 : 18), { align: "center" });
-        return startY + (compact ? 28 : 34);
+        doc.text(upperRoomLabel(roomLabel), pageWidth / 2, startY + (compact ? 13.5 : 18), { align: "center" });
+        return startY + (compact ? 25 : 34);
     }
 
     async function downloadPdf(mode) {
@@ -3511,7 +3527,7 @@
                         fillColor: [248, 250, 252]
                     },
                     columnStyles: {
-                        0: { cellWidth: 330 },
+                        0: { cellWidth: 330, fontStyle: "bold" },
                         1: { cellWidth: 140 },
                         2: { cellWidth: 62, halign: "center" }
                     }
@@ -3526,26 +3542,27 @@
                 if (index > 0) {
                     doc.addPage();
                 }
-                let startY = renderPdfHeader(doc, batch, "OFFICIAL EXAMINATION ATTENDANCE SHEET", brandAssets, { compact: true });
+                let startY = renderPdfHeader(doc, batch, "OFFICIAL EXAMINATION ATTENDANCE SHEET", brandAssets, { compact: true, hideBatch: true });
                 startY = drawPdfRoomBanner(doc, room.roomLabel, startY, { compact: true });
 
                 doc.autoTable({
                     startY: startY + 2,
-                    head: [["Applicant Full Name", "LDSP No.", "Seat No.", "Signature"]],
+                    head: [["Seat No.", "Applicant Full Name", "LDSP No.", "Signature"]],
                     body: room.rows.map(function (row) {
                         return [
+                            row.room_seat_no || "-",
                             row.applicant_name || "Unknown Applicant",
                             row.application_no || "-",
-                            row.room_seat_no || "-",
                             ""
                         ];
                     }),
-                    margin: { left: 28, right: 28 },
+                    margin: { left: 20, right: 20 },
                     styles: {
                         font: "helvetica",
-                        fontSize: 7.4,
-                        cellPadding: 3.2,
-                        minCellHeight: 19,
+                        fontSize: 9.9,
+                        cellPadding: 3.4,
+                        minCellHeight: 22.5,
+                        valign: "middle",
                         lineColor: [148, 163, 184],
                         lineWidth: 0.5,
                         textColor: [15, 23, 42]
@@ -3554,17 +3571,17 @@
                         fillColor: [226, 232, 240],
                         textColor: [15, 23, 42],
                         fontStyle: "bold",
-                        fontSize: 7.2,
-                        cellPadding: 3.5
+                        fontSize: 9.5,
+                        cellPadding: 3.7
                     },
                     alternateRowStyles: {
                         fillColor: [248, 250, 252]
                     },
                     columnStyles: {
-                        0: { cellWidth: 210 },
-                        1: { cellWidth: 100 },
-                        2: { cellWidth: 48, halign: "center" },
-                        3: { cellWidth: 154 }
+                        0: { cellWidth: 50, halign: "center" },
+                        1: { cellWidth: 248, fontStyle: "bold" },
+                        2: { cellWidth: 102, halign: "center" },
+                        3: { cellWidth: 172 }
                     }
                 });
             });
