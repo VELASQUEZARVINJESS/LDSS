@@ -95,6 +95,9 @@
             nextStepForApplicant: function () {
                 return "Wait for an update from the scholarship office.";
             },
+            isExamCheckingStage: function () {
+                return false;
+            },
             examSummaryFromRecord: function () {
                 return {
                     controlNo: "-",
@@ -839,9 +842,11 @@
         const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
         const examValue = hasNumericExam
             ? ("Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText)
+            : (workflow().isExamCheckingStage && workflow().isExamCheckingStage(application.status)
+                ? "Checking Examination"
             : (normalizedStatus === "pending_exam" || normalizedStatus === "exam_scheduled" || normalizedStatus === "exam_completed"
                 ? "Exam processing"
-                : "No score yet");
+                : "No score yet"));
 
         setText("dashboardExamValue", examValue);
         setChip("dashboardExamChip", examSummary.resultLabel, examSummary.resultChipClass);
@@ -1168,28 +1173,7 @@
                 ? "Only 1 submitted application is allowed per user. Update your existing application instead."
                 : (intakeIsClosed ? intakeHint : "")
         );
-
-        if (latestApplication && latestApplication.id) {
-            const detailUrl = "application-detail.html?id=" + encodeURIComponent(latestApplication.id);
-            setActionLink("dashboardHeaderViewApplicationBtn", detailUrl, "View My Application", false);
-            setActionLink("dashboardQuickViewApplicationBtn", detailUrl, "View My Application", false);
-        } else {
-            setActionLink(
-                "dashboardHeaderViewApplicationBtn",
-                "applicant-application-form.html",
-                intakeIsClosed ? "Application Closed" : "Start Application",
-                intakeIsClosed,
-                intakeIsClosed ? intakeHint : ""
-            );
-            setActionLink("dashboardQuickViewApplicationBtn", "javascript:void(0);", "No Application Yet", true);
-        }
-
-        if (latestDraft && latestDraft.id) {
-            const draftUrl = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
-            setActionLink("dashboardContinueDraftBtn", draftUrl, "Continue Draft", false);
-        } else {
-            setActionLink("dashboardContinueDraftBtn", "javascript:void(0);", "No Draft Yet", true);
-        }
+        setActionLink("dashboardMyApplicationsBtn", "applicant-applications.html", "My Applications", false);
     }
 
     function dashboardMobileSections() {
@@ -1263,6 +1247,10 @@
             return;
         }
 
+        if (window.ldssWorkflowControlsReadyPromise && typeof window.ldssWorkflowControlsReadyPromise.then === "function") {
+            await window.ldssWorkflowControlsReadyPromise;
+        }
+
         showStatus("");
 
         try {
@@ -1270,7 +1258,6 @@
                 loadProfileSummary(context),
                 loadLatestApplication(context),
                 loadLatestEditableDraft(context),
-                loadNotifications(context),
                 loadLatestBlockingApplication(context),
                 loadIntakePolicy(context)
             ]);
@@ -1278,9 +1265,8 @@
             const profileSummary = headResults[0];
             const latestApplication = headResults[1];
             const latestDraft = headResults[2];
-            const notificationPayload = headResults[3];
-            const latestBlockingApplication = headResults[4];
-            const intakePolicy = headResults[5];
+            const latestBlockingApplication = headResults[3];
+            const intakePolicy = headResults[4];
             const latestApplicationAuxMeta = latestApplication
                 ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
                 : { available: false, payload: null };
@@ -1288,7 +1274,6 @@
 
             renderProfileHeader(profileSummary, context.user.email);
             renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy);
-            renderNotificationDropdown(notificationPayload.rows, notificationPayload.unreadCount);
             showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
             if (completionReminder) {
                 if (shouldShowProfileReminderModal(context.user.id, completionReminder)) {
@@ -1297,38 +1282,6 @@
             } else {
                 clearProfileReminderDismissed(context.user.id);
             }
-
-            if (!latestApplication) {
-                renderCards(null, null, null, null, intakePolicy);
-                renderRequirementSummary([]);
-                const eventsWithoutApp = buildDashboardEvents(null, null, null, null, notificationPayload.rows);
-                renderRecentActivity(eventsWithoutApp);
-                renderTimeline(eventsWithoutApp);
-                return;
-            }
-
-            const detailResults = await Promise.all([
-                loadExamRecord(context, latestApplication.id, latestApplication.status),
-                loadInterviewRecord(context, latestApplication.id),
-                loadApprovalRecord(context, latestApplication.id),
-                context.client
-                    .from("application_documents")
-                    .select("document_type, verification_status, created_at")
-                    .eq("application_id", latestApplication.id)
-            ]);
-
-            const examRecord = detailResults[0];
-            const interviewRecord = detailResults[1];
-            const approvalRecord = detailResults[2];
-            const docsResult = detailResults[3];
-            const documents = docsResult && !docsResult.error && docsResult.data ? docsResult.data : [];
-
-            renderCards(latestApplication, examRecord, interviewRecord, approvalRecord, intakePolicy);
-            renderRequirementSummary(documents);
-
-            const events = buildDashboardEvents(latestApplication, examRecord, interviewRecord, approvalRecord, notificationPayload.rows);
-            renderRecentActivity(events);
-            renderTimeline(events);
         } catch (error) {
             showStatus("Failed to load dashboard data. Please refresh.", "alert-warning");
         }

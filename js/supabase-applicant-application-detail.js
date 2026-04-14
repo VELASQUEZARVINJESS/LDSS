@@ -39,6 +39,9 @@
             nextStepForApplicant: function () {
                 return "Wait for update.";
             },
+            isExamCheckingStage: function () {
+                return false;
+            },
             examSummaryFromRecord: function () {
                 return {
                     controlNo: "-",
@@ -568,6 +571,9 @@
         const context = await window.ldssAuthReadyPromise;
         if (!context || !context.client) {
             return;
+        }
+        if (window.ldssWorkflowControlsReadyPromise && typeof window.ldssWorkflowControlsReadyPromise.then === "function") {
+            await window.ldssWorkflowControlsReadyPromise;
         }
 
         showStatus("");

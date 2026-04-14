@@ -4,6 +4,7 @@
     const PAGE_SIZE = 8;
     const BATCH_APPLY_LIMIT = 30;
     const INTERVIEW_QUEUE_APPLICATION_STATUSES = [
+        "exam_completed",
         "passed_exam",
         "special_endorsement_review",
         "for_interview",
@@ -28,6 +29,7 @@
     ];
 
     const APP_STATUS_META = {
+        exam_completed: { label: "Exam Completed", chipClass: "ldss-chip-accent" },
         passed_exam: { label: "Passed Exam", chipClass: "ldss-chip-success" },
         failed_exam: { label: "Failed Exam", chipClass: "ldss-chip-danger" },
         special_endorsement_review: { label: "Special Endorsement Review", chipClass: "ldss-chip-accent" },

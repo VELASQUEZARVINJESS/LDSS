@@ -21,9 +21,6 @@
                 <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
             </a>
             <ul class="navbar-nav align-items-center ms-auto">
-                <li class="nav-item me-2">
-                    <a class="btn btn-icon btn-transparent-dark ldss-bell-alert" href="applicant-notifications.html"><i data-feather="bell"></i></a>
-                </li>
                 <li class="nav-item dropdown no-caret">
                     <a class="btn btn-outline-dark btn-sm d-inline-flex align-items-center gap-2 dropdown-toggle ldss-account-trigger" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i><span class="ldss-account-trigger-label">My Profile</span></a>
                     <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
@@ -45,10 +42,6 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
-                            <a class="nav-link" href="applicant-applications.html">
-                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
-                                My Applications
-                            </a>
                         </div>
                     </div>
                 </nav>
@@ -64,14 +57,11 @@
                                             <div class="page-header-icon"><i data-feather="folder"></i></div>
                                             My Applications
                                         </h1>
-                                        <div class="small ldss-muted">View current, draft, and previous submissions.</div>
+                                        <div class="small ldss-muted">View current, draft, and previous submissions here without a separate tracking page.</div>
                                         <ol class="ldss-breadcrumb mt-1">
                                             <li><a href="applicant-dashboard.html">Dashboard</a></li>
                                             <li>My Applications</li>
                                         </ol>
-                                    </div>
-                                    <div class="col-12 col-xl-auto mb-3">
-                                        <a class="btn btn-dark btn-sm me-2" id="newApplicationBtn" href="applicant-application-form.html">New Application</a>
                                     </div>
                                 </div>
                             </div>
@@ -127,8 +117,9 @@
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js"></script>
-        <script src="../js/ldss-workflow.js?v=20260408-1"></script>
-        <script src="../js/supabase-applicant-applications.js?v=20260408-1"></script>
+        <script src="../js/ldss-workflow-controls.js?v=20260414-1"></script>
+        <script src="../js/ldss-workflow.js?v=20260414-1"></script>
+        <script src="../js/supabase-applicant-applications.js?v=20260414-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

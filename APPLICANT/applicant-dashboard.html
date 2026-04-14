@@ -21,23 +21,6 @@
                 <span class="ldss-top-subtitle d-none d-md-inline">LGU Daet Scholarship System</span>
             </a>
             <ul class="navbar-nav align-items-center ms-auto">
-                <li class="nav-item dropdown no-caret me-3 dropdown-notifications">
-                    <a class="btn btn-icon btn-transparent-dark dropdown-toggle ldss-bell-alert" id="applicantAlerts" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i data-feather="bell"></i>
-                        <span class="ldss-bell-count d-none" id="dashboardAlertsBellCount">0</span>
-                    </a>
-                    <div class="dropdown-menu dropdown-menu-end border-0 shadow animated--fade-in-up ldss-applicant-alerts-menu" aria-labelledby="applicantAlerts">
-                        <h6 class="dropdown-header d-flex align-items-center justify-content-between">
-                            <span>Notifications</span>
-                            <span class="badge bg-light text-dark border" id="dashboardAlertsUnreadPill">0</span>
-                        </h6>
-                        <div id="dashboardAlertsList">
-                            <span class="dropdown-item small text-muted">No notifications yet.</span>
-                        </div>
-                        <div class="dropdown-divider"></div>
-                        <a class="dropdown-item small text-center" href="applicant-notifications.html">View all notifications</a>
-                    </div>
-                </li>
                 <li class="nav-item dropdown no-caret">
                     <a class="btn btn-outline-dark btn-sm d-inline-flex align-items-center gap-2 dropdown-toggle ldss-account-trigger" id="applicantUser" href="javascript:void(0);" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i data-feather="user"></i><span class="ldss-account-trigger-label">My Profile</span></a>
                     <div class="dropdown-menu dropdown-menu-end border-0 shadow" aria-labelledby="applicantUser">
@@ -59,10 +42,6 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
-                            <a class="nav-link" href="applicant-applications.html">
-                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>
-                                My Applications
-                            </a>
                         </div>
                     </div>
                 </nav>
@@ -79,7 +58,7 @@
                                             Applicant Dashboard
                                         </h1>
                                         <div class="small text-muted" id="dashboardWelcomeText">Welcome to your scholarship portal.</div>
-                                        <div class="small ldss-muted">Track your scholarship status, schedules, and next required action.</div>
+                                        <div class="small ldss-muted">Use this page to start a new application and open your saved application records.</div>
                                     </div>
                                 </div>
                             </div>
@@ -87,36 +66,20 @@
                     </header>
                     <div class="container-xl px-4 mt-4">
                         <div class="alert d-none" id="dashboardStatus" role="alert"></div>
-                        <section class="ldss-dashboard-overview mb-3">
-                            <div class="ldss-dashboard-overview-bar">
-                                <p class="ldss-dashboard-overview-note mb-0">A lighter snapshot of your latest application progress.</p>
-                                <div class="ldss-dashboard-inline-actions">
-                                    <a class="btn btn-dark btn-sm" id="dashboardNewApplicationBtn" href="applicant-application-form.html">New Application</a>
+                        <section class="card">
+                            <div class="card-body">
+                                <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+                                    <div>
+                                        <div class="fw-700 mb-1">Applicant Actions</div>
+                                        <div class="small text-muted">All submitted, draft, and processed applications are shown inside My Applications. The dashboard stays simple for now.</div>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <a class="btn btn-dark btn-sm" id="dashboardNewApplicationBtn" href="applicant-application-form.html">New Application</a>
+                                        <a class="btn btn-outline-dark btn-sm" id="dashboardMyApplicationsBtn" href="applicant-applications.html">My Applications</a>
+                                    </div>
                                 </div>
                             </div>
                         </section>
-                        <div class="row g-2 mb-3">
-                            <div class="col-12 col-xl-9">
-                                <div class="ldss-status-card ldss-status-card-compact h-100">
-                                    <div class="ldss-status-card-head">
-                                        <div class="ldss-status-card-icon"><i data-feather="file-text"></i></div>
-                                        <div class="ldss-status-label mb-0">Application Status</div>
-                                    </div>
-                                    <div class="ldss-status-value" id="dashboardCurrentApplicationValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral" id="dashboardCurrentApplicationChip">No data yet</span>
-                                </div>
-                            </div>
-                            <div class="col-12 col-xl-3">
-                                <div class="ldss-status-card ldss-status-card-compact h-100">
-                                    <div class="ldss-status-card-head">
-                                        <div class="ldss-status-card-icon"><i data-feather="corner-down-right"></i></div>
-                                        <div class="ldss-status-label mb-0">Next Thing To Do</div>
-                                    </div>
-                                    <div class="ldss-status-value" id="dashboardNextStepValue">-</div>
-                                    <span class="ldss-chip ldss-chip-neutral" id="dashboardNextStepChip">Waiting for application</span>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </main>
                 <footer class="footer-admin mt-auto footer-light">
@@ -150,14 +113,12 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
-        <script src="../js/ldss-workflow.js"></script>
-        <script src="../js/supabase-applicant-dashboard.js?v=20260322-1"></script>
+        <script src="../js/ldss-workflow-controls.js?v=20260414-1"></script>
+        <script src="../js/ldss-workflow.js?v=20260414-1"></script>
+        <script src="../js/supabase-applicant-dashboard.js?v=20260414-2"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
-
-
-
 
 
 

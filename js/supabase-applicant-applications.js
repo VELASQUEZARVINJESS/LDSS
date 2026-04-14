@@ -20,6 +20,9 @@
             nextStepForApplicant: function () {
                 return "Wait for update.";
             },
+            isExamCheckingStage: function () {
+                return false;
+            },
             examSummaryFromRecord: function () {
                 return {
                     scoreText: "-",
@@ -208,7 +211,6 @@
         const encodedId = encodeURIComponent(row.id);
         const actionMenuId = "applicationActions-" + String(row.id).replace(/[^a-zA-Z0-9_-]/g, "");
         const editHref = "applicant-application-form.html?application_id=" + encodedId;
-        const trackHref = "application-detail.html?id=" + encodedId;
         const downloadHref = "applicant-print-form.html?id=" + encodedId + "&download=1";
         const editAction = canEditApplication(row)
             ? '<a class="dropdown-item" href="' + editHref + '">Edit</a>'
@@ -221,7 +223,6 @@
             '<div class="dropdown ldss-row-actions">' +
             '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + actionMenuId + '" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>' +
             '<div class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="' + actionMenuId + '">' +
-            '<a class="dropdown-item" href="' + trackHref + '">Track</a>' +
             editAction +
             downloadAction +
             "</div>" +
@@ -267,7 +268,9 @@
         } else if (examSummary.scoreText !== "-") {
             extra = "Raw Score: " + examSummary.scoreText;
         } else if ((examSummary.result || "").toString() === "pending") {
-            extra = "Result not yet encoded";
+            extra = workflow().isExamCheckingStage && workflow().isExamCheckingStage(row.status)
+                ? "Checking examination in progress"
+                : "Result not yet encoded";
         }
 
         if (extra) {
@@ -611,6 +614,9 @@
         const context = await window.ldssAuthReadyPromise;
         if (!context || !context.client) {
             return;
+        }
+        if (window.ldssWorkflowControlsReadyPromise && typeof window.ldssWorkflowControlsReadyPromise.then === "function") {
+            await window.ldssWorkflowControlsReadyPromise;
         }
         bindEvents(context);
         await loadApplications(context);

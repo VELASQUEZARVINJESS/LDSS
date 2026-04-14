@@ -196,6 +196,10 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Exam Management now uses a more compact monochrome workspace style for the room-assignment screen, keeping the page black, white, and gray with smaller action buttons for a steadier office-facing look on desktop and mobile.
 - Secretary Exam Management status messages now use a cleaner monochrome notice box style so save, review, info, and error states feel more official and easier to scan.
 - Secretary Exam Management now places the room generator in a narrower left workspace and the Eligible Examinees table in a wider right workspace on desktop, while still stacking cleanly on smaller screens.
+- Secretary Exam Management now opens a room-based raw-score sheet for exam encoding, so staff can choose a saved batch plus room, enter whole-number raw scores in printed seat order, and move room-to-room without using a visible passing-threshold rule on the page.
+- System Administrator Scholarship Settings now includes a Checking Examination toggle so applicant progress views can show that exam scores are under review without changing the underlying database status list.
+- Applicant navigation is now simplified for end users: the sidebar keeps only Dashboard, notification links are hidden for now, the Dashboard is reduced to New Application plus My Applications actions, and My Applications now carries the application-status flow without a separate Track action.
+- Secretary navigation now includes a dedicated Ranking sidebar link that opens a separate Secretary ranking page with raw-score-only print options for overall, per-room, sector-classification, and top-range ranking review.
 - Secretary room assignment saving requires the SQL hotfix `supabase/exam_room_assignment_hotfix_2026_03_28.sql`.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
@@ -203,7 +207,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Applicant submission form now includes the missing intake-date formatter used by the filing-window guard, fixing the `formatDate is not defined` submission error when the system shows intake open/close schedule messaging.
 - Applicant form now lets users update already-submitted or returned-for-correction applications after the intake deadline, while still blocking first-time draft submission once filing is closed.
 - Login and applicant registration pages now show a public filing-status modal when online scholarship application is not yet open, already closed, or manually closed by the scholarship office, while clarifying that existing applicants may still sign in even though new submission is unavailable.
-- Secretary exam management supports exam batch scheduling, control number assignment, exam result encoding, and status transitions to `passed_exam` / `failed_exam`.
+- Secretary exam management supports exam batch scheduling, room assignment, and raw-score encoding for ranking-based review.
 - Admin approval queue supports ranking view, special endorsement action, approve/reject/waitlist decisions, and batch decision handling.
 - Scholarship workflow status model:
   - `draft`, `submitted`, `pending_exam`, `exam_scheduled`, `exam_completed`, `passed_exam`, `failed_exam`, `special_endorsement_review`, `for_interview`, `interview_scheduled`, `interview_completed`, `hard_copy_verified`, `for_approval`, `approved`, `waitlisted`, `rejected`, `for_release`, `released`

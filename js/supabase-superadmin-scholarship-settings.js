@@ -39,7 +39,8 @@
                 show_secretary_special_consideration_control: false,
                 special_consideration_options: [],
                 require_applicant_photo_on_submit: true,
-                auto_set_for_interview: true
+                auto_set_for_interview: true,
+                exam_checking_in_progress: false
             }
         }
     };
@@ -452,7 +453,8 @@
                     show_secretary_special_consideration_control: currentSecretarySpecialConsiderationControlEnabled(),
                     special_consideration_options: currentSpecialConsiderationOptions(),
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
-                    auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
+                    auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked),
+                    exam_checking_in_progress: Boolean(byId("superSettingsExamCheckingInProgress") && byId("superSettingsExamCheckingInProgress").checked)
                 }
             }
         };
@@ -1000,6 +1002,7 @@
             "Secretary Special Consideration Selector: " + (controls.show_secretary_special_consideration_control ? "Enabled" : "Disabled"),
             "Special Consideration Flow Page: " + (controls.allow_secretary_special_consideration ? "Enabled" : "Disabled"),
             "Applicant Photo Required On Submit: " + (controls.require_applicant_photo_on_submit !== false ? "Enabled" : "Disabled"),
+            "Checking Examination Progress: " + (controls.exam_checking_in_progress ? "Enabled" : "Disabled"),
             "Special Endorsement: " + ((controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
             "Weights (Exam/Interview/Income/Requirements): "
                 + Number(ranking.exam_weight || 0) + "/"
@@ -1043,6 +1046,7 @@
         writeCheckbox("superSettingsShowSecretarySpecialConsiderationControl", controls.show_secretary_special_consideration_control);
         writeCheckbox("superSettingsRequireApplicantPhotoOnSubmit", controls.require_applicant_photo_on_submit !== false);
         writeCheckbox("superSettingsAutoSetForInterview", controls.auto_set_for_interview);
+        writeCheckbox("superSettingsExamCheckingInProgress", controls.exam_checking_in_progress);
 
         renderWeightTotal();
         renderKpis(settings);
@@ -1123,7 +1127,8 @@
                     show_secretary_special_consideration_control: currentSecretarySpecialConsiderationControlEnabled(),
                     special_consideration_options: currentSpecialConsiderationOptions(),
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
-                    auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked)
+                    auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked),
+                    exam_checking_in_progress: Boolean(byId("superSettingsExamCheckingInProgress") && byId("superSettingsExamCheckingInProgress").checked)
                 }
             }
         };
@@ -1174,6 +1179,7 @@
                 passing_score: Number(current.passing_score || 0),
                 receive_override_mode: currentReceiveMode,
                 require_applicant_photo_on_submit: currentPhotoRequirement,
+                exam_checking_in_progress: Boolean(currentControls.exam_checking_in_progress),
                 reserved_slot_exception_flow: Boolean(currentControls.allow_secretary_special_consideration),
                 secretary_special_consideration_selector: Boolean(currentControls.show_secretary_special_consideration_control),
                 application_open_date: current.application_open_date || "",
@@ -1425,7 +1431,8 @@
             "superSettingsAllowSecretaryWalkInIntake",
             "superSettingsShowSecretarySpecialConsiderationControl",
             "superSettingsRequireApplicantPhotoOnSubmit",
-            "superSettingsAutoSetForInterview"
+            "superSettingsAutoSetForInterview",
+            "superSettingsExamCheckingInProgress"
         ].forEach(function (id) {
             const input = byId(id);
             if (!input) {

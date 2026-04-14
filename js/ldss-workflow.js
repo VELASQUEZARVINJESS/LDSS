@@ -134,6 +134,10 @@
         failed: { label: "Failed", chipClass: "ldss-chip-danger" }
     };
 
+    function activeWorkflowControls() {
+        return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
     function normalizeStatus(status) {
         const key = (status || "").toString().trim().toLowerCase();
         if (!key) {
@@ -153,6 +157,13 @@
 
     function statusMeta(status) {
         const normalized = normalizeStatus(status);
+        if (normalized === "exam_completed" && activeWorkflowControls().exam_checking_in_progress === true) {
+            return {
+                label: "Checking Examination",
+                chipClass: "ldss-chip-accent",
+                nextStep: "The scholarship office is checking examination scores now. Please wait for the next update."
+            };
+        }
         if (STATUS_META[normalized]) {
             return STATUS_META[normalized];
         }
@@ -168,6 +179,10 @@
 
     function nextStepForApplicant(status) {
         return statusMeta(status).nextStep;
+    }
+
+    function isExamCheckingStage(status) {
+        return normalizeStatus(status) === "exam_completed" && activeWorkflowControls().exam_checking_in_progress === true;
     }
 
     function normalizeExamResult(value) {
@@ -230,6 +245,7 @@
         normalizeStatus: normalizeStatus,
         statusMeta: statusMeta,
         nextStepForApplicant: nextStepForApplicant,
+        isExamCheckingStage: isExamCheckingStage,
         normalizeExamResult: normalizeExamResult,
         examResultMeta: examResultMeta,
         examSummaryFromRecord: examSummaryFromRecord
