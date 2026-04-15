@@ -954,7 +954,6 @@
             "<th>No.</th>" +
             "<th>Rank</th>" +
             "<th>Examinee</th>" +
-            "<th>Application No.</th>" +
             "<th>Room</th>" +
             "<th>Seat</th>" +
             "<th>Sector Classification</th>" +
@@ -962,6 +961,22 @@
             "</tr>" +
             "</thead>"
         );
+    }
+
+    function compactPrintRoomLabel(value) {
+        const raw = (value || "-").toString().trim().toUpperCase();
+        if (!raw || raw === "-") {
+            return "-";
+        }
+        return raw.replace(/^ROOM\s+/i, "R");
+    }
+
+    function formatPrintWholeNumber(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return "-";
+        }
+        return String(Math.max(0, Math.trunc(numeric)));
     }
 
     function rankingTableRowMarkup(row) {
@@ -984,17 +999,16 @@
     function rankingPrintTableRowMarkup(row, counter) {
         return (
             "<tr>" +
-            '<td class="text-center">' + escapeHtml(String(counter)) + "</td>" +
-            '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-number">' + escapeHtml(formatPrintWholeNumber(counter)) + "</span></td>" +
+            '<td class="text-center fw-700"><span class="ldss-ranking-print-number">' + escapeHtml(formatPrintWholeNumber(row.display_rank)) + "</span></td>" +
             "<td>" +
-            '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-            '<div class="small text-muted">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
+            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+            '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(row.application_no || "-") + "</div>" +
             "</td>" +
-            "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
-            '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
-            '<td class="text-center">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</td>" +
-            '<td class="text-center">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</td>" +
-            '<td class="text-center fw-700">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-value">' + escapeHtml(compactPrintRoomLabel(row.room_label || "-")) + "</span></td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-value">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</span></td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-value">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</span></td>" +
+            '<td class="text-center fw-700"><span class="ldss-ranking-print-value">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</span></td>" +
             "</tr>"
         );
     }

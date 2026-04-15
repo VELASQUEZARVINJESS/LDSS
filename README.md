@@ -203,7 +203,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Ranking now shows a phone-friendly card layout on small screens while keeping a folio-sized 8.5 x 13 printable table for the Save as PDF flow.
 - Secretary Ranking no longer shows `Barangay`, keeping the review and printout table focused on rank, examinee, application number, room, seat, sector classification, and score.
 - Secretary Ranking print styling now uses smaller table text, cleaner header wrapping, and alternating row colors so long ranking lists are easier to read on screen and in PDF.
-- Secretary Ranking PDF output now builds dedicated print pages with the Daet logo, a `No.` counter before `Rank`, and fixed 30-row chunks per page so large ranking lists stay readable on long bond paper without page-break collisions.
+- Secretary Ranking PDF output now builds dedicated print pages with the Daet logo, a whole-number `No.` counter before `Rank`, the application number under each applicant name, and fixed 30-row chunks per page so bond-paper exports stay readable without page-break collisions.
 - Secretary room assignment saving requires the SQL hotfix `supabase/exam_room_assignment_hotfix_2026_03_28.sql`.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
