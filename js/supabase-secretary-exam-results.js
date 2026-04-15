@@ -4,6 +4,7 @@
     const SUPABASE_FETCH_LIMIT = 1000;
     const LOOKUP_BATCH_SIZE = 200;
     const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
+    const RANKING_PRINT_ROWS_PER_PAGE = 30;
     const DEFAULT_SETTINGS = {
         exam_total_items: 100
     };
@@ -398,7 +399,7 @@
 
             const result = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number, barangay")
+                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number")
                 .in("id", chunk);
 
             if (result.error) {
@@ -803,7 +804,7 @@
         setText("roomScorePaperPolicy", policyLabel());
     }
 
-    function renderRankingSummary() {
+    function rankingSummaryMeta() {
         const mode = currentRankingMode();
         const filteredRows = rankingRowsForCurrentView();
         let summary = "Select a batch to review ranking.";
@@ -837,11 +838,21 @@
             }
         }
 
-        setText("roomScoreRankingSelectionMeta", summary);
-        setText("roomScoreRankingTableTitle", title);
-        setText("roomScoreRankingTableMeta", tableMeta);
-        setText("roomScoreRankingPrintTitle", "LDSP " + title);
-        setText("roomScoreRankingPrintSummary", summary);
+        return {
+            summary: summary,
+            title: title,
+            tableMeta: tableMeta
+        };
+    }
+
+    function renderRankingSummary() {
+        const meta = rankingSummaryMeta();
+
+        setText("roomScoreRankingSelectionMeta", meta.summary);
+        setText("roomScoreRankingTableTitle", meta.title);
+        setText("roomScoreRankingTableMeta", meta.tableMeta);
+        setText("roomScoreRankingPrintTitle", "LDSP " + meta.title);
+        setText("roomScoreRankingPrintSummary", meta.summary);
     }
 
     function renderEmptyRoomSheet(message) {
@@ -857,7 +868,147 @@
         if (!tbody) {
             return;
         }
-        tbody.innerHTML = '<tr><td colspan="8" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+        tbody.innerHTML = '<tr><td colspan="7" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+    }
+
+    function renderEmptyRankingCards(message) {
+        const container = byId("roomScoreRankingCards");
+        if (!container) {
+            return;
+        }
+        container.innerHTML = '<div class="ldss-ranking-card-empty">' + escapeHtml(message) + "</div>";
+    }
+
+    function clearRankingPrintPages() {
+        const container = byId("roomScoreRankingPrintPages");
+        if (!container) {
+            return;
+        }
+        container.innerHTML = "";
+    }
+
+    function rankingDatasetForRender() {
+        if (!currentBatchId) {
+            return {
+                rows: [],
+                message: "Select a saved batch to review ranking by score."
+            };
+        }
+
+        const batchRoomRows = batchRows(currentBatchId);
+        if (!batchRoomRows.length) {
+            return {
+                rows: [],
+                message: "No assigned room records were found for this batch yet."
+            };
+        }
+
+        const mode = currentRankingMode();
+        if (mode === "room" && currentRankingRoomFilter() === "all") {
+            return {
+                rows: [],
+                message: "Select a room to review or print per-room ranking."
+            };
+        }
+        if (mode === "sector" && currentRankingSectorFilter() === "all") {
+            return {
+                rows: [],
+                message: "Select a sector classification to review or print sector ranking."
+            };
+        }
+
+        const rankingRows = rankingRowsForCurrentView();
+        if (!rankingRows.length) {
+            return {
+                rows: [],
+                message: "No saved scores matched the selected ranking option."
+            };
+        }
+
+        return {
+            rows: rankingRows,
+            message: ""
+        };
+    }
+
+    function rankingTableHeadMarkup() {
+        return (
+            "<thead>" +
+            "<tr>" +
+            "<th>Rank</th>" +
+            "<th>Examinee</th>" +
+            "<th>Application No.</th>" +
+            "<th>Room</th>" +
+            "<th>Seat</th>" +
+            "<th>Sector Classification</th>" +
+            "<th>Score</th>" +
+            "</tr>" +
+            "</thead>"
+        );
+    }
+
+    function rankingPrintTableHeadMarkup() {
+        return (
+            "<thead>" +
+            "<tr>" +
+            "<th>No.</th>" +
+            "<th>Rank</th>" +
+            "<th>Examinee</th>" +
+            "<th>Application No.</th>" +
+            "<th>Room</th>" +
+            "<th>Seat</th>" +
+            "<th>Sector Classification</th>" +
+            "<th>Score</th>" +
+            "</tr>" +
+            "</thead>"
+        );
+    }
+
+    function rankingTableRowMarkup(row) {
+        return (
+            "<tr>" +
+            '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
+            "<td>" +
+            '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+            '<div class="small text-muted">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
+            "</td>" +
+            "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
+            '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
+            '<td class="text-center">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</td>" +
+            '<td class="text-center">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</td>" +
+            '<td class="text-center fw-700">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</td>" +
+            "</tr>"
+        );
+    }
+
+    function rankingPrintTableRowMarkup(row, counter) {
+        return (
+            "<tr>" +
+            '<td class="text-center">' + escapeHtml(String(counter)) + "</td>" +
+            '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
+            "<td>" +
+            '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+            '<div class="small text-muted">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
+            "</td>" +
+            "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
+            '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
+            '<td class="text-center">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</td>" +
+            '<td class="text-center">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</td>" +
+            '<td class="text-center fw-700">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</td>" +
+            "</tr>"
+        );
+    }
+
+    function chunkRankingRowsForPrint(rowsForPrint) {
+        const chunks = [];
+        const pageSize = RANKING_PRINT_ROWS_PER_PAGE > 0 ? RANKING_PRINT_ROWS_PER_PAGE : 30;
+        const sourceRows = rowsForPrint || [];
+
+        for (let index = 0; index < sourceRows.length; index += pageSize) {
+            chunks.push(sourceRows.slice(index, index + pageSize));
+        }
+
+        return chunks;
     }
 
     function renderRoomSheet() {
@@ -909,48 +1060,89 @@
             return;
         }
 
-        if (!currentBatchId) {
-            renderEmptyRankingTable("Select a saved batch to review ranking by score.");
+        const rankingState = rankingDatasetForRender();
+        if (!rankingState.rows.length) {
+            renderEmptyRankingTable(rankingState.message);
             return;
         }
 
-        const batchRoomRows = batchRows(currentBatchId);
-        if (!batchRoomRows.length) {
-            renderEmptyRankingTable("No assigned room records were found for this batch yet.");
+        tbody.innerHTML = rankingState.rows.map(rankingTableRowMarkup).join("");
+    }
+
+    function renderRankingCards() {
+        const container = byId("roomScoreRankingCards");
+        if (!container) {
             return;
         }
 
-        const mode = currentRankingMode();
-        if (mode === "room" && currentRankingRoomFilter() === "all") {
-            renderEmptyRankingTable("Select a room to review or print per-room ranking.");
-            return;
-        }
-        if (mode === "sector" && currentRankingSectorFilter() === "all") {
-            renderEmptyRankingTable("Select a sector classification to review or print sector ranking.");
+        const rankingState = rankingDatasetForRender();
+        if (!rankingState.rows.length) {
+            renderEmptyRankingCards(rankingState.message);
             return;
         }
 
-        const rankingRows = rankingRowsForCurrentView();
-        if (!rankingRows.length) {
-            renderEmptyRankingTable("No saved scores matched the selected ranking option.");
-            return;
-        }
-
-        tbody.innerHTML = rankingRows.map(function (row) {
+        container.innerHTML = rankingState.rows.map(function (row) {
             return (
-                "<tr>" +
-                '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
-                "<td>" +
-                '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-                '<div class="small text-muted">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
-                "</td>" +
-                "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
-                '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
-                '<td class="text-center">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</td>" +
-                '<td class="text-center">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</td>" +
-                '<td class="text-center">' + escapeHtml(row.barangay || "No Barangay") + "</td>" +
-                '<td class="text-center fw-700">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</td>" +
-                "</tr>"
+                '<article class="ldss-ranking-card">' +
+                '<div class="ldss-ranking-card-header">' +
+                '<div>' +
+                '<div class="ldss-ranking-card-rank">Rank ' + escapeHtml(String(row.display_rank || "-")) + "</div>" +
+                "</div>" +
+                '<div class="ldss-ranking-card-score">' +
+                '<div class="ldss-ranking-card-score-label">Score</div>' +
+                '<div class="ldss-ranking-card-score-value">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</div>" +
+                "</div>" +
+                "</div>" +
+                '<div class="ldss-ranking-card-name">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+                '<div class="ldss-ranking-card-school">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
+                '<div class="ldss-ranking-card-grid mt-3">' +
+                '<div><div class="ldss-ranking-card-label">Application No.</div><div class="ldss-ranking-card-value">' + escapeHtml(row.application_no || "-") + "</div></div>" +
+                '<div><div class="ldss-ranking-card-label">Room</div><div class="ldss-ranking-card-value">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</div></div>" +
+                '<div><div class="ldss-ranking-card-label">Seat</div><div class="ldss-ranking-card-value">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</div></div>" +
+                '<div><div class="ldss-ranking-card-label">Sector</div><div class="ldss-ranking-card-value">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</div></div>" +
+                "</div>" +
+                "</article>"
+            );
+        }).join("");
+    }
+
+    function renderRankingPrintPages() {
+        const container = byId("roomScoreRankingPrintPages");
+        if (!container) {
+            return;
+        }
+
+        const rankingState = rankingDatasetForRender();
+        if (!rankingState.rows.length) {
+            clearRankingPrintPages();
+            return;
+        }
+
+        const meta = rankingSummaryMeta();
+        const rowChunks = chunkRankingRowsForPrint(rankingState.rows);
+        const totalPages = rowChunks.length;
+
+        container.innerHTML = rowChunks.map(function (chunk, index) {
+            const startCounter = (index * RANKING_PRINT_ROWS_PER_PAGE) + 1;
+            return (
+                '<section class="ldss-ranking-print-page">' +
+                '<div class="ldss-ranking-print-page-header">' +
+                '<div class="ldss-ranking-print-brand">' +
+                '<img class="ldss-ranking-print-logo" src="../img/daet-lgu.png" alt="LGU Daet Logo" />' +
+                '<div class="ldss-ranking-print-brand-copy">' +
+                '<div class="ldss-ranking-print-page-title">' + escapeHtml("LDSP " + meta.title) + "</div>" +
+                '<div class="ldss-ranking-print-page-meta">' + escapeHtml(meta.summary) + "</div>" +
+                '<div class="ldss-ranking-print-page-page">Page ' + escapeHtml(String(index + 1)) + " of " + escapeHtml(String(totalPages)) + " | Rows " + escapeHtml(String(startCounter)) + "-" + escapeHtml(String(startCounter + chunk.length - 1)) + "</div>" +
+                "</div>" +
+                "</div>" +
+                "</div>" +
+                '<table class="table mb-0 ldss-ranking-table ldss-ranking-print-table">' +
+                rankingPrintTableHeadMarkup() +
+                "<tbody>" + chunk.map(function (row, rowIndex) {
+                    return rankingPrintTableRowMarkup(row, startCounter + rowIndex);
+                }).join("") + "</tbody>" +
+                "</table>" +
+                "</section>"
             );
         }).join("");
     }
@@ -1059,6 +1251,8 @@
         renderRoomSheet();
         renderRankingSummary();
         renderRankingTable();
+        renderRankingCards();
+        renderRankingPrintPages();
         syncActionButtons();
     }
 
@@ -1095,7 +1289,6 @@
                 sector_classification: application ? normalizeSectorClassification(application.sector_classification || "") : "Unspecified",
                 applicant_name: buildApplicantName(profile),
                 applicant_contact: profile ? (profile.mobile_number || profile.email || "-") : "-",
-                barangay: profile && profile.barangay ? profile.barangay : "No Barangay",
                 school_name: profile && profile.school_name ? profile.school_name : "",
                 batch_id: row.batch_id || "",
                 exam_control_no: row.exam_control_no || "",

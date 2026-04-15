@@ -199,7 +199,11 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Exam Management now opens a room-based raw-score sheet for exam encoding, so staff can choose a saved batch plus room, enter whole-number raw scores in printed seat order, and move room-to-room without using a visible passing-threshold rule on the page.
 - System Administrator Scholarship Settings now includes a Checking Examination toggle so applicant progress views can show that exam scores are under review without changing the underlying database status list.
 - Applicant navigation is now simplified for end users: the sidebar keeps only Dashboard, notification links are hidden for now, the Dashboard is reduced to New Application plus My Applications actions, and My Applications now carries the application-status flow without a separate Track action.
-- Secretary navigation now includes a dedicated Ranking sidebar link that opens a separate Secretary ranking page with raw-score-only print options for overall, per-room, sector-classification, and top-range ranking review.
+- Secretary navigation now includes a dedicated Ranking sidebar link that opens a separate Secretary ranking page with raw-score-only review options for overall, per-room, sector-classification, and top-range ranking views.
+- Secretary Ranking now shows a phone-friendly card layout on small screens while keeping a folio-sized 8.5 x 13 printable table for the Save as PDF flow.
+- Secretary Ranking no longer shows `Barangay`, keeping the review and printout table focused on rank, examinee, application number, room, seat, sector classification, and score.
+- Secretary Ranking print styling now uses smaller table text, cleaner header wrapping, and alternating row colors so long ranking lists are easier to read on screen and in PDF.
+- Secretary Ranking PDF output now builds dedicated print pages with the Daet logo, a `No.` counter before `Rank`, and fixed 30-row chunks per page so large ranking lists stay readable on long bond paper without page-break collisions.
 - Secretary room assignment saving requires the SQL hotfix `supabase/exam_room_assignment_hotfix_2026_03_28.sql`.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
