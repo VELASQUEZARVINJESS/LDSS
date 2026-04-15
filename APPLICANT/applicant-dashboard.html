@@ -58,7 +58,7 @@
                                             Applicant Dashboard
                                         </h1>
                                         <div class="small text-muted" id="dashboardWelcomeText">Welcome to your scholarship portal.</div>
-                                        <div class="small ldss-muted">Use this page to start a new application and open your saved application records.</div>
+                                        <div class="small ldss-muted">See your application records and current progress as soon as you open the dashboard.</div>
                                     </div>
                                 </div>
                             </div>
@@ -66,45 +66,40 @@
                     </header>
                     <div class="container-xl px-4 mt-4">
                         <div class="alert d-none" id="dashboardStatus" role="alert"></div>
-                        <section class="ldss-applicant-status-strip" aria-label="Application status overview">
-                            <div class="ldss-applicant-status-layout">
-                                <div class="ldss-applicant-status-primary">
-                                    <div class="ldss-status-label mb-2">Application Status</div>
-                                    <div class="ldss-applicant-status-heading">
-                                        <div class="ldss-applicant-status-title" id="dashboardCurrentApplicationValue">Checking application...</div>
-                                        <span class="ldss-chip ldss-chip-neutral" id="dashboardCurrentApplicationChip">Loading</span>
-                                    </div>
-                                    <div class="ldss-applicant-status-meta" id="dashboardStatusMetaText">Your latest application record will appear here first.</div>
+                        <div class="alert d-none" id="applicationsStatus" role="alert"></div>
+                        <div class="card">
+                            <div class="card-header">Application Records</div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive ldss-applications-table-wrap">
+                                    <table class="table mb-0 ldss-applications-table">
+                                        <thead class="bg-light">
+                                            <tr>
+                                                <th>No.</th>
+                                                <th>School Year</th>
+                                                <th>Applicant ID</th>
+                                                <th>Submitted On</th>
+                                                <th>Examination Status</th>
+                                                <th>Exam Result</th>
+                                                <th>Requirements</th>
+                                                <th>Final Decision</th>
+                                                <th>Option</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="applicationsTableBody">
+                                            <tr>
+                                                <td colspan="9" class="text-center py-4 text-muted">Loading application records...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 </div>
-                                <div class="ldss-applicant-status-secondary">
-                                    <div class="ldss-applicant-status-slot">
-                                        <div class="ldss-status-label">Grant Applied For</div>
-                                        <div class="ldss-applicant-status-detail" id="dashboardGrantValue">Checking record...</div>
-                                    </div>
-                                    <div class="ldss-applicant-status-slot">
-                                        <div class="ldss-status-label">Submitted On</div>
-                                        <div class="ldss-applicant-status-detail" id="dashboardSubmittedOnValue">Checking record...</div>
-                                    </div>
-                                    <div class="ldss-applicant-status-slot">
-                                        <div class="ldss-status-label">Exam Result</div>
-                                        <div class="ldss-applicant-status-detail" id="dashboardExamValue">Checking exam result...</div>
-                                        <span class="ldss-chip ldss-chip-neutral" id="dashboardExamChip">Pending</span>
-                                    </div>
-                                    <div class="ldss-applicant-status-slot">
-                                        <div class="ldss-status-label">Next Step</div>
-                                        <div class="ldss-applicant-status-detail" id="dashboardNextStepValue">Checking your progress...</div>
-                                        <span class="ldss-chip ldss-chip-neutral" id="dashboardNextStepChip">Pending</span>
-                                    </div>
-                                </div>
-                                <div class="ldss-applicant-status-actions">
-                                    <div class="small text-muted mb-2">Quick Actions</div>
-                                    <div class="d-flex flex-wrap gap-2 ldss-quick-actions">
-                                        <a class="btn btn-dark btn-sm" id="dashboardNewApplicationBtn" href="applicant-application-form.html">New Application</a>
-                                        <a class="btn btn-outline-dark btn-sm" id="dashboardMyApplicationsBtn" href="applicant-applications.html">My Applications</a>
-                                    </div>
+                                <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 p-3 border-top">
+                                    <div class="small text-muted" id="applicationsPaginationInfo">Showing 0 of 0 records</div>
+                                    <nav aria-label="Application records pagination">
+                                        <ul class="pagination pagination-sm mb-0" id="applicationsPagination"></ul>
+                                    </nav>
                                 </div>
                             </div>
-                        </section>
+                        </div>
                     </div>
                 </main>
                 <footer class="footer-admin mt-auto footer-light">
@@ -138,17 +133,12 @@
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
+        <script src="../js/ldss-upload-api.js"></script>
         <script src="../js/ldss-workflow-controls.js?v=20260415-1"></script>
-        <script src="../js/ldss-workflow.js?v=20260414-1"></script>
-        <script src="../js/supabase-applicant-dashboard.js?v=20260415-1"></script>
+        <script src="../js/ldss-workflow.js?v=20260416-3"></script>
+        <script src="../js/supabase-applicant-dashboard.js?v=20260416-3"></script>
+        <script src="../js/supabase-applicant-applications.js?v=20260416-3"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>
-
-
-
-
-
-
-
 

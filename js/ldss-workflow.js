@@ -53,8 +53,8 @@
         },
         exam_completed: {
             label: "Exam Completed",
-            chipClass: "ldss-chip-accent",
-            nextStep: "Wait for encoded exam score and result."
+            chipClass: "ldss-chip-success",
+            nextStep: "The scholarship office is collecting and consolidating exam scores before posting the final result."
         },
         passed_exam: {
             label: "Passed Exam",
@@ -129,9 +129,16 @@
     };
 
     const EXAM_RESULT_META = {
-        pending: { label: "Pending", chipClass: "ldss-chip-neutral" },
+        pending: { label: "Score Consolidation", chipClass: "ldss-chip-accent" },
         passed: { label: "Passed", chipClass: "ldss-chip-success" },
         failed: { label: "Failed", chipClass: "ldss-chip-danger" }
+    };
+
+    const EXAM_RECORD_STATUS_META = {
+        pending: { label: "Pending", chipClass: "ldss-chip-neutral" },
+        scheduled: { label: "Scheduled", chipClass: "ldss-chip-accent" },
+        completed: { label: "Completed", chipClass: "ldss-chip-success" },
+        absent: { label: "Absent", chipClass: "ldss-chip-danger" }
     };
 
     function activeWorkflowControls() {
@@ -159,9 +166,9 @@
         const normalized = normalizeStatus(status);
         if (normalized === "exam_completed" && activeWorkflowControls().exam_checking_in_progress === true) {
             return {
-                label: "Checking Examination",
-                chipClass: "ldss-chip-accent",
-                nextStep: "The scholarship office is checking examination scores now. Please wait for the next update."
+                label: "Exam Completed",
+                chipClass: "ldss-chip-success",
+                nextStep: "The scholarship office is collecting and consolidating exam scores now. Please wait for the final exam result."
             };
         }
         if (STATUS_META[normalized]) {
@@ -204,14 +211,40 @@
         return EXAM_RESULT_META[key] || EXAM_RESULT_META.pending;
     }
 
+    function normalizeExamRecordStatus(value) {
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (!raw) {
+            return "pending";
+        }
+        if (raw === "absent") {
+            return "absent";
+        }
+        if (raw === "completed" || raw === "encoded") {
+            return "completed";
+        }
+        if (raw === "scheduled" || raw === "exam_scheduled") {
+            return "scheduled";
+        }
+        return "pending";
+    }
+
+    function examRecordStatusMeta(value) {
+        const key = normalizeExamRecordStatus(value);
+        return EXAM_RECORD_STATUS_META[key] || EXAM_RECORD_STATUS_META.pending;
+    }
+
     function examSummaryFromRecord(examRecord) {
         if (!examRecord) {
+            const recordMeta = EXAM_RECORD_STATUS_META.pending;
             return {
                 controlNo: "-",
                 scoreText: "-",
                 percentageText: "-",
                 roomLabel: "",
                 seatNo: "",
+                status: "pending",
+                statusLabel: recordMeta.label,
+                statusChipClass: recordMeta.chipClass,
                 result: "pending",
                 resultLabel: EXAM_RESULT_META.pending.label,
                 resultChipClass: EXAM_RESULT_META.pending.chipClass
@@ -220,6 +253,8 @@
 
         const score = examRecord.raw_score;
         const percent = examRecord.percentage_score;
+        const recordStatus = normalizeExamRecordStatus(examRecord.status);
+        const recordStatusMeta = examRecordStatusMeta(recordStatus);
         const result = normalizeExamResult(examRecord.result);
         const resultMeta = examResultMeta(result);
         const roomLabel = (examRecord.room_label || "").toString().trim();
@@ -234,6 +269,9 @@
             percentageText: percent === null || typeof percent === "undefined" ? "-" : String(percent) + "%",
             roomLabel: roomLabel,
             seatNo: seatNo,
+            status: recordStatus,
+            statusLabel: recordStatusMeta.label,
+            statusChipClass: recordStatusMeta.chipClass,
             result: result,
             resultLabel: resultMeta.label,
             resultChipClass: resultMeta.chipClass
@@ -248,6 +286,8 @@
         isExamCheckingStage: isExamCheckingStage,
         normalizeExamResult: normalizeExamResult,
         examResultMeta: examResultMeta,
+        normalizeExamRecordStatus: normalizeExamRecordStatus,
+        examRecordStatusMeta: examRecordStatusMeta,
         examSummaryFromRecord: examSummaryFromRecord
     };
 })(window);

@@ -49,8 +49,11 @@
                     percentageText: "-",
                     roomLabel: "",
                     seatNo: "",
-                    resultLabel: "Pending",
-                    resultChipClass: "ldss-chip-neutral"
+                    status: "pending",
+                    statusLabel: "Pending",
+                    statusChipClass: "ldss-chip-neutral",
+                    resultLabel: "Score Consolidation",
+                    resultChipClass: "ldss-chip-accent"
                 };
             }
         };
@@ -470,9 +473,23 @@
         setText("detailExamControlNo", examSummary.controlNo || "-");
         setText("detailExamRoom", examSummary.roomLabel || "Not posted yet");
         setText("detailExamSeatNo", examSummary.seatNo || "Not posted yet");
-        setText("detailExamRawScore", showExamScores ? (examSummary.scoreText || "-") : (hasNumericExam ? "Hidden" : "-"));
-        setText("detailExamPercentage", showExamScores ? (examSummary.percentageText || "-") : (hasNumericExam ? "Hidden" : "-"));
-        setChip("detailExamResultChip", examSummary.resultLabel || "Pending", examSummary.resultChipClass || "ldss-chip-neutral");
+        setText(
+            "detailExamRawScore",
+            examSummary.status === "absent"
+                ? "-"
+                : (showExamScores ? (examSummary.scoreText || "-") : (hasNumericExam ? "Hidden" : "-"))
+        );
+        setText(
+            "detailExamPercentage",
+            examSummary.status === "absent"
+                ? "-"
+                : (showExamScores ? (examSummary.percentageText || "-") : (hasNumericExam ? "Hidden" : "-"))
+        );
+        setChip(
+            "detailExamResultChip",
+            examSummary.status === "absent" ? "No Result" : (examSummary.resultLabel || "Score Consolidation"),
+            examSummary.status === "absent" ? "ldss-chip-neutral" : (examSummary.resultChipClass || "ldss-chip-accent")
+        );
 
         setText("detailNextStepText", workflow().nextStepForApplicant(application.status));
 

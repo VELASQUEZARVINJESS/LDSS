@@ -103,8 +103,11 @@
                     controlNo: "-",
                     scoreText: "-",
                     percentageText: "-",
-                    resultLabel: "Pending",
-                    resultChipClass: "ldss-chip-neutral"
+                    status: "pending",
+                    statusLabel: "Pending",
+                    statusChipClass: "ldss-chip-neutral",
+                    resultLabel: "Score Consolidation",
+                    resultChipClass: "ldss-chip-accent"
                 };
             }
         };
@@ -656,7 +659,12 @@
 
         if (examRecord && examRecord.updated_at) {
             const examSummary = workflow().examSummaryFromRecord(examRecord);
-            events.push({ label: "Exam result: " + examSummary.resultLabel, at: examRecord.updated_at });
+            events.push({
+                label: examSummary.status === "absent"
+                    ? "Examination status: Absent"
+                    : ("Exam result: " + examSummary.resultLabel),
+                at: examRecord.updated_at
+            });
         }
 
         if (interviewRecord && interviewRecord.scheduled_at) {
@@ -850,18 +858,26 @@
         const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
         let examValue = "No score yet";
 
-        if (hasNumericExam && applicantExamScoresVisible()) {
+        if ((examSummary.status || "").toString() === "absent") {
+            examValue = "Absent from examination";
+        } else if (hasNumericExam && applicantExamScoresVisible()) {
             examValue = "Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText;
         } else if (hasNumericExam) {
             examValue = "Score hidden by scholarship office";
         } else if (workflow().isExamCheckingStage && workflow().isExamCheckingStage(application.status)) {
-            examValue = "Checking Examination";
-        } else if (normalizedStatus === "pending_exam" || normalizedStatus === "exam_scheduled" || normalizedStatus === "exam_completed") {
+            examValue = "Scores are being consolidated";
+        } else if (normalizedStatus === "exam_completed") {
+            examValue = "Scores are being consolidated";
+        } else if (normalizedStatus === "pending_exam" || normalizedStatus === "exam_scheduled") {
             examValue = "Exam processing";
         }
 
         setText("dashboardExamValue", examValue);
-        setChip("dashboardExamChip", examSummary.resultLabel, examSummary.resultChipClass);
+        setChip(
+            "dashboardExamChip",
+            examSummary.status === "absent" ? "No Result" : examSummary.resultLabel,
+            examSummary.status === "absent" ? "ldss-chip-neutral" : examSummary.resultChipClass
+        );
 
         if (interviewRecord && interviewRecord.scheduled_at) {
             const iMeta = interviewMeta(interviewRecord.status);

@@ -4,6 +4,20 @@
     const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
     const PAGE_SIZE = 10;
+    const REQUIRED_DOCUMENT_TYPES = ["income_certificate"];
+    const REQUIREMENT_META = {
+        complete: { label: "Complete", chipClass: "ldss-chip-success" },
+        incomplete: { label: "Incomplete", chipClass: "ldss-chip-accent" },
+        reupload: { label: "Needs Reupload", chipClass: "ldss-chip-danger" },
+        missing: { label: "Not Uploaded", chipClass: "ldss-chip-neutral" },
+        not_submitted: { label: "Not Submitted", chipClass: "ldss-chip-neutral" }
+    };
+    const QUALIFICATION_META = {
+        qualified: { label: "Approved", chipClass: "ldss-chip-success" },
+        underqualified: { label: "Disapproved", chipClass: "ldss-chip-danger" },
+        pending: { label: "Pending", chipClass: "ldss-chip-neutral" },
+        unknown: { label: "Unknown", chipClass: "ldss-chip-neutral" }
+    };
 
     let applicationRows = [];
     let currentPage = 1;
@@ -14,6 +28,9 @@
 
     function workflow() {
         return window.LDSS_WORKFLOW || {
+            normalizeStatus: function (status) {
+                return (status || "").toString().trim().toLowerCase();
+            },
             statusMeta: function (status) {
                 return { label: (status || "-").toString(), chipClass: "ldss-chip-neutral", nextStep: "Wait for update." };
             },
@@ -29,8 +46,8 @@
                     percentageText: "-",
                     roomLabel: "",
                     seatNo: "",
-                    resultLabel: "Pending",
-                    resultChipClass: "ldss-chip-neutral"
+                    resultLabel: "Score Consolidation",
+                    resultChipClass: "ldss-chip-accent"
                 };
             }
         };
@@ -74,6 +91,13 @@
 
     function statusMeta(status) {
         return workflow().statusMeta(status);
+    }
+
+    function normalizeStatusValue(status) {
+        if (workflow() && typeof workflow().normalizeStatus === "function") {
+            return workflow().normalizeStatus(status || "");
+        }
+        return (status || "").toString().trim().toLowerCase();
     }
 
     function toIsoDateOnly(value) {
@@ -215,27 +239,9 @@
         return (status || "").toString() !== "draft";
     }
 
-    function actionButtonMarkup(row) {
+    function viewButtonMarkup(row) {
         const encodedId = encodeURIComponent(row.id);
-        const actionMenuId = "applicationActions-" + String(row.id).replace(/[^a-zA-Z0-9_-]/g, "");
-        const editHref = "applicant-application-form.html?application_id=" + encodedId;
-        const downloadHref = "applicant-print-form.html?id=" + encodedId + "&download=1";
-        const editAction = canEditApplication(row)
-            ? '<a class="dropdown-item" href="' + editHref + '">Edit</a>'
-            : '<span class="dropdown-item disabled" title="Only draft, submitted, or returned applications can be edited while unlocked.">Edit</span>';
-        const downloadAction = canDownloadApplication(row.status)
-            ? '<a class="dropdown-item" href="' + downloadHref + '" target="_blank" rel="noopener">Download</a>'
-            : '<span class="dropdown-item disabled" title="Submit the application first to download the printable form.">Download</span>';
-
-        return (
-            '<div class="dropdown ldss-row-actions">' +
-            '<button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" id="' + actionMenuId + '" data-bs-toggle="dropdown" aria-expanded="false">Actions</button>' +
-            '<div class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="' + actionMenuId + '">' +
-            editAction +
-            downloadAction +
-            "</div>" +
-            "</div>"
-        );
+        return '<a class="btn btn-outline-dark btn-sm" href="application-detail.html?id=' + encodedId + '">Option</a>';
     }
 
     function submittedOnMarkup(row) {
@@ -253,48 +259,117 @@
         if (!row.exam_record) {
             return '<span class="ldss-chip ldss-chip-neutral">Not Taken</span>';
         }
-
-        const detailLines = [];
-        if (examSummary.roomLabel || examSummary.seatNo) {
-            const assignmentParts = [];
-            if (examSummary.roomLabel) {
-                assignmentParts.push("Room: " + examSummary.roomLabel);
-            }
-            if (examSummary.seatNo) {
-                assignmentParts.push("Seat No.: " + examSummary.seatNo);
-            }
-            if (assignmentParts.length) {
-                detailLines.push(assignmentParts.join(" | "));
-            }
+        if ((examSummary.status || "").toString() === "absent") {
+            return '<span class="ldss-chip ldss-chip-neutral">No Result</span>';
         }
 
-        let extra = "";
-        const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
+        return '<span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span>";
+    }
 
-        if (hasNumericExam && !applicantExamScoresVisible()) {
-            extra = "Score hidden by scholarship office";
-        } else if (examSummary.scoreText !== "-" && examSummary.percentageText !== "-") {
-            extra = "Raw: " + examSummary.scoreText + " | " + examSummary.percentageText;
-        } else if (examSummary.percentageText !== "-") {
-            extra = "Score: " + examSummary.percentageText;
-        } else if (examSummary.scoreText !== "-") {
-            extra = "Raw Score: " + examSummary.scoreText;
-        } else if ((examSummary.result || "").toString() === "pending") {
-            extra = workflow().isExamCheckingStage && workflow().isExamCheckingStage(row.status)
-                ? "Checking examination in progress"
-                : "Result not yet encoded";
+    function examStatusMetaForRow(row) {
+        const examSummary = workflow().examSummaryFromRecord(row.exam_record || null);
+        if (row.exam_record) {
+            return {
+                label: examSummary.statusLabel || "Pending",
+                chipClass: examSummary.statusChipClass || "ldss-chip-neutral"
+            };
         }
 
-        if (extra) {
-            detailLines.push(extra);
+        const applicationStatus = normalizeStatusValue(row && row.status ? row.status : "");
+        const completedStatuses = [
+            "exam_completed",
+            "passed_exam",
+            "failed_exam",
+            "special_endorsement_review",
+            "for_interview",
+            "interview_scheduled",
+            "interview_completed",
+            "hard_copy_verified",
+            "for_approval",
+            "approved",
+            "waitlisted",
+            "rejected",
+            "for_release",
+            "released"
+        ];
+
+        if (applicationStatus === "exam_scheduled") {
+            return { label: "Scheduled", chipClass: "ldss-chip-accent" };
+        }
+        if (completedStatuses.includes(applicationStatus)) {
+            return { label: "Completed", chipClass: "ldss-chip-success" };
+        }
+        return { label: "Pending", chipClass: "ldss-chip-neutral" };
+    }
+
+    function examStatusMarkup(row) {
+        const meta = examStatusMetaForRow(row);
+        return '<span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span>";
+    }
+
+    function latestDocByType(rows) {
+        const map = {};
+        (rows || []).forEach(function (row) {
+            const key = row && row.document_type ? row.document_type : "";
+            if (!key) {
+                return;
+            }
+            const existing = map[key];
+            if (!existing) {
+                map[key] = row;
+                return;
+            }
+            const existingTime = new Date(existing.created_at || 0).getTime();
+            const currentTime = new Date(row.created_at || 0).getTime();
+            if (currentTime > existingTime) {
+                map[key] = row;
+            }
+        });
+        return map;
+    }
+
+    function requirementMetaForRows(rows, application) {
+        const normalizedStatus = normalizeStatusValue(application && application.status ? application.status : "");
+        if (!application || normalizedStatus === "draft" || !application.submitted_at) {
+            return REQUIREMENT_META.not_submitted;
         }
 
-        return (
-            '<span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span>" +
-            detailLines.map(function (line) {
-                return '<div class="small text-muted mt-1">' + escapeHtml(line) + "</div>";
-            }).join("")
-        );
+        const latest = latestDocByType(rows || []);
+        const statuses = REQUIRED_DOCUMENT_TYPES.map(function (docType) {
+            const doc = latest[docType];
+            return doc && doc.verification_status ? doc.verification_status : "missing";
+        });
+
+        if (!statuses.length || statuses.every(function (status) { return status === "missing"; })) {
+            return REQUIREMENT_META.missing;
+        }
+        if (statuses.some(function (status) { return status === "rejected" || status === "needs_reupload"; })) {
+            return REQUIREMENT_META.reupload;
+        }
+        if (statuses.every(function (status) { return status === "verified"; })) {
+            return REQUIREMENT_META.complete;
+        }
+        return REQUIREMENT_META.incomplete;
+    }
+
+    function qualificationMeta(row) {
+        const decisionStatus = normalizeStatusValue(row.approval_record && row.approval_record.decision_status
+            ? row.approval_record.decision_status
+            : "");
+        const applicationStatus = normalizeStatusValue(row.status);
+        const finalReviewStatuses = ["for_approval", "special_endorsement_review"];
+
+        if (["approved", "waitlisted"].includes(decisionStatus)
+            || ["approved", "waitlisted", "for_release", "released"].includes(applicationStatus)) {
+            return QUALIFICATION_META.qualified;
+        }
+        if (decisionStatus === "rejected" || ["rejected", "failed_exam"].includes(applicationStatus)) {
+            return QUALIFICATION_META.underqualified;
+        }
+        if (decisionStatus === "pending" || finalReviewStatuses.includes(applicationStatus)) {
+            return QUALIFICATION_META.pending;
+        }
+        return QUALIFICATION_META.unknown;
     }
 
     function getPageCount(totalRows) {
@@ -323,23 +398,27 @@
             return;
         }
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No application records found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">No application records found.</td></tr>';
             return;
         }
 
         tbody.innerHTML = rows
-            .map(function (row) {
-                const meta = statusMeta(row.status);
+            .map(function (row, index) {
+                const requirements = row.requirements_meta || REQUIREMENT_META.missing;
+                const qualification = qualificationMeta(row);
+                const rowNumber = ((currentPage - 1) * PAGE_SIZE) + index + 1;
 
                 return (
                     "<tr>" +
-                    '<td data-label="Application ID"><div class="fw-700">' + escapeHtml(row.application_no) + "</div></td>" +
-                    '<td data-label="Grant Applied For"><div class="small fw-600">DEGREE COURSE</div></td>' +
+                    '<td data-label="No."><div class="small fw-700">' + escapeHtml(String(rowNumber)) + "</div></td>" +
+                    '<td data-label="School Year"><div class="small fw-600">' + escapeHtml((row.school_year || "-").toString()) + "</div></td>" +
+                    '<td data-label="Applicant ID"><div class="fw-700 ldss-table-id">' + escapeHtml(row.application_no) + "</div></td>" +
                     '<td data-label="Submitted On">' + submittedOnMarkup(row) + "</td>" +
-                    '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
+                    '<td data-label="Examination Status">' + examStatusMarkup(row) + "</td>" +
                     '<td data-label="Exam Result">' + examResultMarkup(row) + "</td>" +
-                    '<td data-label="Next Step"><div class="small ldss-next-step-text">' + escapeHtml(workflow().nextStepForApplicant(row.status)) + "</div></td>" +
-                    '<td data-label="Action" class="ldss-actions-cell">' + actionButtonMarkup(row) + "</td>" +
+                    '<td data-label="Requirements"><span class="ldss-chip ' + requirements.chipClass + '">' + escapeHtml(requirements.label) + "</span></td>" +
+                    '<td data-label="Final Decision"><span class="ldss-chip ' + qualification.chipClass + '">' + escapeHtml(qualification.label) + "</span></td>" +
+                    '<td data-label="Option" class="ldss-actions-cell">' + viewButtonMarkup(row) + "</td>" +
                     "</tr>"
                 );
             })
@@ -560,6 +639,60 @@
         return latestRowByApplication(transformed);
     }
 
+    async function loadDocumentsMap(context, applicationIds) {
+        if (!applicationIds.length) {
+            return {};
+        }
+
+        const result = await context.client
+            .from("application_documents")
+            .select("application_id, document_type, verification_status, created_at")
+            .in("application_id", applicationIds);
+
+        if (result.error || !result.data) {
+            return {};
+        }
+
+        const map = {};
+        result.data.forEach(function (row) {
+            const applicationId = row && row.application_id ? row.application_id : "";
+            if (!applicationId) {
+                return;
+            }
+            if (!map[applicationId]) {
+                map[applicationId] = [];
+            }
+            map[applicationId].push(row);
+        });
+        return map;
+    }
+
+    async function loadApprovalMap(context, applicationIds) {
+        if (!applicationIds.length) {
+            return {};
+        }
+
+        let result = await context.client
+            .from("approval_records")
+            .select("application_id, decision_status, decided_at, updated_at, created_at")
+            .in("application_id", applicationIds);
+
+        if (result.error) {
+            if (!/does not exist|relation/i.test(result.error.message || "")) {
+                return {};
+            }
+            result = await context.client
+                .from("approval_queue")
+                .select("application_id, decision_status, decided_at, updated_at, created_at")
+                .in("application_id", applicationIds);
+            if (result.error) {
+                return {};
+            }
+        }
+
+        return latestRowByApplication(result.data || []);
+    }
+
     async function loadApplications(context) {
         showStatus("");
         const result = await context.client
@@ -575,11 +708,20 @@
 
         const rows = result.data || [];
         const appIds = rows.map(function (row) { return row.id; }).filter(Boolean);
-        const examMap = await loadExamMap(context, appIds);
+        const loadedMaps = await Promise.all([
+            loadExamMap(context, appIds),
+            loadDocumentsMap(context, appIds),
+            loadApprovalMap(context, appIds)
+        ]);
+        const examMap = loadedMaps[0];
+        const documentsMap = loadedMaps[1];
+        const approvalMap = loadedMaps[2];
 
         applicationRows = rows.map(function (row) {
             return Object.assign({}, row, {
-                exam_record: examMap[row.id] || null
+                exam_record: examMap[row.id] || null,
+                requirements_meta: requirementMetaForRows(documentsMap[row.id] || [], row),
+                approval_record: approvalMap[row.id] || null
             });
         });
 
