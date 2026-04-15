@@ -46,29 +46,9 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
-                            <a class="nav-link" href="admin-approval-queue.html">
-                                <div class="nav-link-icon"><i data-feather="check-square"></i></div>
-                                Approval Queue
-                            </a>
-                            <a class="nav-link" href="admin-scholar-records.html">
-                                <div class="nav-link-icon"><i data-feather="users"></i></div>
-                                Scholar Records
-                            </a>
-                            <a class="nav-link" href="certification-placeholder.html">
-                                <div class="nav-link-icon"><i data-feather="award"></i></div>
-                                Certifications
-                            </a>
-                            <a class="nav-link" href="admin-release-management.html">
-                                <div class="nav-link-icon"><i data-feather="package"></i></div>
-                                Release Management
-                            </a>
-                            <a class="nav-link" href="admin-reports.html">
-                                <div class="nav-link-icon"><i data-feather="bar-chart-2"></i></div>
-                                Reports
-                            </a>
-                            <a class="nav-link" href="../logout.html">
-                                <div class="nav-link-icon"><i data-feather="log-out"></i></div>
-                                Logout
+                            <a class="nav-link" href="admin-approval-queue.html?view=special_consideration">
+                                <div class="nav-link-icon"><i data-feather="bookmark"></i></div>
+                                Special Consideration
                             </a>
                         </div>
                     </div>
@@ -81,18 +61,18 @@
                             <div class="page-header-content">
                                 <div class="row align-items-center justify-content-between pt-3">
                                     <div class="col-auto mb-3">
-                                        <h1 class="page-header-title">
+                                        <h1 class="page-header-title" id="adminApprovalPageTitle">
                                             <div class="page-header-icon"><i data-feather="list"></i></div>
                                             Approval Queue
                                         </h1>
-                                        <div class="small ldss-muted">Admin-only ranking and final decision workspace with Special Endorsement controls.</div>
+                                        <div class="small ldss-muted" id="adminApprovalPageSubtitle">Admin-only ranking and final decision workspace with Special Endorsement controls.</div>
                                         <div class="small text-muted mt-1" id="adminApprovalWorkflowMeta">Loading workflow controls...</div>
                                         <ol class="ldss-breadcrumb mt-1">
                                             <li><a href="admin-dashboard.html">Dashboard</a></li>
-                                            <li>Approval Queue</li>
+                                            <li id="adminApprovalBreadcrumbLabel">Approval Queue</li>
                                         </ol>
                                     </div>
-                                    <div class="col-12 col-xl-auto mb-3">
+                                    <div class="col-12 col-xl-auto mb-3" id="adminApprovalHeaderActions">
                                         <button class="btn btn-outline-dark btn-sm me-2" id="adminApprovalRefreshBtn" type="button">Refresh</button>
                                         <button class="btn btn-dark btn-sm" id="adminApprovalOpenBatchBtn" type="button">Apply Batch Decision</button>
                                     </div>
@@ -101,117 +81,125 @@
                         </div>
                     </header>
                     <div class="container-xl px-4 mt-4">
-                        <div class="alert d-none" id="adminApprovalStatus" role="alert"></div>
-
-                        <div class="row g-3 mb-4">
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-kpi h-100">
-                                    <div class="small">For Approval</div>
-                                    <div class="h4 mt-2 mb-0" id="adminQueueForApprovalCount">0</div>
-                                    <div class="small mt-2">Ready for final decision</div>
-                                </div>
-                            </div>
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-kpi h-100">
-                                    <div class="small">Failed Exam</div>
-                                    <div class="h4 mt-2 mb-0" id="adminQueueFailedExamCount">0</div>
-                                    <div class="small mt-2">Eligible for Special Endorsement review</div>
-                                </div>
-                            </div>
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-kpi h-100">
-                                    <div class="small">Special Endorsement Review</div>
-                                    <div class="h4 mt-2 mb-0" id="adminQueueSpecialReviewCount">0</div>
-                                    <div class="small mt-2">Internal override process</div>
-                                </div>
-                            </div>
-                            <div class="col-sm-6 col-xl-3">
-                                <div class="ldss-kpi h-100">
-                                    <div class="small">Waitlisted</div>
-                                    <div class="h4 mt-2 mb-0" id="adminQueueWaitlistedCount">0</div>
-                                    <div class="small mt-2">Qualified, pending available slots</div>
-                                </div>
+                        <div class="card border-0 shadow-sm d-none" id="adminSpecialConsiderationShell">
+                            <div class="card-body py-5">
+                                <div class="small text-muted mb-0">Special Consideration content removed. Waiting for your manual instructions.</div>
                             </div>
                         </div>
 
-                        <div class="card mb-4">
-                            <div class="card-body">
-                                <div class="row g-2 align-items-end">
-                                    <div class="col-md-4">
-                                        <label class="small mb-1" for="adminApprovalSearchInput">Search</label>
-                                        <input class="form-control" id="adminApprovalSearchInput" type="text" placeholder="Application ID, control no., applicant" />
+                        <div id="adminApprovalWorkspace">
+                            <div class="alert d-none" id="adminApprovalStatus" role="alert"></div>
+
+                            <div class="row g-3 mb-4">
+                                <div class="col-sm-6 col-xl-3">
+                                    <div class="ldss-kpi h-100">
+                                        <div class="small">For Approval</div>
+                                        <div class="h4 mt-2 mb-0" id="adminQueueForApprovalCount">0</div>
+                                        <div class="small mt-2">Ready for final decision</div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="small mb-1" for="adminApprovalStatusFilter">Application Status</label>
-                                        <select class="form-select" id="adminApprovalStatusFilter">
-                                            <option value="all">All</option>
-                                            <option value="for_approval">For Approval</option>
-                                            <option value="failed_exam">Failed Exam</option>
-                                            <option value="special_endorsement_review">Special Endorsement Review</option>
-                                            <option value="waitlisted">Waitlisted</option>
-                                            <option value="approved">Approved</option>
-                                            <option value="rejected">Rejected</option>
-                                        </select>
+                                </div>
+                                <div class="col-sm-6 col-xl-3">
+                                    <div class="ldss-kpi h-100">
+                                        <div class="small">Failed Exam</div>
+                                        <div class="h4 mt-2 mb-0" id="adminQueueFailedExamCount">0</div>
+                                        <div class="small mt-2">Eligible for Special Endorsement review</div>
                                     </div>
-                                    <div class="col-md-3">
-                                        <label class="small mb-1" for="adminApprovalDecisionFilter">Queue Decision</label>
-                                        <select class="form-select" id="adminApprovalDecisionFilter">
-                                            <option value="all">All</option>
-                                            <option value="pending">Pending</option>
-                                            <option value="approved">Approved</option>
-                                            <option value="waitlisted">Waitlisted</option>
-                                            <option value="rejected">Rejected</option>
-                                        </select>
+                                </div>
+                                <div class="col-sm-6 col-xl-3">
+                                    <div class="ldss-kpi h-100">
+                                        <div class="small">Special Endorsement Review</div>
+                                        <div class="h4 mt-2 mb-0" id="adminQueueSpecialReviewCount">0</div>
+                                        <div class="small mt-2">Internal override process</div>
                                     </div>
-                                    <div class="col-md-2">
-                                        <button class="btn btn-outline-dark w-100" id="adminApprovalApplyFilterBtn" type="button">Apply</button>
+                                </div>
+                                <div class="col-sm-6 col-xl-3">
+                                    <div class="ldss-kpi h-100">
+                                        <div class="small">Waitlisted</div>
+                                        <div class="h4 mt-2 mb-0" id="adminQueueWaitlistedCount">0</div>
+                                        <div class="small mt-2">Qualified, pending available slots</div>
                                     </div>
-                                    <div class="col-md-6">
-                                        <label class="small mb-1" for="adminApprovalBatchAction">Batch Action (Selected Rows)</label>
-                                        <select class="form-select" id="adminApprovalBatchAction">
-                                            <option value="">Select action</option>
-                                            <option value="approved">Approve</option>
-                                            <option value="waitlisted">Waitlist</option>
-                                            <option value="rejected">Reject</option>
-                                            <option value="special_endorsement_review">Special Endorsement Review</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="small mb-1" for="adminApprovalBatchNotes">Batch Decision Notes</label>
-                                        <div class="input-group">
-                                            <input class="form-control" id="adminApprovalBatchNotes" type="text" placeholder="Optional notes for selected records" />
-                                            <button class="btn btn-dark" id="adminApprovalBatchApplyBtn" type="button">Apply</button>
+                                </div>
+                            </div>
+
+                            <div class="card mb-4">
+                                <div class="card-body">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-4">
+                                            <label class="small mb-1" for="adminApprovalSearchInput">Search</label>
+                                            <input class="form-control" id="adminApprovalSearchInput" type="text" placeholder="Application ID, control no., applicant" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="small mb-1" for="adminApprovalStatusFilter">Application Status</label>
+                                            <select class="form-select" id="adminApprovalStatusFilter">
+                                                <option value="all">All</option>
+                                                <option value="for_approval">For Approval</option>
+                                                <option value="failed_exam">Failed Exam</option>
+                                                <option value="special_endorsement_review">Special Endorsement Review</option>
+                                                <option value="waitlisted">Waitlisted</option>
+                                                <option value="approved">Approved</option>
+                                                <option value="rejected">Rejected</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="small mb-1" for="adminApprovalDecisionFilter">Queue Decision</label>
+                                            <select class="form-select" id="adminApprovalDecisionFilter">
+                                                <option value="all">All</option>
+                                                <option value="pending">Pending</option>
+                                                <option value="approved">Approved</option>
+                                                <option value="waitlisted">Waitlisted</option>
+                                                <option value="rejected">Rejected</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <button class="btn btn-outline-dark w-100" id="adminApprovalApplyFilterBtn" type="button">Apply</button>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="small mb-1" for="adminApprovalBatchAction">Batch Action (Selected Rows)</label>
+                                            <select class="form-select" id="adminApprovalBatchAction">
+                                                <option value="">Select action</option>
+                                                <option value="approved">Approve</option>
+                                                <option value="waitlisted">Waitlist</option>
+                                                <option value="rejected">Reject</option>
+                                                <option value="special_endorsement_review">Special Endorsement Review</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="small mb-1" for="adminApprovalBatchNotes">Batch Decision Notes</label>
+                                            <div class="input-group">
+                                                <input class="form-control" id="adminApprovalBatchNotes" type="text" placeholder="Optional notes for selected records" />
+                                                <button class="btn btn-dark" id="adminApprovalBatchApplyBtn" type="button">Apply</button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="card">
-                            <div class="card-header d-flex align-items-center justify-content-between">
-                                <span>Approval and Ranking View</span>
-                                <span class="small text-muted">Ranking data is visible only to Admin and Super Admin.</span>
-                            </div>
-                            <div class="card-body p-0">
-                                <div class="table-responsive">
-                                    <table class="table mb-0">
-                                        <thead class="bg-light">
-                                            <tr>
-                                                <th style="width: 40px;"><input id="adminApprovalSelectAll" type="checkbox" /></th>
-                                                <th>Application</th>
-                                                <th>Exam Summary</th>
-                                                <th>Interview Summary</th>
-                                                <th>Ranking</th>
-                                                <th>Queue</th>
-                                                <th>Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="adminApprovalQueueBody">
-                                            <tr>
-                                                <td colspan="7" class="text-center py-4 text-muted">Loading approval queue records...</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
+                            <div class="card">
+                                <div class="card-header d-flex align-items-center justify-content-between">
+                                    <span>Approval and Ranking View</span>
+                                    <span class="small text-muted">Ranking data is visible only to Admin and Super Admin.</span>
+                                </div>
+                                <div class="card-body p-0">
+                                    <div class="table-responsive">
+                                        <table class="table mb-0">
+                                            <thead class="bg-light">
+                                                <tr>
+                                                    <th style="width: 40px;"><input id="adminApprovalSelectAll" type="checkbox" /></th>
+                                                    <th>Application</th>
+                                                    <th>Exam Summary</th>
+                                                    <th>Interview Summary</th>
+                                                    <th>Ranking</th>
+                                                    <th>Queue</th>
+                                                    <th>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="adminApprovalQueueBody">
+                                                <tr>
+                                                    <td colspan="7" class="text-center py-4 text-muted">Loading approval queue records...</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
                         </div>

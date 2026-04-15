@@ -56,6 +56,14 @@
         };
     }
 
+    function workflowControls() {
+        return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
+    function applicantExamScoresVisible() {
+        return workflowControls().show_applicant_exam_scores !== false;
+    }
+
     function showStatus(message, type) {
         const alert = byId("detailStatus");
         if (!alert) {
@@ -457,11 +465,13 @@
         setChip("detailFinalDecisionChip", finalLabel, finalClass);
 
         const examSummary = workflow().examSummaryFromRecord(examRecord);
+        const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
+        const showExamScores = applicantExamScoresVisible();
         setText("detailExamControlNo", examSummary.controlNo || "-");
         setText("detailExamRoom", examSummary.roomLabel || "Not posted yet");
         setText("detailExamSeatNo", examSummary.seatNo || "Not posted yet");
-        setText("detailExamRawScore", examSummary.scoreText || "-");
-        setText("detailExamPercentage", examSummary.percentageText || "-");
+        setText("detailExamRawScore", showExamScores ? (examSummary.scoreText || "-") : (hasNumericExam ? "Hidden" : "-"));
+        setText("detailExamPercentage", showExamScores ? (examSummary.percentageText || "-") : (hasNumericExam ? "Hidden" : "-"));
         setChip("detailExamResultChip", examSummary.resultLabel || "Pending", examSummary.resultChipClass || "ldss-chip-neutral");
 
         setText("detailNextStepText", workflow().nextStepForApplicant(application.status));

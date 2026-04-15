@@ -786,6 +786,15 @@
                                                             <input class="form-check-input" id="superSettingsExamCheckingInProgress" type="checkbox" role="switch" />
                                                         </div>
                                                     </div>
+                                                    <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsShowApplicantExamScores">
+                                                            <span class="ldss-settings-switch-title">Show applicant exam scores after encoding</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Turn this off when applicants should still see their exam status updates but must not see raw or percentage scores yet.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsShowApplicantExamScores" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -836,7 +845,7 @@
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/supabase-superadmin-audit-helper.js"></script>
-        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260414-1"></script>
+        <script src="../js/supabase-superadmin-scholarship-settings.js?v=20260415-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

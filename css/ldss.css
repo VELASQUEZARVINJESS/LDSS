@@ -123,6 +123,77 @@ body {
     min-height: 2.3rem;
 }
 
+.ldss-applicant-status-strip {
+    padding: 0.15rem 0 1.4rem;
+    border-bottom: 1px solid #dbe3ec;
+}
+
+.ldss-applicant-status-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) auto;
+    gap: 1rem 1.4rem;
+    align-items: start;
+}
+
+.ldss-applicant-status-primary,
+.ldss-applicant-status-secondary,
+.ldss-applicant-status-actions {
+    min-width: 0;
+}
+
+.ldss-applicant-status-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.4rem;
+}
+
+.ldss-applicant-status-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #111827;
+}
+
+.ldss-applicant-status-meta {
+    font-size: 0.92rem;
+    color: var(--ldss-muted);
+}
+
+.ldss-applicant-status-secondary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 1.4rem;
+    border-left: 1px solid #e5edf6;
+    padding-left: 1.4rem;
+    align-content: start;
+}
+
+.ldss-applicant-status-slot {
+    min-width: 0;
+}
+
+.ldss-applicant-status-detail {
+    margin: 0.38rem 0 0.45rem;
+    font-size: 0.98rem;
+    font-weight: 600;
+    line-height: 1.45;
+    color: #111827;
+}
+
+.ldss-applicant-status-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    border-left: 1px solid #e5edf6;
+    padding-left: 1.4rem;
+}
+
+.ldss-applicant-status-actions .ldss-quick-actions {
+    width: 100%;
+}
+
 .ldss-dashboard-section-card .card-header {
     padding: 0;
 }
@@ -2411,6 +2482,21 @@ body {
 }
 
 @media (max-width: 1199.98px) {
+    .ldss-applicant-status-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .ldss-applicant-status-secondary,
+    .ldss-applicant-status-actions {
+        border-left: 0;
+        padding-left: 0;
+    }
+
+    .ldss-applicant-status-actions {
+        padding-top: 1rem;
+        border-top: 1px solid #e5edf6;
+    }
+
     .ldss-secretary-summary-layout {
         row-gap: 1.5rem;
     }
@@ -2429,6 +2515,23 @@ body {
 }
 
 @media (max-width: 767.98px) {
+    .ldss-applicant-status-strip {
+        padding-bottom: 1.15rem;
+    }
+
+    .ldss-applicant-status-title {
+        font-size: 1.38rem;
+    }
+
+    .ldss-applicant-status-secondary {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    .ldss-applicant-status-slot {
+        padding-top: 0;
+    }
+
     .ldss-applicant-form-photo-stack {
         width: min(100%, 8.5rem);
         margin-left: auto;

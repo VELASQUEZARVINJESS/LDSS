@@ -140,6 +140,14 @@
         };
     }
 
+    function workflowControls() {
+        return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
+    function applicantExamScoresVisible() {
+        return workflowControls().show_applicant_exam_scores !== false;
+    }
+
     function intakeClosedMessage(policy) {
         if (!policy) {
             return "New application filing is currently closed by System Administrator.";
@@ -261,7 +269,11 @@
         }
 
         let extra = "";
-        if (examSummary.scoreText !== "-" && examSummary.percentageText !== "-") {
+        const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
+
+        if (hasNumericExam && !applicantExamScoresVisible()) {
+            extra = "Score hidden by scholarship office";
+        } else if (examSummary.scoreText !== "-" && examSummary.percentageText !== "-") {
             extra = "Raw: " + examSummary.scoreText + " | " + examSummary.percentageText;
         } else if (examSummary.percentageText !== "-") {
             extra = "Score: " + examSummary.percentageText;

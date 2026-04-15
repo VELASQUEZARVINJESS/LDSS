@@ -49,6 +49,8 @@
     let roomHotfixAvailable = true;
     let isSaving = false;
     let sectorLookup = null;
+    let currentRoomSearchQuery = "";
+    let currentRankingSearchQuery = "";
 
     function byId(id) {
         return document.getElementById(id);
@@ -177,6 +179,14 @@
 
     function normalizeStatus(value) {
         return workflow().normalizeStatus ? workflow().normalizeStatus(value) : (value || "").toString().trim().toLowerCase();
+    }
+
+    function normalizeSearchText(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
     }
 
     function readFallbackSettings() {
@@ -557,6 +567,10 @@
         return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 10;
     }
 
+    function rankingSearchQuery() {
+        return normalizeSearchText(currentRankingSearchQuery);
+    }
+
     function rankingModeLabel(mode) {
         if (mode === "room") {
             return "Per Room Ranking";
@@ -806,7 +820,9 @@
 
     function rankingSummaryMeta() {
         const mode = currentRankingMode();
-        const filteredRows = rankingRowsForCurrentView();
+        const rankingRows = rankingRowsForCurrentView();
+        const filteredRows = filterRankingRowsBySearch(rankingRows);
+        const searchQuery = rankingSearchQuery();
         let summary = "Select a batch to review ranking.";
         let title = "Batch Ranking List";
         let tableMeta = "Applicants with the same score keep the same rank.";
@@ -838,11 +854,57 @@
             }
         }
 
+        if (searchQuery) {
+            summary += " | Search: " + currentRankingSearchQuery.trim();
+            tableMeta += " Search keeps the original saved rank visible for each matching applicant.";
+        }
+
         return {
             summary: summary,
             title: title,
             tableMeta: tableMeta
         };
+    }
+
+    function filterRankingRowsBySearch(sourceRows) {
+        const query = rankingSearchQuery();
+        const rowsForSearch = Array.isArray(sourceRows) ? sourceRows : [];
+        if (!query) {
+            return rowsForSearch.slice();
+        }
+
+        return rowsForSearch.filter(function (row) {
+            const haystack = normalizeSearchText([
+                row.applicant_name || "",
+                row.application_no || "",
+                row.school_name || "",
+                row.scholarship_type || "",
+                row.room_label || "",
+                row.room_seat_no == null ? "" : String(row.room_seat_no),
+                normalizeSectorClassification(row.sector_classification || "")
+            ].join(" "));
+            return haystack.indexOf(query) !== -1;
+        });
+    }
+
+    function renderRankingSearchMeta(totalRows, matchRows) {
+        const target = byId("roomScoreRankingSearchMeta");
+        if (!target) {
+            return;
+        }
+
+        const query = rankingSearchQuery();
+        if (!query) {
+            target.textContent = "Search by applicant name or LDSP application number.";
+            return;
+        }
+
+        if (!matchRows) {
+            target.textContent = "No ranked applicants matched that search.";
+            return;
+        }
+
+        target.textContent = "Showing " + String(matchRows) + " matching ranked applicant(s) out of " + String(totalRows) + ".";
     }
 
     function renderRankingSummary() {
@@ -861,6 +923,10 @@
             return;
         }
         tbody.innerHTML = '<tr><td colspan="5" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+        const meta = byId("roomScoreSearchMeta");
+        if (meta) {
+            meta.textContent = "Search within the current room sheet.";
+        }
     }
 
     function renderEmptyRankingTable(message) {
@@ -868,7 +934,7 @@
         if (!tbody) {
             return;
         }
-        tbody.innerHTML = '<tr><td colspan="7" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+        tbody.innerHTML = '<tr><td colspan="8" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
     }
 
     function renderEmptyRankingCards(message) {
@@ -889,6 +955,7 @@
 
     function rankingDatasetForRender() {
         if (!currentBatchId) {
+            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "Select a saved batch to review ranking by score."
@@ -897,6 +964,7 @@
 
         const batchRoomRows = batchRows(currentBatchId);
         if (!batchRoomRows.length) {
+            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "No assigned room records were found for this batch yet."
@@ -905,12 +973,14 @@
 
         const mode = currentRankingMode();
         if (mode === "room" && currentRankingRoomFilter() === "all") {
+            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "Select a room to review or print per-room ranking."
             };
         }
         if (mode === "sector" && currentRankingSectorFilter() === "all") {
+            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "Select a sector classification to review or print sector ranking."
@@ -918,15 +988,19 @@
         }
 
         const rankingRows = rankingRowsForCurrentView();
-        if (!rankingRows.length) {
+        const searchedRows = filterRankingRowsBySearch(rankingRows);
+        renderRankingSearchMeta(rankingRows.length, searchedRows.length);
+        if (!searchedRows.length) {
             return {
                 rows: [],
-                message: "No saved scores matched the selected ranking option."
+                message: rankingSearchQuery()
+                    ? "No ranked applicants matched the current search."
+                    : "No saved scores matched the selected ranking option."
             };
         }
 
         return {
-            rows: rankingRows,
+            rows: searchedRows,
             message: ""
         };
     }
@@ -935,6 +1009,7 @@
         return (
             "<thead>" +
             "<tr>" +
+            "<th>No.</th>" +
             "<th>Rank</th>" +
             "<th>Examinee</th>" +
             "<th>Application No.</th>" +
@@ -979,9 +1054,11 @@
         return String(Math.max(0, Math.trunc(numeric)));
     }
 
-    function rankingTableRowMarkup(row) {
+    function rankingTableRowMarkup(row, index) {
+        const counter = index + 1;
         return (
             "<tr>" +
+            '<td class="text-center fw-700">' + escapeHtml(String(counter)) + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
             "<td>" +
             '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
@@ -1049,9 +1126,17 @@
 
         tbody.innerHTML = roomRows.map(function (row) {
             const preview = previewMeta(row.raw_score);
+            const searchText = normalizeSearchText([
+                row.room_seat_no == null ? "" : String(row.room_seat_no),
+                row.exam_control_no || "",
+                row.application_no || "",
+                row.applicant_name || "",
+                row.school_name || "",
+                row.scholarship_type || ""
+            ].join(" "));
 
             return (
-                "<tr>" +
+                '<tr data-room-sheet-row="' + escapeHtml(row.id) + '" data-room-search-text="' + escapeHtml(searchText) + '">' +
                 '<td class="ldss-room-score-seat">' + escapeHtml(row.room_seat_no || "-") + "</td>" +
                 '<td class="ldss-room-score-control">' + escapeHtml(row.exam_control_no || "-") + "</td>" +
                 "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
@@ -1066,6 +1151,52 @@
                 "</tr>"
             );
         }).join("");
+
+        applyRoomSheetSearch();
+    }
+
+    function applyRoomSheetSearch() {
+        const tbody = byId("roomScoreSheetBody");
+        const meta = byId("roomScoreSearchMeta");
+        if (!tbody) {
+            return;
+        }
+
+        const rowsInDom = Array.from(tbody.querySelectorAll("[data-room-sheet-row]"));
+        if (!rowsInDom.length) {
+            if (meta) {
+                meta.textContent = "Search within the current room sheet.";
+            }
+            return;
+        }
+
+        const query = normalizeSearchText(currentRoomSearchQuery);
+        if (!query) {
+            rowsInDom.forEach(function (row) {
+                row.classList.remove("d-none", "ldss-room-score-search-match");
+            });
+            if (meta) {
+                meta.textContent = "Search within the current room sheet.";
+            }
+            return;
+        }
+
+        let matchCount = 0;
+        rowsInDom.forEach(function (row) {
+            const haystack = normalizeSearchText(row.getAttribute("data-room-search-text") || row.textContent || "");
+            const isMatch = haystack.indexOf(query) !== -1;
+            row.classList.toggle("d-none", !isMatch);
+            row.classList.toggle("ldss-room-score-search-match", isMatch);
+            if (isMatch) {
+                matchCount += 1;
+            }
+        });
+
+        if (meta) {
+            meta.textContent = matchCount
+                ? ("Showing " + String(matchCount) + " matching examinee(s) in this room.")
+                : "No matching examinees were found in this room.";
+        }
     }
 
     function renderRankingTable() {
@@ -1080,7 +1211,9 @@
             return;
         }
 
-        tbody.innerHTML = rankingState.rows.map(rankingTableRowMarkup).join("");
+        tbody.innerHTML = rankingState.rows.map(function (row, index) {
+            return rankingTableRowMarkup(row, index);
+        }).join("");
     }
 
     function renderRankingCards() {
@@ -1095,11 +1228,12 @@
             return;
         }
 
-        container.innerHTML = rankingState.rows.map(function (row) {
+        container.innerHTML = rankingState.rows.map(function (row, index) {
             return (
                 '<article class="ldss-ranking-card">' +
                 '<div class="ldss-ranking-card-header">' +
-                '<div>' +
+                '<div class="ldss-ranking-card-badges">' +
+                '<div class="ldss-ranking-card-counter">No. ' + escapeHtml(String(index + 1)) + "</div>" +
                 '<div class="ldss-ranking-card-rank">Rank ' + escapeHtml(String(row.display_rank || "-")) + "</div>" +
                 "</div>" +
                 '<div class="ldss-ranking-card-score">' +
@@ -1227,12 +1361,14 @@
 
     function syncActionButtons() {
         const roomRows = currentRoomRows();
-        const rankingRows = rankingRowsForCurrentView();
+        const rankingState = rankingDatasetForRender();
         const saveBtn = byId("roomScoreSaveBtn");
         const saveNextBtn = byId("roomScoreSaveNextBtn");
         const prevBtn = byId("roomScorePrevRoomBtn");
         const nextBtn = byId("roomScoreNextRoomBtn");
         const printBtn = byId("roomScorePrintBtn");
+        const searchBtn = byId("roomScoreSearchBtn");
+        const clearSearchBtn = byId("roomScoreSearchClearBtn");
 
         if (saveBtn) {
             saveBtn.disabled = isSaving || !roomRows.length;
@@ -1249,7 +1385,13 @@
             nextBtn.disabled = isSaving || !nextSelection();
         }
         if (printBtn) {
-            printBtn.disabled = isSaving || (isRankingPage() ? !rankingRows.length : !roomRows.length);
+            printBtn.disabled = isSaving || (isRankingPage() ? !rankingState.rows.length : !roomRows.length);
+        }
+        if (searchBtn) {
+            searchBtn.disabled = isSaving || !roomRows.length;
+        }
+        if (clearSearchBtn) {
+            clearSearchBtn.disabled = isSaving || !roomRows.length;
         }
     }
 
@@ -1537,10 +1679,15 @@
         const rankingRoomFilter = byId("roomScoreRankingRoomFilter");
         const rankingSectorFilter = byId("roomScoreRankingSectorFilter");
         const rankingTopFilter = byId("roomScoreRankingTopFilter");
+        const rankingSearchInput = byId("roomScoreRankingSearchInput");
+        const rankingSearchClearBtn = byId("roomScoreRankingSearchClearBtn");
         const refreshBtn = byId("roomScoreRefreshBtn");
         const prevBtn = byId("roomScorePrevRoomBtn");
         const nextBtn = byId("roomScoreNextRoomBtn");
         const printBtn = byId("roomScorePrintBtn");
+        const searchInput = byId("roomScoreSearchInput");
+        const searchBtn = byId("roomScoreSearchBtn");
+        const clearSearchBtn = byId("roomScoreSearchClearBtn");
         const saveBtn = byId("roomScoreSaveBtn");
         const saveNextBtn = byId("roomScoreSaveNextBtn");
         const tableBody = byId("roomScoreSheetBody");
@@ -1584,6 +1731,33 @@
             });
         }
 
+        if (rankingSearchInput) {
+            rankingSearchInput.addEventListener("input", function () {
+                currentRankingSearchQuery = rankingSearchInput.value.trim();
+                renderAll();
+            });
+
+            rankingSearchInput.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter") {
+                    return;
+                }
+                event.preventDefault();
+                currentRankingSearchQuery = rankingSearchInput.value.trim();
+                renderAll();
+            });
+        }
+
+        if (rankingSearchClearBtn) {
+            rankingSearchClearBtn.addEventListener("click", function () {
+                currentRankingSearchQuery = "";
+                if (rankingSearchInput) {
+                    rankingSearchInput.value = "";
+                    rankingSearchInput.focus();
+                }
+                renderAll();
+            });
+        }
+
         if (refreshBtn) {
             refreshBtn.addEventListener("click", async function () {
                 try {
@@ -1610,6 +1784,34 @@
         if (printBtn) {
             printBtn.addEventListener("click", function () {
                 window.print();
+            });
+        }
+
+        if (searchBtn) {
+            searchBtn.addEventListener("click", function () {
+                currentRoomSearchQuery = searchInput ? searchInput.value.trim() : "";
+                applyRoomSheetSearch();
+            });
+        }
+
+        if (clearSearchBtn) {
+            clearSearchBtn.addEventListener("click", function () {
+                currentRoomSearchQuery = "";
+                if (searchInput) {
+                    searchInput.value = "";
+                }
+                applyRoomSheetSearch();
+            });
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter") {
+                    return;
+                }
+                event.preventDefault();
+                currentRoomSearchQuery = searchInput.value.trim();
+                applyRoomSheetSearch();
             });
         }
 

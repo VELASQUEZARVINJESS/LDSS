@@ -3,7 +3,8 @@
 
     const STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const DEFAULT_CONTROLS = {
-        exam_checking_in_progress: false
+        exam_checking_in_progress: false,
+        show_applicant_exam_scores: true
     };
 
     function cloneControls(controls) {

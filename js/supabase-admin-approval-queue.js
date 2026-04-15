@@ -30,6 +30,7 @@
         allow_secretary_special_consideration: false,
         special_consideration_options: []
     };
+    const SPECIAL_CONSIDERATION_VIEW = "special_consideration";
 
     let authContext = null;
     let rows = [];
@@ -39,6 +40,19 @@
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function currentAdminView() {
+        try {
+            const params = new URLSearchParams(window.location.search || "");
+            return (params.get("view") || "").toString().trim().toLowerCase();
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    function isSpecialConsiderationView() {
+        return currentAdminView() === SPECIAL_CONSIDERATION_VIEW;
     }
 
     function workflow() {
@@ -104,6 +118,14 @@
             return;
         }
         const specialConsiderationEnabled = workflowControls.allow_secretary_special_consideration === true;
+        if (isSpecialConsiderationView()) {
+            target.textContent = "Reserved-slot exception flow is "
+                + (specialConsiderationEnabled ? "enabled" : "disabled")
+                + ". Special Endorsement is "
+                + (workflowControls.allow_special_endorsement ? "enabled" : "disabled")
+                + " for final review handling.";
+            return;
+        }
         target.textContent = "Special Endorsement is "
             + (workflowControls.allow_special_endorsement ? "enabled" : "disabled")
             + " by System Administrator. Reserved-slot exception flow is "
@@ -489,6 +511,55 @@
         setMetric("adminQueueFailedExamCount", rows.filter(function (row) { return normalizeStatus(row.status) === "failed_exam"; }).length);
         setMetric("adminQueueSpecialReviewCount", rows.filter(function (row) { return normalizeStatus(row.status) === "special_endorsement_review"; }).length);
         setMetric("adminQueueWaitlistedCount", rows.filter(function (row) { return normalizeStatus(row.status) === "waitlisted"; }).length);
+    }
+
+    function applyInitialPageMode() {
+        const title = byId("adminApprovalPageTitle");
+        const subtitle = byId("adminApprovalPageSubtitle");
+        const breadcrumb = byId("adminApprovalBreadcrumbLabel");
+        const workflowMeta = byId("adminApprovalWorkflowMeta");
+        const headerActions = byId("adminApprovalHeaderActions");
+        const shell = byId("adminSpecialConsiderationShell");
+        const workspace = byId("adminApprovalWorkspace");
+        const statusFilter = byId("adminApprovalStatusFilter");
+        const decisionFilter = byId("adminApprovalDecisionFilter");
+        const searchInput = byId("adminApprovalSearchInput");
+
+        if (!isSpecialConsiderationView()) {
+            return;
+        }
+
+        if (title) {
+            title.innerHTML = '<div class="page-header-icon"><i data-feather="bookmark"></i></div>Special Consideration';
+        }
+        if (subtitle) {
+            subtitle.textContent = "Workspace cleared and ready for your next Special Consideration instructions.";
+        }
+        if (breadcrumb) {
+            breadcrumb.textContent = "Special Consideration";
+        }
+        if (workflowMeta) {
+            workflowMeta.textContent = "";
+            workflowMeta.classList.add("d-none");
+        }
+        if (headerActions) {
+            headerActions.classList.add("d-none");
+        }
+        if (shell) {
+            shell.classList.remove("d-none");
+        }
+        if (workspace) {
+            workspace.classList.add("d-none");
+        }
+        if (statusFilter) {
+            statusFilter.value = "special_endorsement_review";
+        }
+        if (decisionFilter) {
+            decisionFilter.value = "all";
+        }
+        if (searchInput) {
+            searchInput.value = "";
+        }
     }
 
     function applyFilterRows() {
@@ -994,9 +1065,19 @@
             return;
         }
 
+        applyInitialPageMode();
+        if (window.feather && typeof window.feather.replace === "function") {
+            window.feather.replace();
+        }
+        if (isSpecialConsiderationView()) {
+            return;
+        }
         bindEvents();
         try {
             await loadData();
+            if (window.feather && typeof window.feather.replace === "function") {
+                window.feather.replace();
+            }
         } catch (error) {
             showStatus(error && error.message ? error.message : "Failed to load approval queue.", "alert-danger");
         }

@@ -40,7 +40,8 @@
                 special_consideration_options: [],
                 require_applicant_photo_on_submit: true,
                 auto_set_for_interview: true,
-                exam_checking_in_progress: false
+                exam_checking_in_progress: false,
+                show_applicant_exam_scores: true
             }
         }
     };
@@ -454,7 +455,8 @@
                     special_consideration_options: currentSpecialConsiderationOptions(),
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked),
-                    exam_checking_in_progress: Boolean(byId("superSettingsExamCheckingInProgress") && byId("superSettingsExamCheckingInProgress").checked)
+                    exam_checking_in_progress: Boolean(byId("superSettingsExamCheckingInProgress") && byId("superSettingsExamCheckingInProgress").checked),
+                    show_applicant_exam_scores: Boolean(byId("superSettingsShowApplicantExamScores") && byId("superSettingsShowApplicantExamScores").checked)
                 }
             }
         };
@@ -1003,6 +1005,7 @@
             "Special Consideration Flow Page: " + (controls.allow_secretary_special_consideration ? "Enabled" : "Disabled"),
             "Applicant Photo Required On Submit: " + (controls.require_applicant_photo_on_submit !== false ? "Enabled" : "Disabled"),
             "Checking Examination Progress: " + (controls.exam_checking_in_progress ? "Enabled" : "Disabled"),
+            "Applicant Exam Score Visibility: " + (controls.show_applicant_exam_scores !== false ? "Visible" : "Hidden"),
             "Special Endorsement: " + ((controls.allow_special_endorsement !== false) ? "Enabled" : "Disabled"),
             "Weights (Exam/Interview/Income/Requirements): "
                 + Number(ranking.exam_weight || 0) + "/"
@@ -1047,6 +1050,7 @@
         writeCheckbox("superSettingsRequireApplicantPhotoOnSubmit", controls.require_applicant_photo_on_submit !== false);
         writeCheckbox("superSettingsAutoSetForInterview", controls.auto_set_for_interview);
         writeCheckbox("superSettingsExamCheckingInProgress", controls.exam_checking_in_progress);
+        writeCheckbox("superSettingsShowApplicantExamScores", controls.show_applicant_exam_scores !== false);
 
         renderWeightTotal();
         renderKpis(settings);
@@ -1128,7 +1132,8 @@
                     special_consideration_options: currentSpecialConsiderationOptions(),
                     require_applicant_photo_on_submit: Boolean(byId("superSettingsRequireApplicantPhotoOnSubmit") && byId("superSettingsRequireApplicantPhotoOnSubmit").checked),
                     auto_set_for_interview: Boolean(byId("superSettingsAutoSetForInterview") && byId("superSettingsAutoSetForInterview").checked),
-                    exam_checking_in_progress: Boolean(byId("superSettingsExamCheckingInProgress") && byId("superSettingsExamCheckingInProgress").checked)
+                    exam_checking_in_progress: Boolean(byId("superSettingsExamCheckingInProgress") && byId("superSettingsExamCheckingInProgress").checked),
+                    show_applicant_exam_scores: Boolean(byId("superSettingsShowApplicantExamScores") && byId("superSettingsShowApplicantExamScores").checked)
                 }
             }
         };

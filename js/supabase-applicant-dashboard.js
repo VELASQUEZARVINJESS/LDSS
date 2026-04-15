@@ -335,6 +335,14 @@
         };
     }
 
+    function workflowControls() {
+        return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
+    function applicantExamScoresVisible() {
+        return workflowControls().show_applicant_exam_scores !== false;
+    }
+
     function getProfileReminderModal() {
         const modalEl = byId("profileReminderModal");
         if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
@@ -840,13 +848,17 @@
 
         const examSummary = workflow().examSummaryFromRecord(examRecord);
         const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
-        const examValue = hasNumericExam
-            ? ("Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText)
-            : (workflow().isExamCheckingStage && workflow().isExamCheckingStage(application.status)
-                ? "Checking Examination"
-            : (normalizedStatus === "pending_exam" || normalizedStatus === "exam_scheduled" || normalizedStatus === "exam_completed"
-                ? "Exam processing"
-                : "No score yet"));
+        let examValue = "No score yet";
+
+        if (hasNumericExam && applicantExamScoresVisible()) {
+            examValue = "Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText;
+        } else if (hasNumericExam) {
+            examValue = "Score hidden by scholarship office";
+        } else if (workflow().isExamCheckingStage && workflow().isExamCheckingStage(application.status)) {
+            examValue = "Checking Examination";
+        } else if (normalizedStatus === "pending_exam" || normalizedStatus === "exam_scheduled" || normalizedStatus === "exam_completed") {
+            examValue = "Exam processing";
+        }
 
         setText("dashboardExamValue", examValue);
         setChip("dashboardExamChip", examSummary.resultLabel, examSummary.resultChipClass);
@@ -884,6 +896,52 @@
 
         setText("dashboardNextStepValue", nextStep);
         setChip("dashboardNextStepChip", nextChipLabel, nextChipClass);
+    }
+
+    function renderStatusOverview(application, approvalRecord, intakePolicy, examRecord) {
+        const metaText = byId("dashboardStatusMetaText");
+        const grantValue = byId("dashboardGrantValue");
+        const submittedValue = byId("dashboardSubmittedOnValue");
+        const submittedAt = application && application.submitted_at ? formatDateOnly(application.submitted_at) : "";
+        const updatedAt = application ? formatDateOnly(application.updated_at || application.created_at || application.submitted_at) : "";
+
+        renderCards(application, examRecord || null, null, approvalRecord, intakePolicy);
+
+        if (!application) {
+            if (metaText) {
+                metaText.textContent = (intakePolicy && !intakePolicy.isOpen)
+                    ? intakeClosedMessage(intakePolicy)
+                    : "You do not have an application yet.";
+            }
+            if (grantValue) {
+                grantValue.textContent = "-";
+            }
+            if (submittedValue) {
+                submittedValue.textContent = "-";
+            }
+            return;
+        }
+
+        if (grantValue) {
+            grantValue.textContent = formatScholarshipType(application.scholarship_type);
+        }
+        if (submittedValue) {
+            submittedValue.textContent = submittedAt || "-";
+        }
+
+        if (metaText) {
+            metaText.textContent = updatedAt && updatedAt !== "-"
+                ? "Last updated " + updatedAt + "."
+                : "Latest application activity is available in My Applications.";
+        }
+    }
+
+    function formatScholarshipType(value) {
+        const text = (value || "").toString().trim();
+        if (!text) {
+            return "-";
+        }
+        return text.replace(/_/g, " ").toUpperCase();
     }
 
     function formatProfileName(profile) {
@@ -944,7 +1002,7 @@
     async function loadLatestApplication(context) {
         const result = await context.client
             .from("applications")
-            .select("id, application_no, status, submitted_at, created_at, updated_at")
+            .select("id, application_no, scholarship_type, status, submitted_at, created_at, updated_at")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false })
             .limit(1);
@@ -958,7 +1016,7 @@
     async function loadLatestEditableDraft(context) {
         const result = await context.client
             .from("applications")
-            .select("id")
+            .select("id, status")
             .eq("applicant_id", context.user.id)
             .in("status", ["draft", "returned_for_correction"])
             .order("updated_at", { ascending: false })
@@ -1164,6 +1222,18 @@
         const intakeIsClosed = !!(intakePolicy && !intakePolicy.isOpen);
         const intakeHint = intakeClosedMessage(intakePolicy);
 
+        if (latestDraft && latestDraft.id) {
+            const resumeLabel = latestDraft.status === "returned_for_correction" ? "Continue Application" : "Continue Draft";
+            setActionLink(
+                "dashboardNewApplicationBtn",
+                "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id),
+                resumeLabel,
+                false
+            );
+            setActionLink("dashboardMyApplicationsBtn", "applicant-applications.html", "My Applications", false);
+            return;
+        }
+
         setActionLink(
             "dashboardNewApplicationBtn",
             "applicant-application-form.html",
@@ -1267,12 +1337,19 @@
             const latestDraft = headResults[2];
             const latestBlockingApplication = headResults[3];
             const intakePolicy = headResults[4];
+            const latestExamRecord = latestApplication
+                ? await loadExamRecord(context, latestApplication.id, latestApplication.status)
+                : null;
+            const latestApprovalRecord = latestApplication
+                ? await loadApprovalRecord(context, latestApplication.id)
+                : null;
             const latestApplicationAuxMeta = latestApplication
                 ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
                 : { available: false, payload: null };
             const completionReminder = buildCompletionReminder(profileSummary, latestApplication, latestApplicationAuxMeta);
 
             renderProfileHeader(profileSummary, context.user.email);
+            renderStatusOverview(latestApplication, latestApprovalRecord, intakePolicy, latestExamRecord);
             renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy);
             showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
             if (completionReminder) {
