@@ -8,6 +8,8 @@
         passing_score: 75,
         exam_total_items: 100
     };
+    const MASTERLIST_SECTOR_LIMIT = 76;
+    const MASTERLIST_LIKHANG_LIMIT = 50;
     const CATEGORY_META = {
         regular: {
             label: "Regular Applicant",
@@ -22,7 +24,7 @@
             className: "ldss-scholar-category-special"
         },
         likhang: {
-            label: "Likhang Daeteño",
+            label: "Dummy Records",
             className: "ldss-scholar-category-likhang"
         }
     };
@@ -253,6 +255,7 @@
         return {
             regularSlots: readWholeNumber("scholarSelectionRegularSlots", 0),
             sectorSlots: readWholeNumber("scholarSelectionSectorSlots", 0),
+            likhangSlots: readWholeNumber("scholarSelectionLikhangSlots", MASTERLIST_LIKHANG_LIMIT),
             includeSpecial: isChecked("scholarSelectionIncludeSpecial"),
             printFilter: (byId("scholarSelectionPrintFilter") ? byId("scholarSelectionPrintFilter").value : "all") || "all",
             likhangInput: byId("scholarSelectionLikhangInput") ? byId("scholarSelectionLikhangInput").value : ""
@@ -281,6 +284,9 @@
 
             writeInput("scholarSelectionRegularSlots", Math.max(0, Math.floor(Number(parsed.regularSlots || 0))));
             writeInput("scholarSelectionSectorSlots", Math.max(0, Math.floor(Number(parsed.sectorSlots || 0))));
+            if (Object.prototype.hasOwnProperty.call(parsed, "likhangSlots")) {
+                writeInput("scholarSelectionLikhangSlots", Math.max(0, Math.floor(Number(parsed.likhangSlots))));
+            }
             writeCheckbox("scholarSelectionIncludeSpecial", parsed.includeSpecial !== false);
             if (byId("scholarSelectionPrintFilter") && parsed.printFilter) {
                 byId("scholarSelectionPrintFilter").value = parsed.printFilter;
@@ -368,11 +374,11 @@
                     selection_id: "likhang-" + String(index + 1),
                     categoryKey: "likhang",
                     rank: "-",
-                    applicantName: parts[0] || "Manual Likhang Entry",
+                    applicantName: parts[0] || "Manual Dummy Record",
                     applicationNo: "-",
                     barangay: parts[1] || "-",
                     school: parts[2] || "-",
-                    sector: "Likhang Daeteño Performing Art",
+                    sector: "Dummy Records Performing Art",
                     score: "-",
                     basis: parts[3] || "Manual audition-based selection",
                     sourceRow: null
@@ -400,6 +406,9 @@
         const settings = currentSettings();
         const rankedRows = rankedRowsForBatch(currentBatchId);
         const selectedApplicationIds = new Set();
+        const sectorSlots = settings.sectorSlots > 0
+            ? settings.sectorSlots
+            : Math.max(0, Math.floor(rankedRows.length * 0.10));
 
         const regularCandidates = rankedRows.filter(function (row) {
             return row.passed_by_score === true;
@@ -413,10 +422,11 @@
             return !selectedApplicationIds.has(row.application_id)
                 && row.has_sector_classification === true
                 && hasSavedRawScore(row.raw_score)
-                && row.passed_by_score !== true;
+                && row.passed_by_score !== true
+                && !row.special_consideration_tag;
         });
-        const sector = settings.sectorSlots > 0
-            ? sectorCandidates.slice(0, settings.sectorSlots).map(function (row) {
+        const sector = sectorSlots > 0
+            ? sectorCandidates.slice(0, sectorSlots).map(function (row) {
                 selectedApplicationIds.add(row.application_id);
                 return toSelectionRow(row, "sector", "Sector slot from below-passing-score pool.");
             })
@@ -433,8 +443,40 @@
                 })
             : [];
 
-        const likhang = parseLikhangRows();
-        const combined = regular.concat(sector, special, likhang);
+        const likhang = limitRows(parseLikhangRows(), settings.likhangSlots);
+        const combined = regular.concat(special, sector);
+
+        const masterlistSelectedApplicationIds = new Set();
+        const masterRegular = rankedRows
+            .filter(function (row) {
+                return row.passed_by_score === true;
+            })
+            .map(function (row) {
+                masterlistSelectedApplicationIds.add(row.application_id);
+                return toSelectionRow(row, "regular", "Passed the configured score policy.");
+            });
+        const masterSectorCandidates = rankedRows.filter(function (row) {
+            return !masterlistSelectedApplicationIds.has(row.application_id)
+                && row.has_sector_classification === true
+                && hasSavedRawScore(row.raw_score)
+                && row.passed_by_score !== true
+                && !row.special_consideration_tag;
+        });
+        const masterSpecial = rankedRows
+            .filter(function (row) {
+                return row.special_consideration_tag && !masterlistSelectedApplicationIds.has(row.application_id);
+            })
+            .map(function (row) {
+                masterlistSelectedApplicationIds.add(row.application_id);
+                return toSelectionRow(row, "special", specialTagDisplay(row.special_consideration_tag));
+            });
+        const masterSector = limitRows(masterSectorCandidates, sectorSlots || MASTERLIST_SECTOR_LIMIT)
+            .map(function (row) {
+                masterlistSelectedApplicationIds.add(row.application_id);
+                return toSelectionRow(row, "sector", "Sector Classification from below-passing-score pool.");
+            });
+        const masterlistCore = masterRegular.concat(masterSpecial, masterSector);
+        const masterlist = masterlistCore;
 
         return {
             regular: regular,
@@ -442,8 +484,15 @@
             special: special,
             likhang: likhang,
             combined: combined,
+            masterlist: masterlist,
+            masterlistCore: masterlistCore,
+            masterlistCoreCount: masterlistCore.length,
             regularCandidateCount: regularCandidates.length,
-            sectorCandidateCount: sectorCandidates.length
+            sectorCandidateCount: sectorCandidates.length,
+            masterlistRegularCount: masterRegular.length,
+            masterlistSectorCount: masterSector.length,
+            masterlistSpecialCount: masterSpecial.length,
+            rankedCount: rankedRows.length
         };
     }
 
@@ -532,6 +581,41 @@
                 "<td>" + escapeHtml(row.basis || "-") + "</td>" +
                 "</tr>"
             );
+            }).join("");
+    }
+
+    function renderMasterlistCorePrintTable(selection) {
+        const tbody = byId("scholarSelectionMasterlistBody");
+        if (!tbody) {
+            return;
+        }
+
+        const masterlistRows = selection.masterlistCore || [];
+        if (!currentBatchId && masterlistRows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="ldss-scholar-empty">No exam batch with assigned examinees is ready yet.</td></tr>';
+            return;
+        }
+
+        if (!masterlistRows.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="ldss-scholar-empty">No score passers or Special Consideration applicants are ready for masterlist printing.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = masterlistRows.map(function (row, index) {
+            return (
+                "<tr>" +
+                '<td class="text-center fw-700">' + escapeHtml(String(index + 1)) + "</td>" +
+                '<td class="text-center fw-700">' + escapeHtml(row.rank || "-") + "</td>" +
+                "<td class=\"ldss-scholar-masterlist-applicant\">" +
+                '<div class="fw-700">' + escapeHtml(row.applicantName || "-") + "</div>" +
+                '<div class="ldss-scholar-masterlist-category">' + categoryPill(row.categoryKey) + "</div>" +
+                "</td>" +
+                '<td class="fw-700">' + escapeHtml(row.applicationNo || "-") + "</td>" +
+                "<td>" + escapeHtml(row.sector || "-") + "</td>" +
+                '<td class="text-center fw-700">' + escapeHtml(row.score || "-") + "</td>" +
+                "<td class=\"ldss-scholar-masterlist-basis\">" + escapeHtml(row.basis || "-") + "</td>" +
+                "</tr>"
+            );
         }).join("");
     }
 
@@ -563,6 +647,8 @@
         const batch = batchById(currentBatchId);
         const settings = currentSettings();
         const filteredRows = finalRowsForView(selection);
+        const passingScore = normalizeNumber(policy.passing_score, DEFAULT_POLICY.passing_score);
+        const derivedSectorSlots = Math.max(0, Math.floor(Number(selection.rankedCount || 0) * 0.10));
 
         setText("scholarSelectionRegularCount", selection.regular.length);
         setText("scholarSelectionSectorCount", selection.sector.length);
@@ -571,21 +657,21 @@
 
         const regularSlotLabel = settings.regularSlots > 0
             ? String(settings.regularSlots) + " regular slot(s)"
-            : "all score passers";
+            : String(passingScore).replace(/\.00$/, "") + "+ passers";
         const sectorSlotLabel = settings.sectorSlots > 0
             ? String(settings.sectorSlots) + " sector slot(s)"
-            : "no sector slots selected";
+            : String(derivedSectorSlots) + " sector slot(s) (10% of " + String(selection.rankedCount || 0) + ")";
         const batchLabel = batch
             ? ((batch.batch_label || "Selected batch") + " | " + formatDate(batch.exam_datetime) + " | " + (batch.venue || "-"))
             : "No exam batch selected";
 
         setText(
             "scholarSelectionFinalMeta",
-            batchLabel + ". Policy: " + policyLabel() + ". Regular: " + regularSlotLabel + ". Sector: " + sectorSlotLabel + ". Showing " + String(filteredRows.length) + " row(s)."
+            batchLabel + ". Policy: " + policyLabel() + ". Regular: " + regularSlotLabel + ". Sector: " + sectorSlotLabel + ". Special Consideration follows the regular passers. Showing " + String(filteredRows.length) + " row(s)."
         );
         setText(
             "scholarSelectionPrintMeta",
-            batchLabel + " | Policy: " + policyLabel() + " | Final rows: " + String(filteredRows.length)
+            batchLabel + " | Passing score: " + String(passingScore).replace(/\.00$/, "") + "+ | Regular passers: " + String(selection.masterlistRegularCount) + " | Sector picks: " + String(selection.masterlistSectorCount) + " | Special add-ons: " + String(selection.masterlistSpecialCount) + " | Overall: " + String(selection.masterlist.length)
         );
     }
 
@@ -614,7 +700,7 @@
         renderCompactCategoryTable(
             "scholarSelectionLikhangBody",
             selection.likhang,
-            "No manual Likhang Daeteño entries yet."
+            "No manual dummy records yet."
         );
     }
 
@@ -624,6 +710,7 @@
         const selection = buildSelection();
         renderSummary(selection);
         renderFinalTable(selection);
+        renderMasterlistCorePrintTable(selection);
         renderCategorySections(selection);
     }
 
