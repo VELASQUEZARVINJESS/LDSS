@@ -7,6 +7,7 @@
     const SPECIAL_TAG_DELIMITER = "::";
     const SPECIAL_APPLICATION_BATCH_SIZE = 500;
     const SPECIAL_FLAG_BATCH_SIZE = 150;
+    const SPECIAL_EXAM_LOOKUP_BATCH_SIZE = 150;
     const PROFILE_BATCH_SIZE = 120;
     const SPECIAL_RESULT_LIMIT = 5;
     const DEFAULT_SPECIAL_TAG = "internal_review";
@@ -374,6 +375,69 @@
         ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     }
 
+    function formatBarangayPrintValue(value) {
+        const raw = (value || "").toString().trim().replace(/\s+/g, " ");
+        if (!raw) {
+            return "-";
+        }
+        if (/^barangay\s+/i.test(raw)) {
+            return raw;
+        }
+        if (/^brgy\.?\s+/i.test(raw)) {
+            return raw.replace(/^brgy\.?\s+/i, "Barangay ");
+        }
+        return "Barangay " + raw;
+    }
+
+    function formatSectorPrintValue(value) {
+        const raw = (value || "").toString().trim().replace(/\s+/g, " ");
+        if (!raw || /^(none of the above|none|n\/a|na|unspecified)$/i.test(raw)) {
+            return "";
+        }
+        return raw;
+    }
+
+    function barangaySectorPrintParts(row) {
+        return {
+            barangay: formatBarangayPrintValue(row && row.applicant_barangay ? row.applicant_barangay : ""),
+            sector: formatSectorPrintValue(row && row.sector_classification ? row.sector_classification : "")
+        };
+    }
+
+    function formatApplicationPrintValue(row) {
+        const applicationNo = row && row.application_no ? row.application_no : "-";
+        return "Application " + applicationNo;
+    }
+
+    function toPrintTitleCase(value) {
+        return (value || "").toString().trim().replace(/\s+/g, " ").toLowerCase().replace(/\b[a-z]/g, function (char) {
+            return char.toUpperCase();
+        }).replace(/\bPwd\b/g, "PWD");
+    }
+
+    function formatCareOfPrintValue(value) {
+        const raw = (value || "").toString().trim().replace(/\s+/g, " ");
+        if (!raw) {
+            return "-";
+        }
+        if (/^m\.?\s*o\.?$/i.test(raw) || /^mayors?\s+office$/i.test(raw)) {
+            return "Mayor Office";
+        }
+        return toPrintTitleCase(raw);
+    }
+
+    function specialCarePrintParts(row) {
+        return {
+            careOf: formatCareOfPrintValue(row && row.special_label ? row.special_label : ""),
+            status: toPrintTitleCase(specialTagLabel(row && row.special_level ? row.special_level : ""))
+        };
+    }
+
+    function formatSpecialCarePrintValue(row) {
+        const parts = specialCarePrintParts(row);
+        return [parts.careOf, parts.status].filter(Boolean).join("\n") || "-";
+    }
+
     function formatDateDisplay(value) {
         if (!value) {
             return "-";
@@ -387,6 +451,149 @@
             month: "long",
             day: "numeric"
         });
+    }
+
+    function formatRawScoreValue(value) {
+        if (value === null || typeof value === "undefined" || value === "") {
+            return "-";
+        }
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return String(value);
+        }
+        return Number.isInteger(numeric) ? String(numeric) : String(numeric);
+    }
+
+    function formatRankValue(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return "-";
+        }
+        return String(Math.max(0, Math.trunc(numeric)));
+    }
+
+    function compareRoomLabels(left, right) {
+        return (left || "").toString().localeCompare((right || "").toString(), undefined, {
+            numeric: true,
+            sensitivity: "base"
+        });
+    }
+
+    function hasSavedRawScore(value) {
+        return value !== null && typeof value !== "undefined" && value !== "" && Number.isFinite(Number(value));
+    }
+
+    function choosePreferredExamRecord(currentRecord, nextRecord) {
+        if (!currentRecord) {
+            return nextRecord;
+        }
+        if (!nextRecord) {
+            return currentRecord;
+        }
+
+        const currentHasScore = hasSavedRawScore(currentRecord.raw_score);
+        const nextHasScore = hasSavedRawScore(nextRecord.raw_score);
+        if (nextHasScore !== currentHasScore) {
+            return nextHasScore ? nextRecord : currentRecord;
+        }
+
+        const currentStamp = new Date(currentRecord.updated_at || 0).getTime();
+        const nextStamp = new Date(nextRecord.updated_at || 0).getTime();
+        return nextStamp > currentStamp ? nextRecord : currentRecord;
+    }
+
+    function assignDisplayRanks(sourceRows) {
+        let lastScore = null;
+        let lastRank = 0;
+
+        return (sourceRows || []).map(function (row, index) {
+            const score = row.raw_score_value;
+            const displayRank = index > 0 && score === lastScore ? lastRank : (index + 1);
+            lastScore = score;
+            lastRank = displayRank;
+            return Object.assign({}, row, {
+                display_rank: displayRank
+            });
+        });
+    }
+
+    function sortCandidatesForRanking(sourceRows) {
+        return (sourceRows || []).slice().sort(function (left, right) {
+            if (right.raw_score_value !== left.raw_score_value) {
+                return right.raw_score_value - left.raw_score_value;
+            }
+
+            const roomCompare = compareRoomLabels(left.room_label || "", right.room_label || "");
+            if (roomCompare !== 0) {
+                return roomCompare;
+            }
+
+            const leftSeat = Number(left.room_seat_no || 0);
+            const rightSeat = Number(right.room_seat_no || 0);
+            if (leftSeat !== rightSeat) {
+                return leftSeat - rightSeat;
+            }
+
+            return String(left.application_no || "").localeCompare(String(right.application_no || ""), undefined, {
+                numeric: true,
+                sensitivity: "base"
+            });
+        });
+    }
+
+    function rankMapForSpecialCandidates(sourceRows, schoolYear) {
+        const rankedRows = assignDisplayRanks(sortCandidatesForRanking((sourceRows || []).filter(function (row) {
+            return row && row.school_year === schoolYear && hasSavedRawScore(row.raw_score_value);
+        }).map(function (row) {
+            return Object.assign({}, row, {
+                raw_score_value: Number(row.raw_score_value)
+            });
+        })));
+        const rankMap = {};
+
+        rankedRows.forEach(function (row) {
+            rankMap[row.id] = row.display_rank;
+        });
+
+        return rankMap;
+    }
+
+    function specialPrintLogoUrl() {
+        return new URL("../img/daet-lgu.png", window.location.href).href;
+    }
+
+    let specialPrintLogoDataUrlPromise = null;
+
+    function loadSpecialPrintLogoDataUrl() {
+        if (specialPrintLogoDataUrlPromise) {
+            return specialPrintLogoDataUrlPromise;
+        }
+
+        specialPrintLogoDataUrlPromise = new Promise(function (resolve) {
+            const image = new Image();
+            image.onload = function () {
+                try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = image.naturalWidth || image.width || 1;
+                    canvas.height = image.naturalHeight || image.height || 1;
+                    const context2d = canvas.getContext("2d");
+                    if (!context2d) {
+                        resolve("");
+                        return;
+                    }
+                    context2d.drawImage(image, 0, 0);
+                    resolve(canvas.toDataURL("image/png"));
+                } catch (_error) {
+                    resolve("");
+                }
+            };
+            image.onerror = function () {
+                resolve("");
+            };
+            image.src = specialPrintLogoUrl();
+        });
+
+        return specialPrintLogoDataUrlPromise;
     }
 
     function specialTagTone(value) {
@@ -619,6 +826,7 @@
 
         renderFlowChip();
         renderOptionCatalog();
+        renderSpecialCounters();
     }
 
     function applySettingsRecord(record) {
@@ -652,6 +860,65 @@
                 const rightStamp = new Date(right.flag_updated_at || right.updated_at || right.created_at || 0).getTime();
                 return rightStamp - leftStamp;
             });
+    }
+
+    function specialCounterSnapshot() {
+        const rows = specialRows();
+        const snapshot = {
+            tagged: rows.length,
+            priority: 0,
+            approval: 0,
+            available: specialCandidates.filter(function (row) {
+                return !row.is_reserved_slot;
+            }).length
+        };
+
+        rows.forEach(function (row) {
+            const level = normalizeSpecialTag(row && row.special_level ? row.special_level : "");
+            if (level === "for_approval") {
+                snapshot.approval += 1;
+            } else {
+                snapshot.priority += 1;
+            }
+        });
+
+        return snapshot;
+    }
+
+    function renderSpecialCounters() {
+        const snapshot = specialCounterSnapshot();
+        const printButton = byId("specialConsiderationPrintBtn");
+        const pdfButton = byId("specialConsiderationPdfBtn");
+
+        setText("specialConsiderationTaggedCount", snapshot.tagged);
+        setText("specialConsiderationPriorityCount", snapshot.priority);
+        setText("specialConsiderationApprovalCount", snapshot.approval);
+        setText("specialConsiderationAvailableCount", snapshot.available);
+
+        if (printButton) {
+            printButton.disabled = !currentSchoolYear() || snapshot.tagged === 0;
+        }
+        if (pdfButton) {
+            pdfButton.disabled = !currentSchoolYear() || snapshot.tagged === 0;
+        }
+    }
+
+    function pdfFileSlug(value, fallback) {
+        const slug = (value || "")
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+        return slug || fallback;
+    }
+
+    function getPdfGenerator() {
+        const jsPdfNamespace = window.jspdf || null;
+        if (!jsPdfNamespace || typeof jsPdfNamespace.jsPDF !== "function") {
+            return null;
+        }
+        return jsPdfNamespace.jsPDF;
     }
 
     function specialSearchQuery() {
@@ -688,8 +955,9 @@
             searchResults.innerHTML = '<div class="px-3 pb-3 small text-muted">' + safeMessage + "</div>";
         }
         if (tableBody) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">' + safeMessage + "</td></tr>";
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">' + safeMessage + "</td></tr>";
         }
+        renderSpecialCounters();
     }
 
     async function fetchProfiles(context, applicantIds) {
@@ -700,7 +968,7 @@
             const batch = ids.slice(index, index + PROFILE_BATCH_SIZE);
             const result = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, email")
+                .select("id, first_name, middle_name, last_name, email, barangay")
                 .in("id", batch);
 
             if (result.error) {
@@ -724,7 +992,7 @@
         while (true) {
             const result = await context.client
                 .from("applications")
-                .select("id, application_no, applicant_id, school_year, scholarship_type, status, submitted_at, created_at, updated_at")
+                .select("id, application_no, applicant_id, school_year, scholarship_type, sector_classification, status, submitted_at, created_at, updated_at")
                 .eq("school_year", schoolYear)
                 .neq("status", "draft")
                 .order("updated_at", { ascending: false })
@@ -747,22 +1015,90 @@
         return rows;
     }
 
-    async function fetchSpecialConsiderationFlags(context, applicationIds) {
-        const flagMap = {};
+    async function fetchApplicationsByIds(context, applicationIds) {
+        const rows = [];
         const ids = Array.isArray(applicationIds) ? applicationIds.filter(Boolean) : [];
 
         for (let index = 0; index < ids.length; index += SPECIAL_FLAG_BATCH_SIZE) {
             const batch = ids.slice(index, index + SPECIAL_FLAG_BATCH_SIZE);
             const result = await context.client
+                .from("applications")
+                .select("id, application_no, applicant_id, school_year, scholarship_type, sector_classification, status, submitted_at, created_at, updated_at")
+                .in("id", batch);
+
+            if (result.error) {
+                throw new Error("Failed to load flagged special consideration applications: " + result.error.message);
+            }
+
+            rows.push.apply(rows, Array.isArray(result.data) ? result.data : []);
+        }
+
+        return rows;
+    }
+
+    async function fetchExamRecordsByApplicationIds(context, applicationIds) {
+        const examMap = {};
+        const ids = Array.isArray(applicationIds) ? applicationIds.filter(Boolean) : [];
+
+        for (let index = 0; index < ids.length; index += SPECIAL_EXAM_LOOKUP_BATCH_SIZE) {
+            const batch = ids.slice(index, index + SPECIAL_EXAM_LOOKUP_BATCH_SIZE);
+            let result = await context.client
+                .from("exam_records")
+                .select("id, application_id, raw_score, result, updated_at, room_label, room_seat_no")
+                .in("application_id", batch)
+                .order("updated_at", { ascending: false });
+
+            if (result.error && /room_label|room_seat_no/i.test(result.error.message || "")) {
+                result = await context.client
+                    .from("exam_records")
+                    .select("id, application_id, raw_score, result, updated_at")
+                    .in("application_id", batch)
+                    .order("updated_at", { ascending: false });
+
+                if (!result.error) {
+                    result.data = (result.data || []).map(function (row) {
+                        return Object.assign({}, row, {
+                            room_label: "",
+                            room_seat_no: null
+                        });
+                    });
+                }
+            }
+
+            if (result.error) {
+                throw new Error("Failed to load exam score records: " + result.error.message);
+            }
+
+            (result.data || []).forEach(function (row) {
+                const applicationId = row && row.application_id ? row.application_id : "";
+                if (!applicationId) {
+                    return;
+                }
+                examMap[applicationId] = choosePreferredExamRecord(examMap[applicationId] || null, row);
+            });
+        }
+
+        return examMap;
+    }
+
+    async function fetchAllSpecialConsiderationFlags(context) {
+        const flagMap = {};
+        let start = 0;
+
+        while (true) {
+            const result = await context.client
                 .from(APPLICATION_STAFF_FLAGS_TABLE)
                 .select("application_id, special_consideration_tag, updated_at, created_at")
-                .in("application_id", batch);
+                .not("special_consideration_tag", "is", null)
+                .order("updated_at", { ascending: false })
+                .range(start, start + SPECIAL_FLAG_BATCH_SIZE - 1);
 
             if (result.error) {
                 throw result.error;
             }
 
-            (result.data || []).forEach(function (row) {
+            const batch = Array.isArray(result.data) ? result.data : [];
+            batch.forEach(function (row) {
                 const applicationId = row && row.application_id ? row.application_id : "";
                 const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
                 if (!applicationId || !tag) {
@@ -773,6 +1109,12 @@
                     updated_at: row.updated_at || row.created_at || null
                 };
             });
+
+            if (batch.length < SPECIAL_FLAG_BATCH_SIZE) {
+                break;
+            }
+
+            start += SPECIAL_FLAG_BATCH_SIZE;
         }
 
         return flagMap;
@@ -851,38 +1193,48 @@
         if (!tableBody) {
             return;
         }
+        renderSpecialCounters();
         if (!currentSchoolYear()) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">Save Scholarship Settings first to set the active school year.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">Save Scholarship Settings first to set the active school year.</td></tr>';
             return;
         }
         if (!specialFlagsAvailable) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">Special consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">Special consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.</td></tr>';
             return;
         }
         if (!rows.length) {
-            tableBody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No students are currently on the special consideration allow-list.</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">No students are currently on the special consideration allow-list.</td></tr>';
             return;
         }
 
-        tableBody.innerHTML = rows.map(function (row) {
+        tableBody.innerHTML = rows.map(function (row, index) {
             const applicantName = row.applicant_name || "Unknown Applicant";
+            const applicantEmail = row.applicant_email || "";
             const scholarshipType = row.scholarship_type || "-";
             const applicationNo = row.application_no || "-";
             const updatedDate = formatDateDisplay((row.flag_updated_at || row.updated_at || "").slice(0, 10));
             const statusLabel = formatStatusLabel(row.status);
+            const rankValue = formatRankValue(row.display_rank);
+            const scoreValue = formatRawScoreValue(row.raw_score_value);
             return [
                 '<tr class="ldss-secretary-app-row" tabindex="0">',
+                '<td class="ldss-special-col-no" data-label="No.">' + escapeHtml(String(index + 1)) + "</td>",
+                '<td class="ldss-special-col-rank text-center" data-label="Rank"><div class="fw-600">' + escapeHtml(rankValue) + "</div></td>",
                 '<td data-label="Applicant">',
                 '<div class="ldss-queue-applicant">',
                 '<div class="ldss-queue-applicant-body">',
                 '<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + "</span>",
-                '<span class="ldss-queue-applicant-note">' + escapeHtml(scholarshipType) + "</span>",
+                '<span class="ldss-queue-applicant-note">' + escapeHtml(applicantEmail || scholarshipType) + "</span>",
                 "</div>",
                 "</div>",
                 "</td>",
                 '<td data-label="Application">',
                 '<div class="fw-600">' + escapeHtml(applicationNo) + "</div>",
-                '<div class="small text-muted">Updated ' + escapeHtml(updatedDate) + "</div>",
+                '<div class="small text-muted">' + escapeHtml((row.school_year || "-") + " | " + scholarshipType) + "</div>",
+                "</td>",
+                '<td class="ldss-special-col-score text-center" data-label="Score">',
+                '<div class="fw-600">' + escapeHtml(scoreValue) + "</div>",
+                '<div class="small text-muted">Saved raw score</div>',
                 "</td>",
                 '<td data-label="Category + Label">',
                 specialTagBadgeMarkup(row.special_level),
@@ -890,6 +1242,10 @@
                 "</td>",
                 '<td data-label="Status">',
                 '<span class="ldss-chip ldss-chip-neutral">' + escapeHtml(statusLabel) + "</span>",
+                "</td>",
+                '<td class="ldss-special-col-updated" data-label="Updated">',
+                '<div class="fw-600">' + escapeHtml(updatedDate) + "</div>",
+                '<div class="small text-muted">Latest tag update</div>',
                 "</td>",
                 '<td class="ldss-actions-cell text-end" data-label="Action">',
                 '<div class="ldss-special-action-row">',
@@ -900,6 +1256,281 @@
                 "</tr>"
             ].join("");
         }).join("");
+    }
+
+    function specialPrintSummaryLine(schoolYear, counts) {
+        return [
+            "School Year " + (schoolYear || "-"),
+            "Total Tagged " + String(counts.tagged),
+            "Priority Review " + String(counts.priority),
+            "For Approval " + String(counts.approval)
+        ].join(" | ");
+    }
+
+    function specialPrintTableHeadMarkup() {
+        return (
+            "<thead>" +
+            "<tr>" +
+            "<th>NO.</th>" +
+            "<th>RANK</th>" +
+            "<th>EXAMINEE</th>" +
+            "<th>BARANGAY / SECTOR</th>" +
+            "<th>SCORE</th>" +
+            "<th>SPECIAL CONSIDERATION &amp; CARE OF</th>" +
+            "</tr>" +
+            "</thead>"
+        );
+    }
+
+    function specialPrintTableRowMarkup(row, counter) {
+        const specialParts = specialCarePrintParts(row);
+        const locationParts = barangaySectorPrintParts(row);
+        const careTone = specialTagTone(row && row.special_level ? row.special_level : "");
+        return (
+            "<tr>" +
+            '<td class="text-center"><span class="ldss-ranking-print-number">' + escapeHtml(String(counter)) + "</span></td>" +
+            '<td class="text-center fw-700"><span class="ldss-ranking-print-number">' + escapeHtml(formatRankValue(row.display_rank)) + "</span></td>" +
+            "<td>" +
+            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+            '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(formatApplicationPrintValue(row)) + "</div>" +
+            "</td>" +
+            "<td>" +
+            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(locationParts.barangay) + "</div>" +
+            (locationParts.sector ? '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(locationParts.sector) + "</div>" : "") +
+            "</td>" +
+            '<td class="text-center fw-700 ldss-special-print-score"><span class="ldss-ranking-print-value">' + escapeHtml(formatRawScoreValue(row.raw_score_value)) + "</span></td>" +
+            '<td class="text-center ldss-special-print-care ldss-special-print-care-' + escapeHtml(careTone) + '">' +
+            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(specialParts.careOf) + "</div>" +
+            '<div class="small ldss-ranking-print-secondary">' + escapeHtml(specialParts.status) + "</div>" +
+            "</td>" +
+            "</tr>"
+        );
+    }
+
+    function clearSpecialPrintPages() {
+        const container = byId("specialConsiderationPrintPages");
+        if (container) {
+            container.innerHTML = "";
+        }
+    }
+
+    function renderSpecialPrintPages() {
+        const container = byId("specialConsiderationPrintPages");
+        const rows = specialRows();
+        const schoolYear = currentSchoolYear();
+        const counts = specialCounterSnapshot();
+        const printedAt = new Date().toLocaleString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+        });
+
+        if (!container) {
+            return false;
+        }
+
+        if (!rows.length) {
+            container.innerHTML = "";
+            return false;
+        }
+
+        const summary = specialPrintSummaryLine(schoolYear, counts);
+        container.innerHTML = [
+            '<section class="ldss-special-print-document">',
+            '<div class="ldss-special-print-header">',
+            '<div class="ldss-special-print-brand">',
+            '<img class="ldss-special-print-logo" src="' + escapeHtml(specialPrintLogoUrl()) + '" alt="LGU Daet Logo" />',
+            '<div class="ldss-special-print-brand-copy">',
+            '<div class="ldss-special-print-title">LDSP Special Consideration Tagged Applicants</div>',
+            '<div class="ldss-special-print-copy">' + escapeHtml(summary) + "</div>",
+            '<div class="ldss-special-print-copy">' + escapeHtml("Printed " + printedAt) + "</div>",
+            "</div>",
+            "</div>",
+            "</div>",
+            '<table class="table mb-0 ldss-special-print-table">',
+            specialPrintTableHeadMarkup(),
+            "<tbody>",
+            rows.map(function (row, index) {
+                return specialPrintTableRowMarkup(row, index + 1);
+            }).join(""),
+            "</tbody></table>",
+            "</section>"
+        ].join("");
+
+        return true;
+    }
+
+    function printAllowedTable() {
+        const rows = specialRows();
+
+        if (!rows.length) {
+            clearSpecialPrintPages();
+            showManagerStatus("No tagged applicants are available to print yet.", "alert-warning");
+            return;
+        }
+
+        if (!renderSpecialPrintPages()) {
+            showManagerStatus("The print layout could not be prepared right now.", "alert-warning");
+            return;
+        }
+
+        window.print();
+    }
+
+    async function downloadAllowedPdf() {
+        const rows = specialRows();
+        const schoolYear = currentSchoolYear();
+        const counts = specialCounterSnapshot();
+        const printedAt = new Date().toLocaleString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+        });
+
+        if (!rows.length) {
+            showManagerStatus("No tagged applicants are available for PDF download yet.", "alert-warning");
+            return;
+        }
+
+        const JsPdf = getPdfGenerator();
+        if (!JsPdf) {
+            showManagerStatus("The PDF library is not available right now, so the print view will open instead.", "alert-warning");
+            printAllowedTable();
+            return;
+        }
+
+        try {
+            const doc = new JsPdf({
+                orientation: "portrait",
+                unit: "pt",
+                format: [612, 936]
+            });
+
+            if (typeof doc.autoTable !== "function") {
+                showManagerStatus("The PDF table helper is not available right now, so the print view will open instead.", "alert-warning");
+                printAllowedTable();
+                return;
+            }
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const left = 18;
+            const logoDataUrl = await loadSpecialPrintLogoDataUrl();
+            const summary = specialPrintSummaryLine(schoolYear, counts);
+
+            if (logoDataUrl) {
+                doc.addImage(logoDataUrl, "PNG", left, 14, 47, 47);
+            }
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(16);
+            doc.setTextColor(15, 23, 42);
+            doc.text("LDSP Special Consideration Tagged Applicants", left + 55, 30);
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            doc.setTextColor(75, 85, 99);
+            doc.text(summary, left + 55, 46);
+            doc.text("Printed: " + printedAt, left + 55, 59);
+            doc.text("LDSP LGU Daet Scholarship System", pageWidth - left, 30, { align: "right" });
+            doc.text("System Administrator Workspace", pageWidth - left, 44, { align: "right" });
+
+            doc.autoTable({
+                startY: 76,
+                head: [["NO.", "RANK", "EXAMINEE", "BARANGAY / SECTOR", "SCORE", "SPECIAL CONSIDERATION & CARE OF"]],
+                body: rows.map(function (row, index) {
+                    const locationParts = barangaySectorPrintParts(row);
+                    return [
+                        String(index + 1),
+                        formatRankValue(row.display_rank),
+                        [row.applicant_name || "Unknown Applicant", formatApplicationPrintValue(row)].join("\n"),
+                        [locationParts.barangay, locationParts.sector].filter(Boolean).join("\n"),
+                        formatRawScoreValue(row.raw_score_value),
+                        formatSpecialCarePrintValue(row)
+                    ];
+                }),
+                margin: { left: left, right: left },
+                styles: {
+                    font: "helvetica",
+                    fontSize: 8.25,
+                    cellPadding: 2.8,
+                    lineColor: [148, 163, 184],
+                    lineWidth: 0.5,
+                    textColor: [15, 23, 42],
+                    overflow: "ellipsize",
+                    valign: "middle"
+                },
+                headStyles: {
+                    fillColor: [226, 232, 240],
+                    textColor: [15, 23, 42],
+                    fontStyle: "bold",
+                    fontSize: 9.2
+                },
+                alternateRowStyles: {
+                    fillColor: [248, 250, 252]
+                },
+                columnStyles: {
+                    0: { cellWidth: 23, halign: "center", fontStyle: "bold" },
+                    1: { cellWidth: 30, halign: "center", fontStyle: "bold" },
+                    2: { cellWidth: 184, fontStyle: "bold" },
+                    3: { cellWidth: 112 },
+                    4: { cellWidth: 36, halign: "center", fontStyle: "bold" },
+                    5: { cellWidth: 191, halign: "center", fontStyle: "bold" }
+                },
+                didParseCell: function (data) {
+                    if (data.section !== "body") {
+                        return;
+                    }
+                    if (data.column.index === 4) {
+                        data.cell.styles.fontStyle = "bold";
+                    }
+                    if (data.column.index === 5) {
+                        const sourceRow = rows[data.row.index] || {};
+                        const specialParts = specialCarePrintParts(sourceRow);
+                        data.cell.styles.halign = "center";
+                        data.cell.styles.valign = "top";
+                        data.cell.styles.fontStyle = "bold";
+                        data.cell.styles.textColor = [15, 23, 42];
+                        data.cell.styles.minCellHeight = 20;
+                        data.cell.styles.cellPadding = {
+                            top: 2.8,
+                            right: 2.8,
+                            bottom: 8.2,
+                            left: 2.8
+                        };
+                        data.cell.text = [specialParts.careOf];
+                    }
+                },
+                didDrawCell: function (data) {
+                    if (data.section !== "body" || data.column.index !== 5) {
+                        return;
+                    }
+                    const sourceRow = rows[data.row.index] || {};
+                    const specialParts = specialCarePrintParts(sourceRow);
+                    const tone = specialTagTone(sourceRow.special_level || "");
+                    const statusColor = tone === "for_approval" ? [180, 83, 9] : [21, 128, 61];
+
+                    doc.setFont("helvetica", "bold");
+                    doc.setFontSize(6.9);
+                    doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+                    doc.text(
+                        specialParts.status,
+                        data.cell.x + (data.cell.width / 2),
+                        data.cell.y + data.cell.height - 4.4,
+                        { align: "center" }
+                    );
+                    doc.setTextColor(15, 23, 42);
+                }
+            });
+
+            doc.save("ldss-special-consideration-" + pdfFileSlug(schoolYear, "active-school-year") + ".pdf");
+            showManagerStatus("Special consideration PDF downloaded successfully.", "alert-success");
+        } catch (error) {
+            showManagerStatus(error && error.message ? error.message : "Failed to build the special consideration PDF.", "alert-danger");
+        }
     }
 
     async function writeAuditEntry(context, entry) {
@@ -1186,21 +1817,10 @@
         if (loadToken !== specialLoadToken) {
             return;
         }
-        const applicantIds = Array.from(new Set(applicationRows.map(function (row) {
-            return row.applicant_id;
-        }).filter(Boolean)));
-        const profileMap = await fetchProfiles(context, applicantIds);
-
-        if (loadToken !== specialLoadToken) {
-            return;
-        }
-
         let flagMap = {};
-        if (specialFlagsAvailable && applicationRows.length) {
+        if (specialFlagsAvailable) {
             try {
-                flagMap = await fetchSpecialConsiderationFlags(context, applicationRows.map(function (row) {
-                    return row.id;
-                }));
+                flagMap = await fetchAllSpecialConsiderationFlags(context);
                 specialFlagsAvailable = true;
             } catch (error) {
                 if (/does not exist|relation|schema cache/i.test(error && error.message ? error.message : "")) {
@@ -1216,20 +1836,75 @@
             }
         }
 
+        if (specialFlagsAvailable) {
+            const loadedApplicationIds = new Set(applicationRows.map(function (row) {
+                return row && row.id ? row.id : "";
+            }).filter(Boolean));
+            const flaggedOnlyIds = Object.keys(flagMap).filter(function (applicationId) {
+                return applicationId && !loadedApplicationIds.has(applicationId);
+            });
+
+            if (flaggedOnlyIds.length) {
+                const flaggedOnlyRows = await fetchApplicationsByIds(context, flaggedOnlyIds);
+                if (loadToken !== specialLoadToken) {
+                    return;
+                }
+                applicationRows = applicationRows.concat(flaggedOnlyRows);
+            }
+        }
+
+        const applicantIds = Array.from(new Set(applicationRows.map(function (row) {
+            return row.applicant_id;
+        }).filter(Boolean)));
+        const profileMap = await fetchProfiles(context, applicantIds);
+        let examMap = {};
+
+        try {
+            examMap = await fetchExamRecordsByApplicationIds(context, applicationRows.map(function (row) {
+                return row.id;
+            }));
+        } catch (error) {
+            showManagerStatus(
+                /does not exist|relation|schema cache/i.test(error && error.message ? error.message : "")
+                    ? "Exam records are not installed yet, so score and rank will stay blank for now."
+                    : "Score and rank could not be loaded right now, but the Special Consideration list is still available.",
+                "alert-warning"
+            );
+            examMap = {};
+        }
+
+        if (loadToken !== specialLoadToken) {
+            return;
+        }
+
         specialApplicationsById = {};
-        specialCandidates = applicationRows.map(function (row) {
+        const preparedCandidates = applicationRows.map(function (row) {
             const profile = profileMap[row.applicant_id] || null;
             const flagged = flagMap[row.id] || null;
             const decodedTag = decodeSpecialTag(flagged && flagged.tag ? flagged.tag : "");
-            const candidate = Object.assign({}, row, {
+            const examRecord = examMap[row.id] || null;
+
+            return Object.assign({}, row, {
                 applicant_name: buildApplicantName(profile) || (profile && profile.email ? profile.email : row.application_no || "Unknown Applicant"),
+                applicant_email: profile && profile.email ? profile.email : "",
+                applicant_barangay: profile && profile.barangay ? profile.barangay : "",
+                raw_score_value: hasSavedRawScore(examRecord && examRecord.raw_score) ? Number(examRecord.raw_score) : null,
+                room_label: examRecord && examRecord.room_label ? examRecord.room_label : "",
+                room_seat_no: examRecord && examRecord.room_seat_no != null ? Number(examRecord.room_seat_no) : null,
                 is_reserved_slot: Boolean(decodedTag.level),
                 special_level: decodedTag.level || "",
                 special_label: decodedTag.label || "",
                 flag_updated_at: flagged && flagged.updated_at ? flagged.updated_at : null
             });
-            specialApplicationsById[candidate.id] = candidate;
-            return candidate;
+        });
+        const rankMap = rankMapForSpecialCandidates(preparedCandidates, schoolYear);
+
+        specialCandidates = preparedCandidates.map(function (candidate) {
+            const enrichedCandidate = Object.assign({}, candidate, {
+                display_rank: Object.prototype.hasOwnProperty.call(rankMap, candidate.id) ? rankMap[candidate.id] : null
+            });
+            specialApplicationsById[enrichedCandidate.id] = enrichedCandidate;
+            return enrichedCandidate;
         });
 
         renderSearchResults();
@@ -1415,6 +2090,8 @@
         const tableBody = byId("specialConsiderationTableBody");
         const catalogList = byId("specialConsiderationCatalogList");
         const addOptionButton = byId("specialConsiderationAddOption");
+        const pdfButton = byId("specialConsiderationPdfBtn");
+        const printButton = byId("specialConsiderationPrintBtn");
         const optionSaveButton = byId("specialConsiderationOptionSave");
         const editSaveButton = byId("specialConsiderationEditSave");
         const flowModalIds = ["specialConsiderationEnabledModal", "specialConsiderationDisabledModal"];
@@ -1436,6 +2113,18 @@
         if (addOptionButton) {
             addOptionButton.addEventListener("click", function () {
                 openCatalogModal();
+            });
+        }
+
+        if (pdfButton) {
+            pdfButton.addEventListener("click", function () {
+                downloadAllowedPdf();
+            });
+        }
+
+        if (printButton) {
+            printButton.addEventListener("click", function () {
+                printAllowedTable();
             });
         }
 

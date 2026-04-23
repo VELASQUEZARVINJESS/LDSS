@@ -2415,8 +2415,8 @@
         return result.data;
     }
 
-    async function findLatestEditableDraft(context) {
-        const result = await context.client
+    async function findLatestEditableDraft(context, schoolYear) {
+        let query = context.client
             .from("applications")
             .select("id, application_no, status")
             .eq("applicant_id", context.user.id)
@@ -2424,20 +2424,32 @@
             .order("updated_at", { ascending: false })
             .limit(1);
 
+        if (schoolYear) {
+            query = query.eq("school_year", schoolYear);
+        }
+
+        const result = await query;
+
         if (result.error || !result.data || result.data.length === 0) {
             return null;
         }
         return result.data[0];
     }
 
-    async function findLatestBlockingApplication(context) {
-        const result = await context.client
+    async function findLatestBlockingApplication(context, schoolYear) {
+        let query = context.client
             .from("applications")
-            .select("id, application_no, status, is_locked")
+            .select("id, application_no, school_year, status, is_locked")
             .eq("applicant_id", context.user.id)
             .neq("status", "draft")
             .order("updated_at", { ascending: false })
             .limit(1);
+
+        if (schoolYear) {
+            query = query.eq("school_year", schoolYear);
+        }
+
+        const result = await query;
 
         if (result.error || !result.data || result.data.length === 0) {
             return null;
@@ -2534,11 +2546,17 @@
         return {
             isOpen: result.data.is_open !== false,
             reason: (result.data.reason || "open").toString(),
+            schoolYear: (result.data.school_year || "").toString().trim(),
             openDate: toIsoDateOnly(result.data.open_date || ""),
             closeDate: toIsoDateOnly(result.data.close_date || ""),
             openTime: normalizeTimeValue(result.data.open_time || ""),
             closeTime: normalizeTimeValue(result.data.close_time || "")
         };
+    }
+
+    async function loadActiveSchoolYear(context) {
+        const policy = await loadIntakePolicy(context);
+        return policy && policy.schoolYear ? policy.schoolYear : "";
     }
 
     async function assertApplicationIntakeOpen(context) {
@@ -3468,7 +3486,8 @@
                     maybeShowCorrectionPrompt(query, existing);
                 }
             } else {
-                const latestBlocking = await findLatestBlockingApplication(context);
+                const activeSchoolYear = await loadActiveSchoolYear(context);
+                const latestBlocking = await findLatestBlockingApplication(context, activeSchoolYear);
                 if (latestBlocking) {
                     const existing = await loadApplication(context, latestBlocking.id);
                     if (existing) {
@@ -3481,7 +3500,7 @@
                             setFormEditableState(false);
                             const detailLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
                             setStatus(
-                                "Only 1 submitted application is allowed per user. Your current record is not editable. Use tracking instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
+                                "Only 1 application attempt is allowed per school year. Your current record is not editable. Use tracking instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
                                 "alert-warning",
                                 true
                             );
@@ -3490,13 +3509,13 @@
 
                         const editLink = "applicant-application-form.html?application_id=" + encodeURIComponent(existing.id);
                         setStatus(
-                            "Only 1 submitted application is allowed per user. Update your existing application instead: <a href=\"" + editLink + "\">Open Current Application</a>.",
+                            "Only 1 application attempt is allowed per school year. Update your existing application instead: <a href=\"" + editLink + "\">Open Current Application</a>.",
                             "alert-warning",
                             true
                         );
                     }
                 } else {
-                    const latestDraft = await findLatestEditableDraft(context);
+                    const latestDraft = await findLatestEditableDraft(context, activeSchoolYear);
                     if (latestDraft) {
                         const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
                         const intakePolicy = await loadIntakePolicy(context);

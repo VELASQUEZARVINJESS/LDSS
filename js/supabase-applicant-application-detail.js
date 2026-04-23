@@ -67,6 +67,41 @@
         return workflowControls().show_applicant_exam_scores !== false;
     }
 
+    function normalizeExamResultValue(value) {
+        if (workflow() && typeof workflow().normalizeExamResult === "function") {
+            return workflow().normalizeExamResult(value || "pending");
+        }
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (raw === "passed" || raw === "pass") {
+            return "passed";
+        }
+        if (raw === "failed" || raw === "fail") {
+            return "failed";
+        }
+        return "pending";
+    }
+
+    function postedExamResultMeta(examSummary) {
+        const result = normalizeExamResultValue(examSummary && examSummary.result ? examSummary.result : "pending");
+        const scoreText = examSummary && examSummary.scoreText ? examSummary.scoreText : "-";
+        return {
+            result: result,
+            hasScore: scoreText !== "-",
+            scoreText: scoreText,
+            displayLabel: result === "passed"
+                ? "PASSED"
+                : (result === "failed" ? (scoreText === "-" ? (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Failed to Take Exam") : "FAIL") : (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Score Consolidation"))
+        };
+    }
+
+    function maskedApplicantStatusValue(status) {
+        const normalized = workflow().normalizeStatus ? workflow().normalizeStatus(status || "") : (status || "").toString().trim().toLowerCase();
+        if (!applicantExamScoresVisible() && (normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "exam_completed";
+        }
+        return status;
+    }
+
     function showStatus(message, type) {
         const alert = byId("detailStatus");
         if (!alert) {
@@ -342,7 +377,7 @@
             return null;
         }
 
-        const normalizedStatus = workflow().normalizeStatus ? workflow().normalizeStatus(application.status) : (application.status || "");
+        const normalizedStatus = workflow().normalizeStatus ? workflow().normalizeStatus(maskedApplicantStatusValue(application.status)) : (maskedApplicantStatusValue(application.status) || "");
         let inferredResult = "pending";
         if (normalizedStatus === "passed_exam") {
             inferredResult = "passed";
@@ -432,7 +467,7 @@
     }
 
     function renderStatusCards(application, examRecord, interviewRecord, approvalRecord) {
-        const appStatus = statusMeta(application.status);
+        const appStatus = statusMeta(maskedApplicantStatusValue(application.status));
         setText("detailOverallStatus", appStatus.label);
         setText("detailSubmittedAt", formatDateTime(application.submitted_at || application.created_at));
         setChip("detailWorkflowChip", appStatus.label, appStatus.chipClass);
@@ -470,6 +505,7 @@
         const examSummary = workflow().examSummaryFromRecord(examRecord);
         const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
         const showExamScores = applicantExamScoresVisible();
+        const postedResult = postedExamResultMeta(examSummary);
         setText("detailExamControlNo", examSummary.controlNo || "-");
         setText("detailExamRoom", examSummary.roomLabel || "Not posted yet");
         setText("detailExamSeatNo", examSummary.seatNo || "Not posted yet");
@@ -487,11 +523,27 @@
         );
         setChip(
             "detailExamResultChip",
-            examSummary.status === "absent" ? "No Result" : (examSummary.resultLabel || "Score Consolidation"),
-            examSummary.status === "absent" ? "ldss-chip-neutral" : (examSummary.resultChipClass || "ldss-chip-accent")
+            examSummary.status === "absent"
+                ? "No Result"
+                : (
+                    (postedResult.result === "passed" || postedResult.result === "failed")
+                        ? (
+                            showExamScores
+                                ? (postedResult.hasScore ? (postedResult.scoreText + " | " + postedResult.displayLabel) : postedResult.displayLabel)
+                                : "Score Consolidation"
+                        )
+                        : (examSummary.resultLabel || "Score Consolidation")
+                ),
+            examSummary.status === "absent"
+                ? "ldss-chip-neutral"
+                : (
+                    (postedResult.result === "passed" || postedResult.result === "failed") && !showExamScores
+                        ? "ldss-chip-accent"
+                        : (examSummary.resultChipClass || "ldss-chip-accent")
+                )
         );
 
-        setText("detailNextStepText", workflow().nextStepForApplicant(application.status));
+        setText("detailNextStepText", workflow().nextStepForApplicant(maskedApplicantStatusValue(application.status)));
 
         if (interviewRecord && interviewRecord.scheduled_at) {
             const iMeta = interviewMeta(interviewRecord.status || "scheduled");
@@ -565,7 +617,17 @@
         }
         if (examRecord && examRecord.updated_at) {
             const summary = workflow().examSummaryFromRecord(examRecord);
-            events.push({ label: "Exam result: " + summary.resultLabel, at: examRecord.updated_at });
+            const postedResult = postedExamResultMeta(summary);
+            events.push({
+                label: (postedResult.result === "passed" || postedResult.result === "failed")
+                    ? (
+                        applicantExamScoresVisible()
+                            ? ("Exam result: " + (postedResult.hasScore ? (postedResult.scoreText + " | " + postedResult.displayLabel) : postedResult.displayLabel))
+                            : "Exam result recorded"
+                    )
+                    : ("Exam result: " + summary.resultLabel),
+                at: examRecord.updated_at
+            });
         }
         if (interviewRecord && interviewRecord.scheduled_at) {
             events.push({ label: "Interview scheduled", at: interviewRecord.scheduled_at });
@@ -574,7 +636,7 @@
             events.push({ label: "Final decision: " + (approvalRecord.decision_status || "updated"), at: approvalRecord.decided_at });
         }
         if (application.updated_at) {
-            const current = statusMeta(application.status).label;
+            const current = statusMeta(maskedApplicantStatusValue(application.status)).label;
             events.push({ label: "Current status: " + current, at: application.updated_at });
         }
 

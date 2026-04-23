@@ -536,6 +536,19 @@
         return null;
     }
 
+    function existingExamRecordForApplication(applicationId) {
+        if (!applicationId) {
+            return null;
+        }
+        for (let index = 0; index < examRecords.length; index += 1) {
+            const record = examRecords[index];
+            if (record.application_id === applicationId) {
+                return record;
+            }
+        }
+        return null;
+    }
+
     function nextAppendControlNumberForBatch(batchId) {
         let maxInBatch = 0;
         batchRecords(batchId).forEach(function (record) {
@@ -603,6 +616,21 @@
     function validateEditableBatchState(targetBatchId) {
         if (targetBatchId && !batchEditable(targetBatchId)) {
             throw new Error("This batch already contains completed or encoded exam records, so room changes are locked for safety.");
+        }
+    }
+
+    function validateManualAssignmentApplicants(applicationIds) {
+        const wantedIds = Array.from(new Set((applicationIds || []).filter(Boolean)));
+        for (let index = 0; index < wantedIds.length; index += 1) {
+            const applicationId = wantedIds[index];
+            const record = existingExamRecordForApplication(applicationId);
+            if (record && !isScheduledExamRecordStatus(record.status)) {
+                const application = appById(applicationId);
+                const applicantName = application && application.applicant_name
+                    ? application.applicant_name
+                    : "This applicant";
+                throw new Error(applicantName + " already has a completed or encoded exam record, so the assignment cannot be changed here.");
+            }
         }
     }
 
@@ -2831,7 +2859,7 @@
         }
 
         try {
-            validateEditableBatchState(currentBatchId);
+            validateManualAssignmentApplicants(pendingRows.map(function (row) { return row.id; }));
             const batch = await createOrUpdateBatch(values);
             currentBatchId = batch.id;
 
@@ -2889,7 +2917,7 @@
         }
 
         try {
-            validateEditableBatchState(currentBatchId);
+            validateManualAssignmentApplicants([context.applicationId]);
             const batch = await createOrUpdateBatch(values);
             currentBatchId = batch.id;
 

@@ -140,6 +140,68 @@ window.addEventListener('DOMContentLoaded', event => {
         document.body.classList.add('ldss-ready');
     });
 
+    function ensureSecretaryAllPassedLink() {
+        const secretaryAccountTrigger = document.body.querySelector('#secretaryUser');
+        const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
+
+        if (!secretaryAccountTrigger || !sidenav) {
+            return;
+        }
+        if (sidenav.querySelector('a.nav-link[href="secretary-all-passed.html"]')) {
+            return;
+        }
+
+        const rankingLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
+            const href = (link.getAttribute('href') || '').trim();
+            return href === 'secretary-ranking.html';
+        });
+
+        if (!rankingLink) {
+            return;
+        }
+
+        const allPassedLink = rankingLink.cloneNode(true);
+        allPassedLink.setAttribute('href', 'secretary-all-passed.html');
+        allPassedLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="check-circle"></i></div>\n                                All Passed\n                            ';
+
+        rankingLink.insertAdjacentElement('afterend', allPassedLink);
+    }
+
+    function ensureSecretaryScholarSelectionLink() {
+        const secretaryAccountTrigger = document.body.querySelector('#secretaryUser');
+        const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
+
+        if (!secretaryAccountTrigger || !sidenav) {
+            return;
+        }
+        if (sidenav.querySelector('a.nav-link[href="secretary-scholar-selection.html"]')) {
+            return;
+        }
+
+        const allPassedLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
+            const href = (link.getAttribute('href') || '').trim();
+            return href === 'secretary-all-passed.html';
+        });
+        const rankingLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
+            const href = (link.getAttribute('href') || '').trim();
+            return href === 'secretary-ranking.html';
+        });
+        const insertAfter = allPassedLink || rankingLink;
+
+        if (!insertAfter) {
+            return;
+        }
+
+        const scholarSelectionLink = insertAfter.cloneNode(true);
+        scholarSelectionLink.setAttribute('href', 'secretary-scholar-selection.html');
+        scholarSelectionLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="award"></i></div>\n                                Scholar Selection\n                            ';
+
+        insertAfter.insertAdjacentElement('afterend', scholarSelectionLink);
+    }
+
+    ensureSecretaryAllPassedLink();
+    ensureSecretaryScholarSelectionLink();
+
     // Activate feather only when the icon library is available
     if (window.feather && typeof window.feather.replace === 'function') {
         window.feather.replace();

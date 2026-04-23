@@ -4,9 +4,9 @@
     const SUPABASE_FETCH_LIMIT = 1000;
     const LOOKUP_BATCH_SIZE = 200;
     const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
+    const RANKING_PRINT_ROWS_PER_PAGE = 30;
     const DEFAULT_SETTINGS = {
-        exam_total_items: 100,
-        passing_score: 75
+        exam_total_items: 100
     };
     const SECTOR_CLASSIFICATIONS = [
         "Person with Disability (PWD)",
@@ -48,12 +48,7 @@
     let activeSettings = Object.assign({}, DEFAULT_SETTINGS);
     let roomHotfixAvailable = true;
     let isSaving = false;
-    let isMarkingNoShows = false;
-    let isRankingResultSaving = false;
     let sectorLookup = null;
-    let currentRoomSearchQuery = "";
-    let currentRankingSearchQuery = "";
-    let rankingResultDrafts = {};
 
     function byId(id) {
         return document.getElementById(id);
@@ -136,20 +131,6 @@
         return parts.length ? parts.join(" ") : (profile.email || "Unknown Applicant");
     }
 
-    function formatBarangayLabel(value) {
-        const raw = (value || "").toString().trim();
-        if (!raw) {
-            return "No barangay";
-        }
-        if (/^barangay\s+/i.test(raw)) {
-            return raw;
-        }
-        if (/^brgy\.?\s+/i.test(raw)) {
-            return raw.replace(/^brgy\.?\s*/i, "Barangay ");
-        }
-        return "Barangay " + raw;
-    }
-
     function compareRoomLabels(left, right) {
         return (left || "").toString().localeCompare((right || "").toString(), undefined, {
             numeric: true,
@@ -189,16 +170,6 @@
         return getSectorLookup()[cleanupLookupKey(raw)] || raw;
     }
 
-    function hasSectorClassification(value) {
-        const normalized = normalizeSectorClassification(value || "");
-        return normalized !== "Unspecified" && normalized !== "None of the above";
-    }
-
-    function sectorClassificationMarkup(value) {
-        const label = normalizeSectorClassification(value || "");
-        return '<span class="ldss-ranking-sector-text">' + escapeHtml(label) + "</span>";
-    }
-
     function normalizeNumber(value, fallbackValue) {
         const numeric = Number(value);
         return Number.isFinite(numeric) ? numeric : fallbackValue;
@@ -206,33 +177,6 @@
 
     function normalizeStatus(value) {
         return workflow().normalizeStatus ? workflow().normalizeStatus(value) : (value || "").toString().trim().toLowerCase();
-    }
-
-    function normalizeSearchText(value) {
-        let normalized = (value || "")
-            .toString()
-            .trim()
-            .toLowerCase();
-
-        if (typeof normalized.normalize === "function") {
-            normalized = normalized
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "");
-        }
-
-        return normalized
-            .replace(/[^a-z0-9\s]/g, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-    }
-
-    function compactSearchText(value) {
-        return normalizeSearchText(value).replace(/\s+/g, "");
-    }
-
-    function searchTokens(value) {
-        const normalized = normalizeSearchText(value);
-        return normalized ? normalized.split(" ").filter(Boolean) : [];
     }
 
     function readFallbackSettings() {
@@ -247,7 +191,6 @@
                 return fallback;
             }
             fallback.exam_total_items = normalizeNumber(parsed.exam_total_items, fallback.exam_total_items);
-            fallback.passing_score = normalizeNumber(parsed.passing_score, fallback.passing_score);
             return fallback;
         } catch (_error) {
             return fallback;
@@ -262,7 +205,7 @@
 
         const result = await context.client
             .from("ranking_settings")
-            .select("exam_total_items, passing_score")
+            .select("exam_total_items")
             .eq("is_active", true)
             .order("updated_at", { ascending: false })
             .limit(1);
@@ -273,8 +216,7 @@
 
         const record = result.data[0] || {};
         activeSettings = {
-            exam_total_items: normalizeNumber(record.exam_total_items, activeSettings.exam_total_items),
-            passing_score: normalizeNumber(record.passing_score, activeSettings.passing_score)
+            exam_total_items: normalizeNumber(record.exam_total_items, activeSettings.exam_total_items)
         };
         return activeSettings;
     }
@@ -282,11 +224,6 @@
     function maxRawScore() {
         const items = Math.round(normalizeNumber(activeSettings.exam_total_items, DEFAULT_SETTINGS.exam_total_items));
         return items > 0 ? items : DEFAULT_SETTINGS.exam_total_items;
-    }
-
-    function passingScore() {
-        const score = normalizeNumber(activeSettings.passing_score, DEFAULT_SETTINGS.passing_score);
-        return score > 0 ? score : DEFAULT_SETTINGS.passing_score;
     }
 
     function policyLabel() {
@@ -310,60 +247,8 @@
         return Number.isInteger(numeric) ? String(numeric) : String(numeric);
     }
 
-    function normalizeExamResult(value) {
-        if (workflow() && typeof workflow().normalizeExamResult === "function") {
-            return workflow().normalizeExamResult(value || "pending");
-        }
-        const raw = (value || "").toString().trim().toLowerCase();
-        if (raw === "passed" || raw === "pass") {
-            return "passed";
-        }
-        if (raw === "failed" || raw === "fail") {
-            return "failed";
-        }
-        return "pending";
-    }
-
-    function examResultLabel(value) {
-        const normalized = normalizeExamResult(value);
-        if (normalized === "passed") {
-            return "Passed";
-        }
-        if (normalized === "failed") {
-            return "Fail";
-        }
-        return "Pending";
-    }
-
-    function deriveExamResultFromScore(rawScore) {
-        const numeric = Number(rawScore);
-        if (Number.isNaN(numeric) || !Number.isInteger(numeric) || numeric < 1 || numeric > maxRawScore()) {
-            return "pending";
-        }
-        return calculatePercentage(numeric) >= passingScore() ? "passed" : "failed";
-    }
-
-    function resultOptionsMarkup(selectedValue) {
-        const normalized = normalizeExamResult(selectedValue || "pending");
-        return [
-            '<option value="pending"' + (normalized === "pending" ? " selected" : "") + ">Pending</option>",
-            '<option value="passed"' + (normalized === "passed" ? " selected" : "") + ">Passed</option>",
-            '<option value="failed"' + (normalized === "failed" ? " selected" : "") + ">Fail</option>"
-        ].join("");
-    }
-
-    function displayedResultValueForRow(row) {
-        return normalizeExamResult(row && row.result ? row.result : "pending");
-    }
-
-    function previewMeta(rawValue, resultValue) {
+    function previewMeta(rawValue) {
         if (rawValue === null || typeof rawValue === "undefined" || rawValue === "") {
-            if (normalizeExamResult(resultValue || "pending") === "failed") {
-                return {
-                    text: "Failed to Take Exam",
-                    className: "ldss-room-score-preview is-error"
-                };
-            }
             return {
                 text: "Pending",
                 className: "ldss-room-score-preview"
@@ -385,12 +270,9 @@
             };
         }
 
-        const normalizedResult = normalizeExamResult(resultValue || "");
         return {
-            text: normalizedResult === "pending" || !normalizedResult
-                ? "Accepted raw score"
-                : ("Accepted raw score | Result: " + examResultLabel(normalizedResult)),
-            className: "ldss-room-score-preview " + (normalizedResult === "failed" ? "is-error" : "is-valid")
+            text: "Accepted raw score",
+            className: "ldss-room-score-preview is-valid"
         };
     }
 
@@ -517,7 +399,7 @@
 
             const result = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number, barangay")
+                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number")
                 .in("id", chunk);
 
             if (result.error) {
@@ -617,7 +499,7 @@
                 return leftSeat - rightSeat;
             }
 
-            return String(left.application_no || "").localeCompare(String(right.application_no || ""), undefined, {
+            return String(left.exam_control_no || "").localeCompare(String(right.exam_control_no || ""), undefined, {
                 numeric: true,
                 sensitivity: "base"
             });
@@ -675,88 +557,6 @@
         return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 10;
     }
 
-    function rankingSearchQuery() {
-        return normalizeSearchText(currentRankingSearchQuery);
-    }
-
-    function matchesRankingApplicantSearch(row, query) {
-        const normalizedQuery = normalizeSearchText(query);
-        if (!normalizedQuery) {
-            return true;
-        }
-
-        const applicantName = normalizeSearchText(row && row.applicant_name ? row.applicant_name : "");
-        const applicationNo = normalizeSearchText(row && row.application_no ? row.application_no : "");
-        const compactQuery = compactSearchText(normalizedQuery);
-        const compactApplicantName = compactSearchText(applicantName);
-        const compactApplicationNo = compactSearchText(applicationNo);
-
-        if (applicationNo && (applicationNo.indexOf(normalizedQuery) !== -1 || (compactQuery && compactApplicationNo.indexOf(compactQuery) !== -1))) {
-            return true;
-        }
-
-        if (!applicantName) {
-            return false;
-        }
-
-        if (applicantName.indexOf(normalizedQuery) !== -1 || (compactQuery && compactApplicantName.indexOf(compactQuery) !== -1)) {
-            return true;
-        }
-
-        const queryTokens = searchTokens(normalizedQuery);
-        const applicantNameTokens = searchTokens(applicantName);
-        if (!queryTokens.length || !applicantNameTokens.length) {
-            return false;
-        }
-
-        return queryTokens.every(function (token) {
-            return applicantNameTokens.some(function (word) {
-                return word.indexOf(token) === 0 || (token.length >= 3 && word.indexOf(token) !== -1);
-            });
-        });
-    }
-
-    function rankingDraftValue(recordId) {
-        return Object.prototype.hasOwnProperty.call(rankingResultDrafts, recordId)
-            ? normalizeExamResult(rankingResultDrafts[recordId])
-            : null;
-    }
-
-    function rankingResultValueForRow(row) {
-        const draftValue = row && row.id ? rankingDraftValue(row.id) : null;
-        if (draftValue !== null) {
-            return draftValue;
-        }
-        return normalizeExamResult(row && row.result ? row.result : "pending");
-    }
-
-    function setRankingResultDraft(recordId, value) {
-        const normalized = normalizeExamResult(value || "pending");
-        rankingResultDrafts[recordId] = normalized;
-    }
-
-    function clearRankingResultDraft(recordId) {
-        delete rankingResultDrafts[recordId];
-    }
-
-    function rankingResultChanges() {
-        if (!currentBatchId) {
-            return [];
-        }
-
-        return currentBatchRankingRows().reduce(function (entries, row) {
-            const nextResult = rankingResultValueForRow(row);
-            const savedResult = normalizeExamResult(row.result || "pending");
-            if (nextResult !== savedResult) {
-                entries.push({
-                    row: row,
-                    result: nextResult
-                });
-            }
-            return entries;
-        }, []);
-    }
-
     function rankingModeLabel(mode) {
         if (mode === "room") {
             return "Per Room Ranking";
@@ -784,9 +584,7 @@
         } else if (mode === "sector") {
             const sectorFilter = currentRankingSectorFilter();
             filteredRows = sectorFilter === "all"
-                ? filteredRows.filter(function (row) {
-                    return hasSectorClassification(row.sector_classification || "");
-                })
+                ? []
                 : filteredRows.filter(function (row) {
                     return normalizeSectorClassification(row.sector_classification || "") === sectorFilter;
                 });
@@ -797,23 +595,15 @@
             }
         }
 
-        const clonedRows = filteredRows.map(function (row) {
+        return assignDisplayRanks(filteredRows.map(function (row) {
             return Object.assign({}, row);
-        });
-
-        if (mode === "room") {
-            return assignDisplayRanks(clonedRows);
-        }
-
-        return clonedRows;
+        }));
     }
 
     function rankingSectorLabelsForBatch(batchId) {
         return Array.from(new Set(batchRows(batchId).map(function (row) {
             return normalizeSectorClassification(row.sector_classification || "");
-        }).filter(function (sector) {
-            return hasSectorClassification(sector);
-        }))).sort(function (left, right) {
+        }).filter(Boolean))).sort(function (left, right) {
             return left.localeCompare(right);
         });
     }
@@ -826,13 +616,6 @@
 
     function pendingCount(roomRows) {
         return Math.max((roomRows || []).length - encodedCount(roomRows), 0);
-    }
-
-    function noShowRowsForCurrentRoom() {
-        return currentRoomRows().filter(function (row) {
-            return !hasSavedRawScore(row.raw_score)
-                && normalizeExamResult(row.result || "pending") !== "failed";
-        });
     }
 
     function resolveSelection(preferredBatchId, preferredRoomLabel) {
@@ -934,6 +717,11 @@
             return;
         }
 
+        if (currentRankingMode() === "sector" && sectors.length) {
+            select.value = sectors[0];
+            return;
+        }
+
         select.value = "all";
     }
 
@@ -1018,9 +806,7 @@
 
     function rankingSummaryMeta() {
         const mode = currentRankingMode();
-        const rankingRows = rankingRowsForCurrentView();
-        const filteredRows = filterRankingRowsBySearch(rankingRows);
-        const searchQuery = rankingSearchQuery();
+        const filteredRows = rankingRowsForCurrentView();
         let summary = "Select a batch to review ranking.";
         let title = "Batch Ranking List";
         let tableMeta = "Applicants with the same score keep the same rank.";
@@ -1031,32 +817,25 @@
                 title = roomFilter && roomFilter !== "all"
                     ? ("Room " + roomFilter.toUpperCase() + " Ranking List")
                     : "Per Room Ranking List";
-                tableMeta = "Applicants in the selected room are ranked by score only. Same scores share one counted rank.";
+                tableMeta = "Applicants in the selected room are ranked by score only.";
                 summary = formatBatchLabel(currentBatchId) + " | " + title + " | Records: " + String(filteredRows.length);
             } else if (mode === "sector") {
                 const sectorFilter = currentRankingSectorFilter();
                 title = sectorFilter && sectorFilter !== "all"
                     ? (sectorFilter + " Ranking List")
-                    : "All Sector Classification Ranking List";
-                tableMeta = sectorFilter && sectorFilter !== "all"
-                    ? "Applicants in the selected sector classification stay on their overall ranking number. Same scores share one counted rank."
-                    : "All sector-classified applicants stay on their overall ranking number; ranks do not reset by category. Same scores share one counted rank.";
+                    : "Sector Classification Ranking List";
+                tableMeta = "Applicants in the selected sector classification are ranked by score only.";
                 summary = formatBatchLabel(currentBatchId) + " | " + title + " | Records: " + String(filteredRows.length);
             } else if (mode === "top") {
                 const topCount = currentRankingTopCount();
                 title = topCount > 0 ? ("Top " + String(topCount) + " Ranking List") : "All Ranked Records";
-                tableMeta = "Only the selected top range is included in this ranking print view. Same scores share one counted rank.";
+                tableMeta = "Only the selected top range is included in this ranking print view.";
                 summary = formatBatchLabel(currentBatchId) + " | " + title + " | Records: " + String(filteredRows.length);
             } else {
                 title = "Overall Ranking List";
-                tableMeta = "All ranked applicants in the selected batch are ordered by score only. Same scores share one counted rank.";
+                tableMeta = "All ranked applicants in the selected batch are ordered by score only.";
                 summary = formatBatchLabel(currentBatchId) + " | " + title + " | Records: " + String(filteredRows.length);
             }
-        }
-
-        if (searchQuery) {
-            summary += " | Search: " + currentRankingSearchQuery.trim();
-            tableMeta += " Search keeps the original saved rank visible for each matching applicant.";
         }
 
         return {
@@ -1064,38 +843,6 @@
             title: title,
             tableMeta: tableMeta
         };
-    }
-
-    function filterRankingRowsBySearch(sourceRows) {
-        const query = rankingSearchQuery();
-        const rowsForSearch = Array.isArray(sourceRows) ? sourceRows : [];
-        if (!query) {
-            return rowsForSearch.slice();
-        }
-
-        return rowsForSearch.filter(function (row) {
-            return matchesRankingApplicantSearch(row, query);
-        });
-    }
-
-    function renderRankingSearchMeta(totalRows, matchRows) {
-        const target = byId("roomScoreRankingSearchMeta");
-        if (!target) {
-            return;
-        }
-
-        const query = rankingSearchQuery();
-        if (!query) {
-            target.textContent = "Search by applicant name or LDSP application number.";
-            return;
-        }
-
-        if (!matchRows) {
-            target.textContent = "No ranked applicants matched that search.";
-            return;
-        }
-
-        target.textContent = "Showing " + String(matchRows) + " matching ranked applicant(s) out of " + String(totalRows) + ".";
     }
 
     function renderRankingSummary() {
@@ -1114,10 +861,6 @@
             return;
         }
         tbody.innerHTML = '<tr><td colspan="5" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
-        const meta = byId("roomScoreSearchMeta");
-        if (meta) {
-            meta.textContent = "Search within the current room sheet.";
-        }
     }
 
     function renderEmptyRankingTable(message) {
@@ -1125,7 +868,7 @@
         if (!tbody) {
             return;
         }
-        tbody.innerHTML = '<tr><td colspan="8" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+        tbody.innerHTML = '<tr><td colspan="7" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
     }
 
     function renderEmptyRankingCards(message) {
@@ -1146,7 +889,6 @@
 
     function rankingDatasetForRender() {
         if (!currentBatchId) {
-            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "Select a saved batch to review ranking by score."
@@ -1155,7 +897,6 @@
 
         const batchRoomRows = batchRows(currentBatchId);
         if (!batchRoomRows.length) {
-            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "No assigned room records were found for this batch yet."
@@ -1164,26 +905,28 @@
 
         const mode = currentRankingMode();
         if (mode === "room" && currentRankingRoomFilter() === "all") {
-            renderRankingSearchMeta(0, 0);
             return {
                 rows: [],
                 message: "Select a room to review or print per-room ranking."
             };
         }
-        const rankingRows = rankingRowsForCurrentView();
-        const searchedRows = filterRankingRowsBySearch(rankingRows);
-        renderRankingSearchMeta(rankingRows.length, searchedRows.length);
-        if (!searchedRows.length) {
+        if (mode === "sector" && currentRankingSectorFilter() === "all") {
             return {
                 rows: [],
-                message: rankingSearchQuery()
-                    ? "No ranked applicants matched the current search."
-                    : "No saved scores matched the selected ranking option."
+                message: "Select a sector classification to review or print sector ranking."
+            };
+        }
+
+        const rankingRows = rankingRowsForCurrentView();
+        if (!rankingRows.length) {
+            return {
+                rows: [],
+                message: "No saved scores matched the selected ranking option."
             };
         }
 
         return {
-            rows: searchedRows,
+            rows: rankingRows,
             message: ""
         };
     }
@@ -1192,10 +935,9 @@
         return (
             "<thead>" +
             "<tr>" +
-            "<th>No.</th>" +
             "<th>Rank</th>" +
             "<th>Examinee</th>" +
-            "<th>Barangay</th>" +
+            "<th>Application No.</th>" +
             "<th>Room</th>" +
             "<th>Seat</th>" +
             "<th>Sector Classification</th>" +
@@ -1212,10 +954,10 @@
             "<th>No.</th>" +
             "<th>Rank</th>" +
             "<th>Examinee</th>" +
-            "<th>Barangay</th>" +
-            "<th>Room / Seat</th>" +
+            "<th>Room</th>" +
+            "<th>Seat</th>" +
             "<th>Sector Classification</th>" +
-            "<th>Scores</th>" +
+            "<th>Score</th>" +
             "</tr>" +
             "</thead>"
         );
@@ -1237,151 +979,50 @@
         return String(Math.max(0, Math.trunc(numeric)));
     }
 
-    function formatRankingApplicationPrintValue(row) {
-        const applicationNo = row && row.application_no ? row.application_no : "-";
-        return "Application " + applicationNo;
-    }
-
-    function formatRankingSectorPrintValue(value) {
-        return hasSectorClassification(value || "") ? normalizeSectorClassification(value || "") : "";
-    }
-
-    function rankingTableRowMarkup(row, index) {
-        const counter = index + 1;
+    function rankingTableRowMarkup(row) {
         return (
             "<tr>" +
-            '<td class="text-center fw-700">' + escapeHtml(String(counter)) + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
             "<td>" +
             '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-            '<div class="small text-muted">' + escapeHtml(row.application_no || "-") + "</div>" +
+            '<div class="small text-muted">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
             "</td>" +
-            "<td>" + escapeHtml(row.applicant_barangay || "No barangay") + "</td>" +
+            "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
             '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
             '<td class="text-center">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</td>" +
-            '<td class="text-center">' + sectorClassificationMarkup(row.sector_classification || "") + "</td>" +
+            '<td class="text-center">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</td>" +
             "</tr>"
         );
     }
 
     function rankingPrintTableRowMarkup(row, counter) {
-        const sector = formatRankingSectorPrintValue(row.sector_classification || "");
-        const seat = row.room_seat_no == null ? "-" : String(row.room_seat_no);
         return (
             "<tr>" +
             '<td class="text-center"><span class="ldss-ranking-print-number">' + escapeHtml(formatPrintWholeNumber(counter)) + "</span></td>" +
             '<td class="text-center fw-700"><span class="ldss-ranking-print-number">' + escapeHtml(formatPrintWholeNumber(row.display_rank)) + "</span></td>" +
             "<td>" +
             '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-            '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(formatRankingApplicationPrintValue(row)) + "</div>" +
+            '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(row.application_no || "-") + "</div>" +
             "</td>" +
-            "<td>" +
-            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_barangay || "No barangay") + "</div>" +
-            "</td>" +
-            '<td class="text-center">' +
-            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(compactPrintRoomLabel(row.room_label || "-")) + "</div>" +
-            '<div class="small text-muted ldss-ranking-print-secondary">Seat ' + escapeHtml(seat) + "</div>" +
-            "</td>" +
-            '<td class="text-center fw-700 ldss-ranking-print-sector"><span class="ldss-ranking-print-value">' + escapeHtml(sector || "-") + "</span></td>" +
-            '<td class="text-center fw-700 ldss-ranking-print-score"><span class="ldss-ranking-print-value">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</span></td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-value">' + escapeHtml(compactPrintRoomLabel(row.room_label || "-")) + "</span></td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-value">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</span></td>" +
+            '<td class="text-center"><span class="ldss-ranking-print-value">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</span></td>" +
+            '<td class="text-center fw-700"><span class="ldss-ranking-print-value">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</span></td>" +
             "</tr>"
         );
     }
 
-    function deriveApplicationStatusForRankingResult(row, resultValue) {
-        const current = normalizeStatus(row && row.application_status ? row.application_status : "");
-        if (PROTECTED_APPLICATION_STATUSES.has(current)) {
-            return current;
-        }
-        const normalizedResult = normalizeExamResult(resultValue || "pending");
-        if (normalizedResult === "passed") {
-            return "passed_exam";
-        }
-        if (normalizedResult === "failed") {
-            return "failed_exam";
-        }
-        return "exam_completed";
-    }
+    function chunkRankingRowsForPrint(rowsForPrint) {
+        const chunks = [];
+        const pageSize = RANKING_PRINT_ROWS_PER_PAGE > 0 ? RANKING_PRINT_ROWS_PER_PAGE : 30;
+        const sourceRows = rowsForPrint || [];
 
-    async function saveRankingResults() {
-        const changes = rankingResultChanges();
-        if (!changes.length) {
-            showStatus("No ranking result changes to save.", "alert-info");
-            return;
+        for (let index = 0; index < sourceRows.length; index += pageSize) {
+            chunks.push(sourceRows.slice(index, index + pageSize));
         }
 
-        isRankingResultSaving = true;
-        syncActionButtons();
-        showStatus("");
-
-        try {
-            for (let index = 0; index < changes.length; index += 1) {
-                const entry = changes[index];
-                const examResult = await context.client
-                    .from("exam_records")
-                    .update({ result: entry.result })
-                    .eq("id", entry.row.id)
-                    .eq("application_id", entry.row.application_id);
-
-                if (examResult.error) {
-                    throw new Error("Failed to save result for " + (entry.row.application_no || "selected applicant") + ": " + examResult.error.message);
-                }
-
-                const targetStatus = deriveApplicationStatusForRankingResult(entry.row, entry.result);
-                if (normalizeStatus(entry.row.application_status || "") !== normalizeStatus(targetStatus)) {
-                    const applicationResult = await context.client
-                        .from("applications")
-                        .update({
-                            status: targetStatus,
-                            secretary_reviewer_id: context.user.id
-                        })
-                        .eq("id", entry.row.application_id);
-
-                    if (applicationResult.error) {
-                        throw new Error("Saved exam result for " + (entry.row.application_no || "selected applicant") + " but application status update failed: " + applicationResult.error.message);
-                    }
-                }
-            }
-
-            rankingResultDrafts = {};
-            await fetchData(currentBatchId, currentRoomLabel);
-            showStatus(String(changes.length) + " ranking result(s) saved successfully.", "alert-success");
-        } catch (error) {
-            showStatus(error && error.message ? error.message : "Failed to save ranking results.", "alert-danger");
-        } finally {
-            isRankingResultSaving = false;
-            syncActionButtons();
-        }
-    }
-
-    function sortAllRanking() {
-        const rankingModeFilter = byId("roomScoreRankingPrintMode");
-        const rankingRoomFilter = byId("roomScoreRankingRoomFilter");
-        const rankingSectorFilter = byId("roomScoreRankingSectorFilter");
-        const rankingTopFilter = byId("roomScoreRankingTopFilter");
-        const rankingSearchInput = byId("roomScoreRankingSearchInput");
-
-        if (rankingModeFilter) {
-            rankingModeFilter.value = "overall";
-        }
-        if (rankingRoomFilter) {
-            rankingRoomFilter.value = "all";
-        }
-        if (rankingSectorFilter) {
-            rankingSectorFilter.value = "all";
-        }
-        if (rankingTopFilter) {
-            rankingTopFilter.value = "all";
-        }
-
-        currentRankingSearchQuery = "";
-        if (rankingSearchInput) {
-            rankingSearchInput.value = "";
-        }
-
-        renderAll();
-        showStatus("All ranking rows are now sorted by score.", "alert-success");
+        return chunks;
     }
 
     function renderRoomSheet() {
@@ -1407,18 +1048,10 @@
         }
 
         tbody.innerHTML = roomRows.map(function (row) {
-            const preview = previewMeta(row.raw_score, row.result);
-            const searchText = normalizeSearchText([
-                row.room_seat_no == null ? "" : String(row.room_seat_no),
-                row.exam_control_no || "",
-                row.application_no || "",
-                row.applicant_name || "",
-                row.school_name || "",
-                row.scholarship_type || ""
-            ].join(" "));
+            const preview = previewMeta(row.raw_score);
 
             return (
-                '<tr data-room-sheet-row="' + escapeHtml(row.id) + '" data-room-search-text="' + escapeHtml(searchText) + '">' +
+                "<tr>" +
                 '<td class="ldss-room-score-seat">' + escapeHtml(row.room_seat_no || "-") + "</td>" +
                 '<td class="ldss-room-score-control">' + escapeHtml(row.exam_control_no || "-") + "</td>" +
                 "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
@@ -1433,52 +1066,6 @@
                 "</tr>"
             );
         }).join("");
-
-        applyRoomSheetSearch();
-    }
-
-    function applyRoomSheetSearch() {
-        const tbody = byId("roomScoreSheetBody");
-        const meta = byId("roomScoreSearchMeta");
-        if (!tbody) {
-            return;
-        }
-
-        const rowsInDom = Array.from(tbody.querySelectorAll("[data-room-sheet-row]"));
-        if (!rowsInDom.length) {
-            if (meta) {
-                meta.textContent = "Search within the current room sheet.";
-            }
-            return;
-        }
-
-        const query = normalizeSearchText(currentRoomSearchQuery);
-        if (!query) {
-            rowsInDom.forEach(function (row) {
-                row.classList.remove("d-none", "ldss-room-score-search-match");
-            });
-            if (meta) {
-                meta.textContent = "Search within the current room sheet.";
-            }
-            return;
-        }
-
-        let matchCount = 0;
-        rowsInDom.forEach(function (row) {
-            const haystack = normalizeSearchText(row.getAttribute("data-room-search-text") || row.textContent || "");
-            const isMatch = haystack.indexOf(query) !== -1;
-            row.classList.toggle("d-none", !isMatch);
-            row.classList.toggle("ldss-room-score-search-match", isMatch);
-            if (isMatch) {
-                matchCount += 1;
-            }
-        });
-
-        if (meta) {
-            meta.textContent = matchCount
-                ? ("Showing " + String(matchCount) + " matching examinee(s) in this room.")
-                : "No matching examinees were found in this room.";
-        }
     }
 
     function renderRankingTable() {
@@ -1493,9 +1080,7 @@
             return;
         }
 
-        tbody.innerHTML = rankingState.rows.map(function (row, index) {
-            return rankingTableRowMarkup(row, index);
-        }).join("");
+        tbody.innerHTML = rankingState.rows.map(rankingTableRowMarkup).join("");
     }
 
     function renderRankingCards() {
@@ -1510,12 +1095,11 @@
             return;
         }
 
-        container.innerHTML = rankingState.rows.map(function (row, index) {
+        container.innerHTML = rankingState.rows.map(function (row) {
             return (
                 '<article class="ldss-ranking-card">' +
                 '<div class="ldss-ranking-card-header">' +
-                '<div class="ldss-ranking-card-badges">' +
-                '<div class="ldss-ranking-card-counter">No. ' + escapeHtml(String(index + 1)) + "</div>" +
+                '<div>' +
                 '<div class="ldss-ranking-card-rank">Rank ' + escapeHtml(String(row.display_rank || "-")) + "</div>" +
                 "</div>" +
                 '<div class="ldss-ranking-card-score">' +
@@ -1524,12 +1108,12 @@
                 "</div>" +
                 "</div>" +
                 '<div class="ldss-ranking-card-name">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-                '<div class="ldss-ranking-card-school">' + escapeHtml(row.application_no || "-") + "</div>" +
+                '<div class="ldss-ranking-card-school">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
                 '<div class="ldss-ranking-card-grid mt-3">' +
-                '<div><div class="ldss-ranking-card-label">Barangay</div><div class="ldss-ranking-card-value">' + escapeHtml(row.applicant_barangay || "No barangay") + "</div></div>" +
+                '<div><div class="ldss-ranking-card-label">Application No.</div><div class="ldss-ranking-card-value">' + escapeHtml(row.application_no || "-") + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Room</div><div class="ldss-ranking-card-value">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Seat</div><div class="ldss-ranking-card-value">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</div></div>" +
-                '<div><div class="ldss-ranking-card-label">Sector</div><div class="ldss-ranking-card-value">' + sectorClassificationMarkup(row.sector_classification || "") + "</div></div>" +
+                '<div><div class="ldss-ranking-card-label">Sector</div><div class="ldss-ranking-card-value">' + escapeHtml(normalizeSectorClassification(row.sector_classification || "")) + "</div></div>" +
                 "</div>" +
                 "</article>"
             );
@@ -1549,30 +1133,32 @@
         }
 
         const meta = rankingSummaryMeta();
-        const totalRows = rankingState.rows.length;
+        const rowChunks = chunkRankingRowsForPrint(rankingState.rows);
+        const totalPages = rowChunks.length;
 
-        container.innerHTML = [
-            '<section class="ldss-ranking-print-page ldss-ranking-print-page-first">',
-            '<div class="ldss-ranking-print-page-header">',
-            '<div class="ldss-ranking-print-brand">',
-            '<img class="ldss-ranking-print-logo" src="../img/daet-lgu.png" alt="LGU Daet Logo" />',
-            '<div class="ldss-ranking-print-brand-copy">',
-            '<div class="ldss-ranking-print-page-title">' + escapeHtml("LDSP " + meta.title) + "</div>",
-            '<div class="ldss-ranking-print-page-meta">' + escapeHtml(meta.summary) + "</div>",
-            '<div class="ldss-ranking-print-page-page">' + escapeHtml("Rows 1-" + String(totalRows)) + "</div>",
-            "</div>",
-            "</div>",
-            "</div>",
-            '<table class="table mb-0 ldss-ranking-table ldss-ranking-print-table">',
-            rankingPrintTableHeadMarkup(),
-            "<tbody>",
-            rankingState.rows.map(function (row, rowIndex) {
-                return rankingPrintTableRowMarkup(row, rowIndex + 1);
-            }).join(""),
-            "</tbody>",
-            "</table>",
-            "</section>"
-        ].join("");
+        container.innerHTML = rowChunks.map(function (chunk, index) {
+            const startCounter = (index * RANKING_PRINT_ROWS_PER_PAGE) + 1;
+            return (
+                '<section class="ldss-ranking-print-page">' +
+                '<div class="ldss-ranking-print-page-header">' +
+                '<div class="ldss-ranking-print-brand">' +
+                '<img class="ldss-ranking-print-logo" src="../img/daet-lgu.png" alt="LGU Daet Logo" />' +
+                '<div class="ldss-ranking-print-brand-copy">' +
+                '<div class="ldss-ranking-print-page-title">' + escapeHtml("LDSP " + meta.title) + "</div>" +
+                '<div class="ldss-ranking-print-page-meta">' + escapeHtml(meta.summary) + "</div>" +
+                '<div class="ldss-ranking-print-page-page">Page ' + escapeHtml(String(index + 1)) + " of " + escapeHtml(String(totalPages)) + " | Rows " + escapeHtml(String(startCounter)) + "-" + escapeHtml(String(startCounter + chunk.length - 1)) + "</div>" +
+                "</div>" +
+                "</div>" +
+                "</div>" +
+                '<table class="table mb-0 ldss-ranking-table ldss-ranking-print-table">' +
+                rankingPrintTableHeadMarkup() +
+                "<tbody>" + chunk.map(function (row, rowIndex) {
+                    return rankingPrintTableRowMarkup(row, startCounter + rowIndex);
+                }).join("") + "</tbody>" +
+                "</table>" +
+                "</section>"
+            );
+        }).join("");
     }
 
     function availableBatchIds() {
@@ -1641,50 +1227,29 @@
 
     function syncActionButtons() {
         const roomRows = currentRoomRows();
-        const rankingState = rankingDatasetForRender();
-        const busy = isSaving || isMarkingNoShows || isRankingResultSaving;
+        const rankingRows = rankingRowsForCurrentView();
         const saveBtn = byId("roomScoreSaveBtn");
         const saveNextBtn = byId("roomScoreSaveNextBtn");
-        const noShowBtn = byId("roomScoreNoShowBtn");
-        const rankingSortBtn = byId("roomScoreRankingSortBtn");
         const prevBtn = byId("roomScorePrevRoomBtn");
         const nextBtn = byId("roomScoreNextRoomBtn");
         const printBtn = byId("roomScorePrintBtn");
-        const searchBtn = byId("roomScoreSearchBtn");
-        const clearSearchBtn = byId("roomScoreSearchClearBtn");
 
         if (saveBtn) {
-            saveBtn.disabled = busy || !roomRows.length;
+            saveBtn.disabled = isSaving || !roomRows.length;
             saveBtn.textContent = isSaving ? "Saving..." : "Save This Room";
         }
         if (saveNextBtn) {
-            saveNextBtn.disabled = busy || !roomRows.length;
+            saveNextBtn.disabled = isSaving || !roomRows.length;
             saveNextBtn.textContent = isSaving ? "Saving..." : "Save and Open Next Room";
         }
-        if (noShowBtn) {
-            const noShowCount = noShowRowsForCurrentRoom().length;
-            noShowBtn.disabled = busy || !noShowCount;
-            noShowBtn.textContent = isMarkingNoShows
-                ? "Marking..."
-                : (noShowCount ? "Mark Blank as Failed to Take Exam" : "No Blank No-Shows");
-        }
-        if (rankingSortBtn) {
-            rankingSortBtn.disabled = busy || !currentBatchRankingRows().length;
-        }
         if (prevBtn) {
-            prevBtn.disabled = busy || !previousSelection();
+            prevBtn.disabled = isSaving || !previousSelection();
         }
         if (nextBtn) {
-            nextBtn.disabled = busy || !nextSelection();
+            nextBtn.disabled = isSaving || !nextSelection();
         }
         if (printBtn) {
-            printBtn.disabled = busy || (isRankingPage() ? !rankingState.rows.length : !roomRows.length);
-        }
-        if (searchBtn) {
-            searchBtn.disabled = busy || !roomRows.length;
-        }
-        if (clearSearchBtn) {
-            clearSearchBtn.disabled = busy || !roomRows.length;
+            printBtn.disabled = isSaving || (isRankingPage() ? !rankingRows.length : !roomRows.length);
         }
     }
 
@@ -1737,7 +1302,6 @@
                 scholarship_type: application ? application.scholarship_type : "",
                 sector_classification: application ? normalizeSectorClassification(application.sector_classification || "") : "Unspecified",
                 applicant_name: buildApplicantName(profile),
-                applicant_barangay: formatBarangayLabel(profile && profile.barangay ? profile.barangay : ""),
                 applicant_contact: profile ? (profile.mobile_number || profile.email || "-") : "-",
                 school_name: profile && profile.school_name ? profile.school_name : "",
                 batch_id: row.batch_id || "",
@@ -1751,7 +1315,6 @@
                 record_status: row.status || "scheduled"
             };
         });
-        rankingResultDrafts = {};
 
         resolveSelection(preferredBatchId, preferredRoomLabel);
         renderAll();
@@ -1806,9 +1369,10 @@
             const percentage = calculatePercentage(rawScore);
             const existingScore = row.raw_score === null || typeof row.raw_score === "undefined" ? null : Number(row.raw_score);
             const existingPercentage = row.percentage_score === null || typeof row.percentage_score === "undefined" ? null : Number(row.percentage_score);
-            const existingResult = normalizeExamResult(row.result || "pending");
+            const existingResult = workflow().normalizeExamResult(row.result || "pending");
             const changed = existingScore !== rawScore
                 || existingPercentage !== percentage
+                || existingResult !== "pending"
                 || normalizeStatus(row.record_status) !== "encoded";
 
             if (!changed) {
@@ -1820,7 +1384,7 @@
                 payload: {
                     raw_score: rawScore,
                     percentage_score: percentage,
-                    result: existingResult,
+                    result: "pending",
                     status: "encoded",
                     encoded_by: context.user.id
                 }
@@ -1870,28 +1434,6 @@
                 notification_type: "application",
                 title: "Exam Score Recorded",
                 message: "Your exam score has been recorded. Please monitor your application for the next update.",
-                related_application_id: row.application_id,
-                related_url: "application-detail.html?id=" + encodeURIComponent(row.application_id)
-            });
-
-        if (result.error) {
-            throw new Error(result.error.message || "Notification insert failed.");
-        }
-    }
-
-    async function notifyNoShowApplicant(row) {
-        if (!row.applicant_id) {
-            return;
-        }
-
-        const result = await context.client
-            .from("notifications")
-            .insert({
-                recipient_user_id: row.applicant_id,
-                sender_user_id: context.user.id,
-                notification_type: "application",
-                title: "Exam Attendance Result",
-                message: "Your exam attendance was marked as Failed to Take Exam. Please contact the scholarship office if you believe this is incorrect.",
                 related_application_id: row.application_id,
                 related_url: "application-detail.html?id=" + encodeURIComponent(row.application_id)
             });
@@ -1979,84 +1521,6 @@
         }
     }
 
-    async function markCurrentRoomNoShows() {
-        const noShowRows = noShowRowsForCurrentRoom();
-        if (!noShowRows.length) {
-            showStatus("No blank examinees are available to mark in this room.", "alert-info");
-            return;
-        }
-
-        const confirmed = window.confirm(
-            "Mark " + String(noShowRows.length) + " blank examinee(s) in " + currentRoomLabel.toUpperCase() + " as Failed to Take Exam? Scored rows will not be changed."
-        );
-        if (!confirmed) {
-            return;
-        }
-
-        isMarkingNoShows = true;
-        syncActionButtons();
-        showStatus("");
-
-        try {
-            let notificationFailures = 0;
-            const encodedAt = new Date().toISOString();
-
-            for (let index = 0; index < noShowRows.length; index += 1) {
-                const row = noShowRows[index];
-                const examResult = await context.client
-                    .from("exam_records")
-                    .update({
-                        raw_score: null,
-                        percentage_score: null,
-                        result: "failed",
-                        status: "completed",
-                        encoded_by: context.user.id,
-                        encoded_at: encodedAt
-                    })
-                    .eq("id", row.id)
-                    .eq("application_id", row.application_id)
-                    .is("raw_score", null);
-
-                if (examResult.error) {
-                    throw new Error("Failed to mark " + (row.application_no || "selected applicant") + ": " + examResult.error.message);
-                }
-
-                const targetStatus = deriveApplicationStatusForRankingResult(row, "failed");
-                if (normalizeStatus(row.application_status || "") !== normalizeStatus(targetStatus)) {
-                    const applicationResult = await context.client
-                        .from("applications")
-                        .update({
-                            status: targetStatus,
-                            secretary_reviewer_id: context.user.id
-                        })
-                        .eq("id", row.application_id);
-
-                    if (applicationResult.error) {
-                        throw new Error("Marked " + (row.application_no || "selected applicant") + " but application status update failed: " + applicationResult.error.message);
-                    }
-                }
-
-                try {
-                    await notifyNoShowApplicant(row);
-                } catch (_notificationError) {
-                    notificationFailures += 1;
-                }
-            }
-
-            await fetchData(currentBatchId, currentRoomLabel);
-            let message = String(noShowRows.length) + " blank examinee(s) marked as Failed to Take Exam for " + currentRoomLabel.toUpperCase() + ".";
-            if (notificationFailures) {
-                message += " " + String(notificationFailures) + " notification(s) were skipped.";
-            }
-            showStatus(message, notificationFailures ? "alert-warning" : "alert-success");
-        } catch (error) {
-            showStatus(error && error.message ? error.message : "Failed to mark blank examinees.", "alert-danger");
-        } finally {
-            isMarkingNoShows = false;
-            syncActionButtons();
-        }
-    }
-
     function moveSelection(selection) {
         if (!selection) {
             return;
@@ -2073,22 +1537,12 @@
         const rankingRoomFilter = byId("roomScoreRankingRoomFilter");
         const rankingSectorFilter = byId("roomScoreRankingSectorFilter");
         const rankingTopFilter = byId("roomScoreRankingTopFilter");
-        const rankingSearchInput = byId("roomScoreRankingSearchInput");
-        const rankingSearchClearBtn = byId("roomScoreRankingSearchClearBtn");
-        const rankingSaveBtn = byId("roomScoreRankingSaveBtn");
-        const rankingSortBtn = byId("roomScoreRankingSortBtn");
-        const rankingTableBody = byId("roomScoreRankingBody");
-        const rankingCards = byId("roomScoreRankingCards");
         const refreshBtn = byId("roomScoreRefreshBtn");
         const prevBtn = byId("roomScorePrevRoomBtn");
         const nextBtn = byId("roomScoreNextRoomBtn");
         const printBtn = byId("roomScorePrintBtn");
-        const searchInput = byId("roomScoreSearchInput");
-        const searchBtn = byId("roomScoreSearchBtn");
-        const clearSearchBtn = byId("roomScoreSearchClearBtn");
         const saveBtn = byId("roomScoreSaveBtn");
         const saveNextBtn = byId("roomScoreSaveNextBtn");
-        const noShowBtn = byId("roomScoreNoShowBtn");
         const tableBody = byId("roomScoreSheetBody");
 
         if (batchFilter) {
@@ -2130,50 +1584,6 @@
             });
         }
 
-        if (rankingSearchInput) {
-            rankingSearchInput.addEventListener("input", function () {
-                currentRankingSearchQuery = rankingSearchInput.value || "";
-                renderAll();
-            });
-
-            rankingSearchInput.addEventListener("search", function () {
-                currentRankingSearchQuery = rankingSearchInput.value || "";
-                renderAll();
-            });
-
-            rankingSearchInput.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter") {
-                    return;
-                }
-                event.preventDefault();
-                currentRankingSearchQuery = rankingSearchInput.value || "";
-                renderAll();
-            });
-        }
-
-        if (rankingSearchClearBtn) {
-            rankingSearchClearBtn.addEventListener("click", function () {
-                currentRankingSearchQuery = "";
-                if (rankingSearchInput) {
-                    rankingSearchInput.value = "";
-                    rankingSearchInput.focus();
-                }
-                renderAll();
-            });
-        }
-
-        if (rankingSaveBtn) {
-            rankingSaveBtn.addEventListener("click", function () {
-                saveRankingResults();
-            });
-        }
-
-        if (rankingSortBtn) {
-            rankingSortBtn.addEventListener("click", function () {
-                sortAllRanking();
-            });
-        }
-
         if (refreshBtn) {
             refreshBtn.addEventListener("click", async function () {
                 try {
@@ -2203,34 +1613,6 @@
             });
         }
 
-        if (searchBtn) {
-            searchBtn.addEventListener("click", function () {
-                currentRoomSearchQuery = searchInput ? searchInput.value.trim() : "";
-                applyRoomSheetSearch();
-            });
-        }
-
-        if (clearSearchBtn) {
-            clearSearchBtn.addEventListener("click", function () {
-                currentRoomSearchQuery = "";
-                if (searchInput) {
-                    searchInput.value = "";
-                }
-                applyRoomSheetSearch();
-            });
-        }
-
-        if (searchInput) {
-            searchInput.addEventListener("keydown", function (event) {
-                if (event.key !== "Enter") {
-                    return;
-                }
-                event.preventDefault();
-                currentRoomSearchQuery = searchInput.value.trim();
-                applyRoomSheetSearch();
-            });
-        }
-
         if (saveBtn) {
             saveBtn.addEventListener("click", function () {
                 saveCurrentRoom(false);
@@ -2240,12 +1622,6 @@
         if (saveNextBtn) {
             saveNextBtn.addEventListener("click", function () {
                 saveCurrentRoom(true);
-            });
-        }
-
-        if (noShowBtn) {
-            noShowBtn.addEventListener("click", function () {
-                markCurrentRoomNoShows();
             });
         }
 
@@ -2275,34 +1651,6 @@
                 }
             });
         }
-
-        [rankingTableBody, rankingCards].forEach(function (container) {
-            if (!container) {
-                return;
-            }
-
-            container.addEventListener("change", function (event) {
-                const select = event.target.closest("[data-ranking-result]");
-                if (!select) {
-                    return;
-                }
-                const recordId = select.getAttribute("data-ranking-result") || "";
-                const row = rows.find(function (entry) {
-                    return entry.id === recordId;
-                });
-                const nextValue = normalizeExamResult(select.value || "pending");
-                const savedValue = normalizeExamResult(row && row.result ? row.result : "pending");
-                if (!recordId) {
-                    return;
-                }
-                if (nextValue === savedValue) {
-                    clearRankingResultDraft(recordId);
-                } else {
-                    setRankingResultDraft(recordId, nextValue);
-                }
-                syncActionButtons();
-            });
-        });
     }
 
     async function init() {

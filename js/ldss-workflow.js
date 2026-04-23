@@ -140,9 +140,58 @@
         completed: { label: "Completed", chipClass: "ldss-chip-success" },
         absent: { label: "Absent", chipClass: "ldss-chip-danger" }
     };
+    const DEFAULT_RANKING_SETTINGS = {
+        exam_total_items: 100,
+        passing_score: 75
+    };
 
     function activeWorkflowControls() {
         return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
+    function normalizeNumber(value, fallbackValue) {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : fallbackValue;
+    }
+
+    function activeRankingSettings() {
+        const settings = window.LDSS_ACTIVE_RANKING_SETTINGS;
+        if (!settings || typeof settings !== "object" || settings.available !== true) {
+            return null;
+        }
+
+        return {
+            exam_total_items: Math.max(1, Math.round(normalizeNumber(
+                settings.exam_total_items,
+                DEFAULT_RANKING_SETTINGS.exam_total_items
+            ))),
+            passing_score: Math.min(100, Math.max(0, normalizeNumber(
+                settings.passing_score,
+                DEFAULT_RANKING_SETTINGS.passing_score
+            )))
+        };
+    }
+
+    function deriveExamScorePolicyMeta(examRecord) {
+        if (!examRecord) {
+            return null;
+        }
+
+        if (examRecord.raw_score === null || typeof examRecord.raw_score === "undefined" || examRecord.raw_score === "") {
+            return null;
+        }
+
+        const settings = activeRankingSettings();
+        const rawScore = Number(examRecord.raw_score);
+        if (!settings || !Number.isFinite(rawScore) || rawScore < 0 || rawScore > settings.exam_total_items) {
+            return null;
+        }
+
+        const percentage = Number(((rawScore / settings.exam_total_items) * 100).toFixed(2));
+        return {
+            percentage: percentage,
+            result: percentage >= settings.passing_score ? "passed" : "failed"
+        };
     }
 
     function normalizeStatus(status) {
@@ -252,11 +301,14 @@
         }
 
         const score = examRecord.raw_score;
-        const percent = examRecord.percentage_score;
+        const hasScore = !(score === null || typeof score === "undefined" || score === "");
+        const derivedPolicyMeta = deriveExamScorePolicyMeta(examRecord);
+        const percent = derivedPolicyMeta ? derivedPolicyMeta.percentage : examRecord.percentage_score;
         const recordStatus = normalizeExamRecordStatus(examRecord.status);
         const recordStatusMeta = examRecordStatusMeta(recordStatus);
-        const result = normalizeExamResult(examRecord.result);
+        const result = normalizeExamResult(derivedPolicyMeta ? derivedPolicyMeta.result : examRecord.result);
         const resultMeta = examResultMeta(result);
+        const failedToTakeExam = result === "failed" && !hasScore;
         const roomLabel = (examRecord.room_label || "").toString().trim();
         const rawSeatNo = examRecord.room_seat_no;
         const seatNo = rawSeatNo === null || typeof rawSeatNo === "undefined" || String(rawSeatNo).trim() === ""
@@ -265,7 +317,7 @@
 
         return {
             controlNo: examRecord.exam_control_no || "-",
-            scoreText: score === null || typeof score === "undefined" ? "-" : String(score),
+            scoreText: hasScore ? String(score) : "-",
             percentageText: percent === null || typeof percent === "undefined" ? "-" : String(percent) + "%",
             roomLabel: roomLabel,
             seatNo: seatNo,
@@ -273,7 +325,7 @@
             statusLabel: recordStatusMeta.label,
             statusChipClass: recordStatusMeta.chipClass,
             result: result,
-            resultLabel: resultMeta.label,
+            resultLabel: failedToTakeExam ? "Failed to Take Exam" : resultMeta.label,
             resultChipClass: resultMeta.chipClass
         };
     }

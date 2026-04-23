@@ -21,6 +21,7 @@
 
     let applicationRows = [];
     let currentPage = 1;
+    let activeSchoolYear = "";
 
     function byId(id) {
         return document.getElementById(id);
@@ -157,11 +158,17 @@
         return {
             isOpen: result.data.is_open !== false,
             reason: (result.data.reason || "open").toString(),
+            schoolYear: (result.data.school_year || "").toString().trim(),
             openDate: toIsoDateOnly(result.data.open_date || ""),
             closeDate: toIsoDateOnly(result.data.close_date || ""),
             openTime: normalizeTimeValue(result.data.open_time || ""),
             closeTime: normalizeTimeValue(result.data.close_time || "")
         };
+    }
+
+    async function loadActiveSchoolYear(context) {
+        const policy = await loadIntakePolicy(context);
+        return policy && policy.schoolYear ? policy.schoolYear : "";
     }
 
     function workflowControls() {
@@ -170,6 +177,34 @@
 
     function applicantExamScoresVisible() {
         return workflowControls().show_applicant_exam_scores !== false;
+    }
+
+    function normalizeExamResultValue(value) {
+        if (workflow() && typeof workflow().normalizeExamResult === "function") {
+            return workflow().normalizeExamResult(value || "pending");
+        }
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (raw === "passed" || raw === "pass") {
+            return "passed";
+        }
+        if (raw === "failed" || raw === "fail") {
+            return "failed";
+        }
+        return "pending";
+    }
+
+    function postedExamResultMeta(examSummary) {
+        const result = normalizeExamResultValue(examSummary && examSummary.result ? examSummary.result : "pending");
+        const scoreText = examSummary && examSummary.scoreText ? examSummary.scoreText : "-";
+        return {
+            result: result,
+            hasScore: scoreText !== "-",
+            scoreText: scoreText,
+            displayLabel: result === "passed"
+                ? "PASSED"
+                : (result === "failed" ? (scoreText === "-" ? (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Failed to Take Exam") : "FAIL") : (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Score Consolidation")),
+            textClass: result === "passed" ? "text-success" : "text-danger"
+        };
     }
 
     function intakeClosedMessage(policy) {
@@ -198,15 +233,27 @@
         btn.setAttribute("data-open-href", openHref);
 
         const latestBlockingApplication = applicationRows.find(function (row) {
-            return (row.status || "").toString().trim().toLowerCase() !== "draft";
+            if ((row.status || "").toString().trim().toLowerCase() === "draft") {
+                return false;
+            }
+            if (activeSchoolYear) {
+                return (row.school_year || "").toString().trim() === activeSchoolYear;
+            }
+            return true;
         }) || null;
 
         if (latestBlockingApplication) {
+            const blockingYear = (latestBlockingApplication.school_year || "").toString().trim();
             btn.classList.add("ldss-btn-disabled-hint");
             btn.textContent = "Application Locked";
             btn.setAttribute("href", "javascript:void(0);");
             btn.setAttribute("aria-disabled", "true");
-            btn.setAttribute("title", "Only 1 submitted application is allowed per user. Update your existing application instead.");
+            btn.setAttribute(
+                "title",
+                blockingYear
+                    ? ("Only 1 application attempt is allowed for " + blockingYear + ". Update your existing application instead.")
+                    : "Only 1 application attempt is allowed per school year. Update your existing application instead."
+            );
             return;
         }
 
@@ -241,7 +288,7 @@
 
     function viewButtonMarkup(row) {
         const encodedId = encodeURIComponent(row.id);
-        return '<a class="btn btn-outline-dark btn-sm" href="application-detail.html?id=' + encodedId + '">Option</a>';
+        return '<a class="btn btn-outline-dark btn-sm" href="applicant-application-form.html?application_id=' + encodedId + '">View</a>';
     }
 
     function submittedOnMarkup(row) {
@@ -261,6 +308,20 @@
         }
         if ((examSummary.status || "").toString() === "absent") {
             return '<span class="ldss-chip ldss-chip-neutral">No Result</span>';
+        }
+
+        const postedResult = postedExamResultMeta(examSummary);
+        if (postedResult.result === "passed" || postedResult.result === "failed") {
+            if (!applicantExamScoresVisible()) {
+                return '<span class="ldss-chip ldss-chip-accent">Score Consolidation</span>';
+            }
+            if (postedResult.hasScore) {
+                return '<div class="fw-700 d-inline-flex align-items-center flex-wrap gap-1">'
+                    + '<span>' + escapeHtml(postedResult.scoreText) + '</span>'
+                    + '<span class="text-muted">|</span>'
+                    + '<span class="' + postedResult.textClass + ' text-uppercase">' + postedResult.displayLabel + "</span>"
+                    + "</div>";
+            }
         }
 
         return '<span class="ldss-chip ' + examSummary.resultChipClass + '">' + escapeHtml(examSummary.resultLabel) + "</span>";
@@ -774,6 +835,7 @@
         }
         bindEvents(context);
         await loadApplications(context);
+        activeSchoolYear = await loadActiveSchoolYear(context);
         const intakePolicy = await loadIntakePolicy(context);
         applyIntakeState(intakePolicy);
     }

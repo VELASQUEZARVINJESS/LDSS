@@ -36,6 +36,8 @@ const REMINDER_CAMPAIGN_PROCESSOR_INTERVAL_MS = 60 * 1000;
 const EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_SIZE = 100;
 const EXAM_SCHEDULE_EMAIL_DEFAULT_BATCH_DELAY_MINUTES = 5;
 const EXAM_SCHEDULE_EMAIL_PROCESSOR_INTERVAL_MS = 60 * 1000;
+const SPECIAL_EXAM_RESCHEDULE_MAX_RECIPIENTS = 500;
+const DEFAULT_SPECIAL_EXAM_RESCHEDULE_SUBJECT = "LDSP Special Examination Reschedule Notice";
 const DEFAULT_ONLINE_APPLICATION_SUBMISSION_DEADLINE_LABEL = "March 23, 2026";
 const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
 const WALK_IN_TEMP_PASSWORD_LENGTH = 16;
@@ -778,6 +780,233 @@ async function sendExamScheduleEmailMail(details) {
         subject: "LDSP Exam Schedule Notice - " + details.applicationNo,
         text: buildExamScheduleEmailText(details),
         html: buildExamScheduleEmailHtml(details)
+    };
+
+    if (MAIL_REPLY_TO) {
+        mailOptions.replyTo = MAIL_REPLY_TO;
+    }
+
+    await transporter.sendMail(mailOptions);
+}
+
+function formatSpecialExamDateLabel(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec((value || "").toString().trim());
+    if (!match) {
+        return (value || "").toString().trim();
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+
+    return date.toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "UTC"
+    });
+}
+
+function formatSpecialExamTimeLabel(value) {
+    const match = /^(\d{2}):(\d{2})$/.exec((value || "").toString().trim());
+    if (!match) {
+        return (value || "").toString().trim();
+    }
+
+    const rawHour = Number(match[1]);
+    const minute = match[2];
+    const suffix = rawHour >= 12 ? "PM" : "AM";
+    const hour = rawHour % 12 || 12;
+    return hour + ":" + minute + " " + suffix;
+}
+
+function buildSpecialExamScheduleLabel(scheduleDate, reportingTime) {
+    const dateLabel = formatSpecialExamDateLabel(scheduleDate);
+    const timeLabel = formatSpecialExamTimeLabel(reportingTime);
+
+    if (dateLabel && timeLabel) {
+        return dateLabel + " at " + timeLabel;
+    }
+    return dateLabel || timeLabel || "";
+}
+
+function normalizeSpecialExamRecipientList(rawRecipients) {
+    const recipientList = Array.isArray(rawRecipients) ? rawRecipients : [];
+    const normalizedRecipients = [];
+    const skippedRecipients = [];
+    const seenEmails = new Set();
+    const seenPairs = new Set();
+
+    recipientList.forEach(function (entry, index) {
+        const fullName = nullIfBlank(
+            entry && (
+                entry.fullName ||
+                entry.full_name ||
+                entry.name
+            )
+        );
+        const email = normalizeEmailAddress(
+            entry && (
+                entry.email ||
+                entry.email_address ||
+                entry.emailAddress
+            )
+        );
+
+        if (!fullName) {
+            skippedRecipients.push({
+                row: index + 1,
+                email: email,
+                reason: "Missing full name."
+            });
+            return;
+        }
+        if (!email) {
+            skippedRecipients.push({
+                row: index + 1,
+                full_name: fullName,
+                reason: "Missing email address."
+            });
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            skippedRecipients.push({
+                row: index + 1,
+                full_name: fullName,
+                email: email,
+                reason: "Invalid email address format."
+            });
+            return;
+        }
+
+        const pairKey = fullName.toLowerCase() + "|" + email;
+        if (seenPairs.has(pairKey) || seenEmails.has(email)) {
+            skippedRecipients.push({
+                row: index + 1,
+                full_name: fullName,
+                email: email,
+                reason: "Duplicate recipient email."
+            });
+            return;
+        }
+
+        seenPairs.add(pairKey);
+        seenEmails.add(email);
+        normalizedRecipients.push({
+            fullName: fullName,
+            email: email
+        });
+    });
+
+    return {
+        recipients: normalizedRecipients,
+        skipped: skippedRecipients
+    };
+}
+
+function buildSpecialExamRescheduleEmailHtml(details) {
+    const scheduleLabel = buildSpecialExamScheduleLabel(details.scheduleDate, details.reportingTime);
+    const noteBlock = details.instructions
+        ? (
+            '<div style="margin-top:20px;padding:16px 18px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;">' +
+            '<div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Office Reminder</div>' +
+            '<div style="font-size:14px;line-height:1.7;color:#1f2937;white-space:pre-wrap;">' + escapeHtml(details.instructions) + "</div>" +
+            "</div>"
+        )
+        : "";
+    const roomRow = details.room
+        ? '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Room / Area</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(details.room) + "</td></tr>"
+        : "";
+    const supportBlock = SUPPORT_FACEBOOK_PAGE_URL
+        ? (
+            '<div style="margin-top:18px;padding:14px 16px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;">' +
+            '<div style="font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px;">Need Help?</div>' +
+            '<div style="font-size:14px;line-height:1.65;">For questions about the rescheduled examination, please contact the LDSP Support Facebook Page: <a href="' + escapeHtml(SUPPORT_FACEBOOK_PAGE_URL) + '" style="color:#c2410c;font-weight:700;word-break:break-all;">' + escapeHtml(SUPPORT_FACEBOOK_PAGE_URL) + "</a>.</div>" +
+            "</div>"
+        )
+        : "";
+
+    return (
+        '<div style="margin:0;padding:24px 12px;background:#eef2f7;font-family:Arial,sans-serif;color:#111827;">' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">' +
+        '<tr><td align="center">' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;border-collapse:collapse;background:#ffffff;border:1px solid #dbe3ee;border-radius:22px;overflow:hidden;box-shadow:0 12px 30px rgba(15,23,42,0.08);">' +
+        '<tr>' +
+        '<td style="padding:0;">' +
+        '<div style="height:6px;background:linear-gradient(90deg,#f59e0b 0%,#111827 100%);font-size:0;line-height:0;">&nbsp;</div>' +
+        '<div style="padding:26px 28px 18px;background:linear-gradient(180deg,#f8fafc 0%,#ffffff 100%);border-bottom:1px solid #e5e7eb;">' +
+        '<div style="font-size:12px;font-weight:800;letter-spacing:0.12em;text-transform:uppercase;color:#64748b;margin-bottom:10px;">LDSP LGU Daet Scholarship System</div>' +
+        '<div style="font-size:28px;line-height:1.2;font-weight:800;color:#0f172a;margin-bottom:8px;">Special Examination Reschedule Notice</div>' +
+        '<div style="font-size:15px;line-height:1.7;color:#475569;">Your scholarship examination schedule has been updated. Please review the new special examination details below and keep this notice for your reference.</div>' +
+        '</div>' +
+        '</td>' +
+        '</tr>' +
+        '<tr>' +
+        '<td style="padding:28px;">' +
+        '<div style="font-size:16px;line-height:1.7;color:#111827;margin-bottom:18px;">Good day <strong>' + escapeHtml(details.applicantName) + '</strong>,</div>' +
+        '<div style="padding:16px 18px;border-radius:16px;background:#f8fafc;border:1px solid #e2e8f0;color:#334155;font-size:14px;line-height:1.7;">You are scheduled for a <strong style="color:#0f172a;">special examination</strong>. Please follow the updated reporting schedule below and arrive early for check-in.</div>' +
+        '<div style="margin-top:20px;border:1px solid #dbe3ee;border-radius:18px;overflow:hidden;background:#ffffff;">' +
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">' +
+        '<tr><td colspan="2" style="padding:16px 18px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:800;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;">Updated Examination Details</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;width:34%;">Examinee</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:700;color:#111827;">' + escapeHtml(details.applicantName) + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Exam Date</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(formatSpecialExamDateLabel(details.scheduleDate) || "-") + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Reporting Time</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(formatSpecialExamTimeLabel(details.reportingTime) || "-") + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Schedule</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(scheduleLabel || "-") + '</td></tr>' +
+        '<tr><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#64748b;">Venue</td><td style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;color:#111827;">' + escapeHtml(details.venue || "-") + '</td></tr>' +
+        roomRow +
+        '<tr><td style="padding:14px 18px;font-size:13px;font-weight:700;color:#64748b;">Please Bring</td><td style="padding:14px 18px;font-size:14px;color:#111827;">Valid school ID or any valid ID, plus one black ballpen.</td></tr>' +
+        '</table>' +
+        '</div>' +
+        noteBlock +
+        supportBlock +
+        '<div style="margin-top:22px;padding-top:18px;border-top:1px solid #e5e7eb;font-size:13px;line-height:1.7;color:#475569;">Please keep this email for your reference and follow the scholarship office instructions on your special examination day.</div>' +
+        '<div style="margin-top:12px;font-size:14px;font-weight:700;color:#0f172a;">LDSP LGU Daet Scholarship System</div>' +
+        '</td>' +
+        '</tr>' +
+        '</table>' +
+        '</td></tr>' +
+        '</table>' +
+        '</div>'
+    );
+}
+
+function buildSpecialExamRescheduleEmailText(details) {
+    const lines = [
+        "Good day " + details.applicantName + ",",
+        "",
+        "Your scholarship examination has been rescheduled for a special examination schedule.",
+        "Exam Date: " + (formatSpecialExamDateLabel(details.scheduleDate) || "-"),
+        "Reporting Time: " + (formatSpecialExamTimeLabel(details.reportingTime) || "-"),
+        "Venue: " + (details.venue || "-")
+    ];
+
+    if (details.room) {
+        lines.push("Room / Area: " + details.room);
+    }
+
+    lines.push("Please Bring: Valid school ID or any valid ID, plus one black ballpen.");
+
+    if (details.instructions) {
+        lines.push("", "Office Reminder:", details.instructions);
+    }
+
+    if (SUPPORT_FACEBOOK_PAGE_URL) {
+        lines.push("", "For questions, please contact the LDSP Support Facebook Page: " + SUPPORT_FACEBOOK_PAGE_URL);
+    }
+
+    lines.push("", "LDSP LGU Daet Scholarship System");
+    return lines.filter(Boolean).join("\n");
+}
+
+async function sendSpecialExamRescheduleMail(details) {
+    const transporter = getMailTransporter();
+    const mailOptions = {
+        from: MAIL_FROM,
+        to: details.email,
+        subject: details.subject || DEFAULT_SPECIAL_EXAM_RESCHEDULE_SUBJECT,
+        text: buildSpecialExamRescheduleEmailText(details),
+        html: buildSpecialExamRescheduleEmailHtml(details)
     };
 
     if (MAIL_REPLY_TO) {
@@ -4457,6 +4686,193 @@ app.post("/api/notifications/exam-schedule/test", authenticate, async function (
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Test exam schedule email failed.");
+    }
+});
+
+app.post("/api/notifications/special-exam-reschedule", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send special examination reschedule emails.");
+            return;
+        }
+
+        if (!mailServerConfigured()) {
+            writeJsonError(response, 503, "Server email is not configured. Add SMTP settings in the Node app environment first.");
+            return;
+        }
+
+        const subject = nullIfBlank(request.body && request.body.subject) || DEFAULT_SPECIAL_EXAM_RESCHEDULE_SUBJECT;
+        const scheduleDate = nullIfBlank(request.body && request.body.scheduleDate);
+        const reportingTime = nullIfBlank(request.body && request.body.reportingTime);
+        const venue = nullIfBlank(request.body && request.body.venue);
+        const room = nullIfBlank(request.body && request.body.room);
+        const instructions = nullIfBlank(request.body && request.body.instructions);
+        const recipientInfo = normalizeSpecialExamRecipientList(request.body && request.body.recipients);
+
+        if (subject.length > 150) {
+            writeJsonError(response, 400, "Email subject must stay within 150 characters.");
+            return;
+        }
+        if (!scheduleDate || !/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate)) {
+            writeJsonError(response, 400, "A valid special examination date is required.");
+            return;
+        }
+        if (!reportingTime || !/^\d{2}:\d{2}$/.test(reportingTime)) {
+            writeJsonError(response, 400, "A valid reporting time is required.");
+            return;
+        }
+        if (!venue) {
+            writeJsonError(response, 400, "Venue is required.");
+            return;
+        }
+        if (venue.length > 180) {
+            writeJsonError(response, 400, "Venue must stay within 180 characters.");
+            return;
+        }
+        if (room && room.length > 120) {
+            writeJsonError(response, 400, "Room / area must stay within 120 characters.");
+            return;
+        }
+        if (instructions && instructions.length > 1000) {
+            writeJsonError(response, 400, "Office reminder must stay within 1000 characters.");
+            return;
+        }
+        if (!recipientInfo.recipients.length) {
+            writeJsonError(response, 400, "At least one valid recipient email is required.");
+            return;
+        }
+        if (recipientInfo.recipients.length > SPECIAL_EXAM_RESCHEDULE_MAX_RECIPIENTS) {
+            writeJsonError(
+                response,
+                400,
+                "Too many recipients in one send. Keep the special examination batch to " + SPECIAL_EXAM_RESCHEDULE_MAX_RECIPIENTS + " recipients or less."
+            );
+            return;
+        }
+
+        const sent = [];
+        const failed = [];
+
+        for (let index = 0; index < recipientInfo.recipients.length; index += 1) {
+            const recipient = recipientInfo.recipients[index];
+            try {
+                await sendSpecialExamRescheduleMail({
+                    email: recipient.email,
+                    applicantName: recipient.fullName,
+                    subject: subject,
+                    scheduleDate: scheduleDate,
+                    reportingTime: reportingTime,
+                    venue: venue,
+                    room: room || "",
+                    instructions: instructions || ""
+                });
+                sent.push({
+                    full_name: recipient.fullName,
+                    email: recipient.email
+                });
+            } catch (error) {
+                failed.push({
+                    full_name: recipient.fullName,
+                    email: recipient.email,
+                    error: error && error.message ? error.message : "Email send failed."
+                });
+            }
+        }
+
+        response.json({
+            ok: true,
+            requested_count: Array.isArray(request.body && request.body.recipients) ? request.body.recipients.length : 0,
+            valid_count: recipientInfo.recipients.length,
+            skipped_count: recipientInfo.skipped.length,
+            sent_count: sent.length,
+            failed_count: failed.length,
+            skipped_preview: recipientInfo.skipped.slice(0, 10),
+            failed_preview: failed.slice(0, 10)
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Special examination reschedule email failed.");
+    }
+});
+
+app.post("/api/notifications/special-exam-reschedule/test", authenticate, async function (request, response) {
+    try {
+        if (!STAFF_ROLES.has(request.auth.role)) {
+            writeJsonError(response, 403, "Only staff can send test special examination emails.");
+            return;
+        }
+
+        if (!mailServerConfigured()) {
+            writeJsonError(response, 503, "Server email is not configured. Add SMTP settings in the Node app environment first.");
+            return;
+        }
+
+        const subject = nullIfBlank(request.body && request.body.subject) || DEFAULT_SPECIAL_EXAM_RESCHEDULE_SUBJECT;
+        const scheduleDate = nullIfBlank(request.body && request.body.scheduleDate);
+        const reportingTime = nullIfBlank(request.body && request.body.reportingTime);
+        const venue = nullIfBlank(request.body && request.body.venue);
+        const room = nullIfBlank(request.body && request.body.room);
+        const instructions = nullIfBlank(request.body && request.body.instructions);
+        const testEmail = normalizeEmailAddress(request.body && request.body.testEmail);
+        const sampleRecipient = request.body && request.body.sampleRecipient ? request.body.sampleRecipient : {};
+        const applicantName = nullIfBlank(
+            sampleRecipient && (
+                sampleRecipient.fullName ||
+                sampleRecipient.full_name ||
+                sampleRecipient.name
+            )
+        ) || "Applicant";
+
+        if (subject.length > 150) {
+            writeJsonError(response, 400, "Email subject must stay within 150 characters.");
+            return;
+        }
+        if (!scheduleDate || !/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate)) {
+            writeJsonError(response, 400, "A valid special examination date is required.");
+            return;
+        }
+        if (!reportingTime || !/^\d{2}:\d{2}$/.test(reportingTime)) {
+            writeJsonError(response, 400, "A valid reporting time is required.");
+            return;
+        }
+        if (!venue) {
+            writeJsonError(response, 400, "Venue is required.");
+            return;
+        }
+        if (venue.length > 180) {
+            writeJsonError(response, 400, "Venue must stay within 180 characters.");
+            return;
+        }
+        if (room && room.length > 120) {
+            writeJsonError(response, 400, "Room / area must stay within 120 characters.");
+            return;
+        }
+        if (instructions && instructions.length > 1000) {
+            writeJsonError(response, 400, "Office reminder must stay within 1000 characters.");
+            return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) {
+            writeJsonError(response, 400, "Enter a valid test receiver email address.");
+            return;
+        }
+
+        await sendSpecialExamRescheduleMail({
+            email: testEmail,
+            applicantName: applicantName,
+            subject: subject,
+            scheduleDate: scheduleDate,
+            reportingTime: reportingTime,
+            venue: venue,
+            room: room || "",
+            instructions: instructions || ""
+        });
+
+        response.json({
+            ok: true,
+            sent_to_email: testEmail,
+            applicant_name: applicantName
+        });
+    } catch (error) {
+        writeJsonError(response, 500, error && error.message ? error.message : "Test special examination email failed.");
     }
 });
 

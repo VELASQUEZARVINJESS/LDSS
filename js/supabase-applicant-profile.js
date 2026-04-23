@@ -179,8 +179,24 @@
             });
     }
 
-    function applicationStatusTone(value) {
+    function workflowControls() {
+        return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
+    function applicantExamScoresVisible() {
+        return workflowControls().show_applicant_exam_scores !== false;
+    }
+
+    function maskedApplicantStatusValue(value) {
         const normalized = (value || "").toString().trim().toLowerCase();
+        if (!applicantExamScoresVisible() && (normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "exam_completed";
+        }
+        return value;
+    }
+
+    function applicationStatusTone(value) {
+        const normalized = (maskedApplicantStatusValue(value) || "").toString().trim().toLowerCase();
         if (!normalized) {
             return "neutral";
         }
@@ -573,7 +589,7 @@
         const row = latest.data[0];
         setText("profileLatestApplicationNo", row.application_no);
         setText("profileLatestScholarshipType", formatSectorClassificationDisplay(row.sector_classification));
-        setChip("profileLatestStatusChip", formatApplicationStatusLabel(row.status), applicationStatusTone(row.status));
+        setChip("profileLatestStatusChip", formatApplicationStatusLabel(maskedApplicantStatusValue(row.status)), applicationStatusTone(row.status));
     }
 
     function fillProfileDisplay(profile) {

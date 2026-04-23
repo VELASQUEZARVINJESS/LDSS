@@ -346,6 +346,41 @@
         return workflowControls().show_applicant_exam_scores !== false;
     }
 
+    function normalizeExamResultValue(value) {
+        if (workflow() && typeof workflow().normalizeExamResult === "function") {
+            return workflow().normalizeExamResult(value || "pending");
+        }
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (raw === "passed" || raw === "pass") {
+            return "passed";
+        }
+        if (raw === "failed" || raw === "fail") {
+            return "failed";
+        }
+        return "pending";
+    }
+
+    function postedExamResultMeta(examSummary) {
+        const result = normalizeExamResultValue(examSummary && examSummary.result ? examSummary.result : "pending");
+        const scoreText = examSummary && examSummary.scoreText ? examSummary.scoreText : "-";
+        return {
+            result: result,
+            hasScore: scoreText !== "-",
+            scoreText: scoreText,
+            displayLabel: result === "passed"
+                ? "PASSED"
+                : (result === "failed" ? (scoreText === "-" ? (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Failed to Take Exam") : "FAIL") : (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Score Consolidation"))
+        };
+    }
+
+    function maskedApplicantStatusValue(status) {
+        const normalized = workflow().normalizeStatus(status || "");
+        if (!applicantExamScoresVisible() && (normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "exam_completed";
+        }
+        return status;
+    }
+
     function getProfileReminderModal() {
         const modalEl = byId("profileReminderModal");
         if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
@@ -520,11 +555,17 @@
         return {
             isOpen: result.data.is_open !== false,
             reason: (result.data.reason || "open").toString(),
+            schoolYear: (result.data.school_year || "").toString().trim(),
             openDate: toIsoDateOnly(result.data.open_date || ""),
             closeDate: toIsoDateOnly(result.data.close_date || ""),
             openTime: normalizeTimeValue(result.data.open_time || ""),
             closeTime: normalizeTimeValue(result.data.close_time || "")
         };
+    }
+
+    async function loadActiveSchoolYear(context) {
+        const policy = await loadIntakePolicy(context);
+        return policy && policy.schoolYear ? policy.schoolYear : "";
     }
 
     function intakeClosedMessage(policy) {
@@ -653,16 +694,25 @@
                 events.push({ label: "Application submitted", at: application.submitted_at });
             }
             if (application.updated_at && application.status) {
-                events.push({ label: "Current status: " + statusMeta(application.status).label, at: application.updated_at });
+                events.push({ label: "Current status: " + statusMeta(maskedApplicantStatusValue(application.status)).label, at: application.updated_at });
             }
         }
 
         if (examRecord && examRecord.updated_at) {
             const examSummary = workflow().examSummaryFromRecord(examRecord);
+            const postedResult = postedExamResultMeta(examSummary);
             events.push({
                 label: examSummary.status === "absent"
                     ? "Examination status: Absent"
-                    : ("Exam result: " + examSummary.resultLabel),
+                    : (
+                        (postedResult.result === "passed" || postedResult.result === "failed")
+                            ? (
+                                applicantExamScoresVisible()
+                                    ? ("Exam result: " + (postedResult.hasScore ? (postedResult.scoreText + " | " + postedResult.displayLabel) : postedResult.displayLabel))
+                                    : "Exam result recorded"
+                            )
+                            : ("Exam result: " + examSummary.resultLabel)
+                    ),
                 at: examRecord.updated_at
             });
         }
@@ -848,18 +898,26 @@
             return;
         }
 
-        const appMeta = statusMeta(application.status);
-        const normalizedStatus = workflow().normalizeStatus(application.status);
+        const effectiveStatus = maskedApplicantStatusValue(application.status);
+        const appMeta = statusMeta(effectiveStatus);
+        const normalizedStatus = workflow().normalizeStatus(effectiveStatus);
 
         setText("dashboardCurrentApplicationValue", appMeta.label);
         setChip("dashboardCurrentApplicationChip", application.application_no || "Active Application", appMeta.chipClass);
 
         const examSummary = workflow().examSummaryFromRecord(examRecord);
         const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
+        const postedResult = postedExamResultMeta(examSummary);
         let examValue = "No score yet";
 
         if ((examSummary.status || "").toString() === "absent") {
             examValue = "Absent from examination";
+        } else if ((postedResult.result === "passed" || postedResult.result === "failed") && applicantExamScoresVisible()) {
+            examValue = postedResult.hasScore
+                ? (postedResult.scoreText + " | " + postedResult.displayLabel)
+                : postedResult.displayLabel;
+        } else if ((postedResult.result === "passed" || postedResult.result === "failed") && !applicantExamScoresVisible()) {
+            examValue = "Result hidden by scholarship office";
         } else if (hasNumericExam && applicantExamScoresVisible()) {
             examValue = "Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText;
         } else if (hasNumericExam) {
@@ -875,8 +933,20 @@
         setText("dashboardExamValue", examValue);
         setChip(
             "dashboardExamChip",
-            examSummary.status === "absent" ? "No Result" : examSummary.resultLabel,
-            examSummary.status === "absent" ? "ldss-chip-neutral" : examSummary.resultChipClass
+            examSummary.status === "absent"
+                ? "No Result"
+                : (
+                    (postedResult.result === "passed" || postedResult.result === "failed") && !applicantExamScoresVisible()
+                        ? "Score Consolidation"
+                        : examSummary.resultLabel
+                ),
+            examSummary.status === "absent"
+                ? "ldss-chip-neutral"
+                : (
+                    (postedResult.result === "passed" || postedResult.result === "failed") && !applicantExamScoresVisible()
+                        ? "ldss-chip-accent"
+                        : examSummary.resultChipClass
+                )
         );
 
         if (interviewRecord && interviewRecord.scheduled_at) {
@@ -889,7 +959,7 @@
             setChip("dashboardInterviewChip", waitingInterview ? "Follow Tracking" : "Pending", waitingInterview ? "ldss-chip-accent" : "ldss-chip-neutral");
         }
 
-        let nextStep = workflow().nextStepForApplicant(application.status);
+        let nextStep = workflow().nextStepForApplicant(effectiveStatus);
         let nextChipLabel = appMeta.label;
         let nextChipClass = appMeta.chipClass;
 
@@ -1029,8 +1099,8 @@
         return result.data[0];
     }
 
-    async function loadLatestEditableDraft(context) {
-        const result = await context.client
+    async function loadLatestEditableDraft(context, schoolYear) {
+        let query = context.client
             .from("applications")
             .select("id, status")
             .eq("applicant_id", context.user.id)
@@ -1038,20 +1108,32 @@
             .order("updated_at", { ascending: false })
             .limit(1);
 
+        if (schoolYear) {
+            query = query.eq("school_year", schoolYear);
+        }
+
+        const result = await query;
+
         if (result.error || !result.data || result.data.length === 0) {
             return null;
         }
         return result.data[0];
     }
 
-    async function loadLatestBlockingApplication(context) {
-        const result = await context.client
+    async function loadLatestBlockingApplication(context, schoolYear) {
+        let query = context.client
             .from("applications")
-            .select("id, application_no, status, is_locked, created_at, updated_at")
+            .select("id, application_no, school_year, status, is_locked, created_at, updated_at")
             .eq("applicant_id", context.user.id)
             .neq("status", "draft")
             .order("updated_at", { ascending: false })
             .limit(1);
+
+        if (schoolYear) {
+            query = query.eq("school_year", schoolYear);
+        }
+
+        const result = await query;
 
         if (result.error || !result.data || result.data.length === 0) {
             return null;
@@ -1167,7 +1249,7 @@
             return null;
         }
 
-        const normalized = workflow().normalizeStatus(applicationStatus);
+        const normalized = workflow().normalizeStatus(maskedApplicantStatusValue(applicationStatus));
         let inferredResult = "pending";
         if (normalized === "passed_exam") {
             inferredResult = "passed";
@@ -1237,6 +1319,12 @@
     function renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy) {
         const intakeIsClosed = !!(intakePolicy && !intakePolicy.isOpen);
         const intakeHint = intakeClosedMessage(intakePolicy);
+        const blockingYear = latestBlockingApplication && latestBlockingApplication.school_year
+            ? String(latestBlockingApplication.school_year)
+            : "";
+        const blockingHint = blockingYear
+            ? ("Only 1 application attempt is allowed for " + blockingYear + ". Update your existing application instead.")
+            : "Only 1 application attempt is allowed per school year. Update your existing application instead.";
 
         if (latestDraft && latestDraft.id) {
             const resumeLabel = latestDraft.status === "returned_for_correction" ? "Continue Application" : "Continue Draft";
@@ -1256,7 +1344,7 @@
             intakeIsClosed ? "Application Closed" : "New Application",
             !!latestBlockingApplication || intakeIsClosed,
             latestBlockingApplication
-                ? "Only 1 submitted application is allowed per user. Update your existing application instead."
+                ? blockingHint
                 : (intakeIsClosed ? intakeHint : "")
         );
         setActionLink("dashboardMyApplicationsBtn", "applicant-applications.html", "My Applications", false);
@@ -1343,16 +1431,20 @@
             const headResults = await Promise.all([
                 loadProfileSummary(context),
                 loadLatestApplication(context),
-                loadLatestEditableDraft(context),
-                loadLatestBlockingApplication(context),
-                loadIntakePolicy(context)
+                loadIntakePolicy(context),
+                loadActiveSchoolYear(context)
             ]);
 
             const profileSummary = headResults[0];
             const latestApplication = headResults[1];
-            const latestDraft = headResults[2];
-            const latestBlockingApplication = headResults[3];
-            const intakePolicy = headResults[4];
+            const intakePolicy = headResults[2];
+            const activeSchoolYear = headResults[3];
+            const actionResults = await Promise.all([
+                loadLatestEditableDraft(context, activeSchoolYear),
+                loadLatestBlockingApplication(context, activeSchoolYear)
+            ]);
+            const latestDraft = actionResults[0];
+            const latestBlockingApplication = actionResults[1];
             const latestExamRecord = latestApplication
                 ? await loadExamRecord(context, latestApplication.id, latestApplication.status)
                 : null;

@@ -418,6 +418,43 @@
                 box-shadow: 0 0.35rem 1.15rem rgba(15, 23, 42, 0.03);
             }
 
+            .ldss-special-stat-grid {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 0.9rem;
+            }
+
+            .ldss-special-stat-card {
+                border: 1px solid #e7ebf1;
+                border-radius: 0.9rem;
+                background: #fff;
+                box-shadow: 0 0.35rem 1.15rem rgba(15, 23, 42, 0.03);
+                padding: 0.95rem 1rem;
+            }
+
+            .ldss-special-stat-label {
+                font-size: 0.75rem;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: var(--ldss-muted);
+                font-weight: 700;
+                margin-bottom: 0.4rem;
+            }
+
+            .ldss-special-stat-value {
+                font-size: 1.7rem;
+                line-height: 1.05;
+                font-weight: 700;
+                color: var(--ldss-text);
+            }
+
+            .ldss-special-stat-copy {
+                margin-top: 0.28rem;
+                font-size: 0.82rem;
+                color: var(--ldss-muted);
+                line-height: 1.45;
+            }
+
             .ldss-special-table-head {
                 display: flex;
                 flex-wrap: wrap;
@@ -431,6 +468,81 @@
 
             .ldss-special-table td {
                 vertical-align: middle;
+            }
+
+            .ldss-special-table th,
+            .ldss-special-table td {
+                padding: 0.55rem 0.65rem;
+                line-height: 1.2;
+            }
+
+            .ldss-special-table .ldss-special-col-no {
+                width: 3.75rem;
+                color: var(--ldss-muted);
+                font-weight: 700;
+            }
+
+            .ldss-special-table .ldss-special-col-rank {
+                width: 4.25rem;
+            }
+
+            .ldss-special-table .ldss-special-col-score {
+                min-width: 5.5rem;
+            }
+
+            .ldss-special-table .ldss-special-col-updated {
+                min-width: 8.75rem;
+            }
+
+            .ldss-special-allowed-table .ldss-queue-applicant-name,
+            .ldss-special-allowed-table .fw-600 {
+                line-height: 1.15;
+            }
+
+            .ldss-special-allowed-table .small {
+                line-height: 1.1;
+            }
+
+            .ldss-ranking-print-pages {
+                display: none;
+            }
+
+            .ldss-special-print-document {
+                background: #ffffff;
+                padding: 0;
+            }
+
+            .ldss-special-print-header {
+                margin-bottom: 0.5rem;
+            }
+
+            .ldss-special-print-brand {
+                display: flex;
+                align-items: center;
+                gap: 0.6rem;
+            }
+
+            .ldss-special-print-logo {
+                width: 42px;
+                height: 42px;
+                object-fit: contain;
+                flex: 0 0 auto;
+            }
+
+            .ldss-special-print-brand-copy {
+                min-width: 0;
+            }
+
+            .ldss-special-print-title {
+                font-size: 0.9rem;
+                font-weight: 700;
+                color: #111827;
+            }
+
+            .ldss-special-print-copy {
+                font-size: 0.68rem;
+                color: #6b7280;
+                line-height: 1.2;
             }
 
             .ldss-special-allowed-table .ldss-special-action-row {
@@ -491,10 +603,19 @@
                 }
             }
 
+            @page {
+                size: 8.5in 13in;
+                margin: 0.18in 0.25in;
+            }
+
             @media (max-width: 767.98px) {
                 .ldss-special-shell .card-header,
                 .ldss-special-shell .card-body {
                     padding: 0.85rem;
+                }
+
+                .ldss-special-stat-grid {
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
                 }
 
                 .ldss-special-header {
@@ -541,8 +662,227 @@
                     align-items: stretch;
                 }
 
+                .ldss-special-stat-grid {
+                    grid-template-columns: 1fr;
+                }
+
                 .ldss-special-switch-control {
                     align-self: flex-end;
+                }
+            }
+
+            @media print {
+                body {
+                    background: #ffffff !important;
+                }
+
+                .topnav,
+                #layoutSidenav_nav,
+                .footer-admin,
+                .page-header,
+                .ldss-special-shell,
+                .ldss-special-stat-grid,
+                #specialConsiderationStatus,
+                #specialConsiderationManagerStatus,
+                .modal,
+                .modal-backdrop {
+                    display: none !important;
+                }
+
+                #layoutSidenav_content,
+                main,
+                .container-xl {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    border: 0 !important;
+                    box-shadow: none !important;
+                    background: #ffffff !important;
+                }
+
+                .ldss-ranking-print-pages {
+                    display: block !important;
+                }
+
+                .ldss-special-print-table {
+                    width: 100% !important;
+                    min-width: 0 !important;
+                    table-layout: fixed;
+                    border-collapse: collapse;
+                    font-size: 11px;
+                    -webkit-print-color-adjust: exact;
+                    print-color-adjust: exact;
+                }
+
+                .ldss-special-print-table thead th {
+                    background: #ffffff !important;
+                    color: #111827 !important;
+                    font-size: 11px;
+                    white-space: nowrap;
+                    word-break: normal;
+                    overflow-wrap: normal;
+                    line-height: 1.12;
+                    text-transform: uppercase;
+                    letter-spacing: 0.02em;
+                }
+
+                .ldss-special-print-table th,
+                .ldss-special-print-table td {
+                    border: 1px solid #d1d5db !important;
+                    break-inside: avoid;
+                    page-break-inside: avoid;
+                }
+
+                .ldss-special-print-table th {
+                    padding: 0.18rem 0.16rem;
+                }
+
+                .ldss-special-print-table td {
+                    padding: 0.16rem 0.18rem;
+                    white-space: nowrap;
+                    word-break: normal;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    overflow-wrap: normal;
+                    font-size: 11px;
+                    line-height: 1.12;
+                    vertical-align: middle;
+                }
+
+                .ldss-special-print-table td .fw-700 {
+                    font-size: 11px;
+                    line-height: 1.12;
+                }
+
+                .ldss-special-print-table td .small {
+                    font-size: 9px;
+                    line-height: 1.08;
+                    color: #6b7280 !important;
+                }
+
+                .ldss-special-print-table td .ldss-ranking-print-primary,
+                .ldss-special-print-table td .ldss-ranking-print-value {
+                    display: block;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    overflow-wrap: normal;
+                }
+
+                .ldss-special-print-table td .ldss-ranking-print-primary {
+                    font-size: 11px;
+                    line-height: 1.12;
+                }
+
+                .ldss-special-print-table td .ldss-ranking-print-number {
+                    display: inline-block;
+                    white-space: nowrap;
+                    overflow: visible;
+                    text-overflow: clip;
+                    min-width: 1.8ch;
+                    text-align: center;
+                    font-variant-numeric: tabular-nums;
+                }
+
+                .ldss-special-print-table td .ldss-ranking-print-secondary {
+                    display: block !important;
+                    margin-top: 0.08rem;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    overflow-wrap: normal;
+                    font-size: 9px;
+                    line-height: 1.08;
+                    color: #6b7280 !important;
+                }
+
+                .ldss-special-print-table td.ldss-special-print-score {
+                    font-weight: 800 !important;
+                }
+
+                .ldss-special-print-table td.ldss-special-print-care {
+                    text-align: center !important;
+                    font-weight: 800 !important;
+                }
+
+                .ldss-special-print-table td.ldss-special-print-care .ldss-ranking-print-primary,
+                .ldss-special-print-table td.ldss-special-print-care .ldss-ranking-print-secondary {
+                    text-align: center !important;
+                    font-weight: 800 !important;
+                }
+
+                .ldss-special-print-table td.ldss-special-print-care-internal_review .ldss-ranking-print-secondary {
+                    color: #15803d !important;
+                }
+
+                .ldss-special-print-table td.ldss-special-print-care-for_approval .ldss-ranking-print-secondary {
+                    color: #b45309 !important;
+                }
+
+                .ldss-special-print-table tbody tr:nth-of-type(odd) {
+                    background: #ffffff !important;
+                }
+
+                .ldss-special-print-table tbody tr:nth-of-type(even) {
+                    background: #f3f4f6 !important;
+                }
+
+                .ldss-special-print-table thead {
+                    display: table-header-group;
+                }
+
+                .ldss-special-print-header {
+                    margin-bottom: 0.24rem;
+                }
+
+                .ldss-special-print-brand {
+                    align-items: flex-start;
+                    gap: 0.55rem;
+                }
+
+                .ldss-special-print-logo {
+                    width: 55px;
+                    height: 55px;
+                }
+
+                .ldss-special-print-title {
+                    font-size: 16px;
+                    line-height: 1.08;
+                    text-transform: uppercase;
+                }
+
+                .ldss-special-print-copy {
+                    font-size: 10px;
+                    line-height: 1.12;
+                }
+
+                .ldss-special-print-table th:nth-child(1),
+                .ldss-special-print-table td:nth-child(1) {
+                    width: 0.32in;
+                }
+
+                .ldss-special-print-table th:nth-child(2),
+                .ldss-special-print-table td:nth-child(2) {
+                    width: 0.42in;
+                }
+
+                .ldss-special-print-table th:nth-child(3),
+                .ldss-special-print-table td:nth-child(3) {
+                    width: 2.55in;
+                }
+
+                .ldss-special-print-table th:nth-child(4),
+                .ldss-special-print-table td:nth-child(4) {
+                    width: 1.55in;
+                }
+
+                .ldss-special-print-table th:nth-child(5),
+                .ldss-special-print-table td:nth-child(5) {
+                    width: 0.5in;
+                }
+
+                .ldss-special-print-table th:nth-child(6),
+                .ldss-special-print-table td:nth-child(6) {
+                    width: 2.66in;
                 }
             }
         </style>
@@ -707,12 +1047,38 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="ldss-special-stat-grid mb-4">
+                            <div class="ldss-special-stat-card">
+                                <div class="ldss-special-stat-label">Total Tagged</div>
+                                <div class="ldss-special-stat-value" id="specialConsiderationTaggedCount">0</div>
+                                <div class="ldss-special-stat-copy">Applicants currently on the special consideration allow-list.</div>
+                            </div>
+                            <div class="ldss-special-stat-card">
+                                <div class="ldss-special-stat-label">Priority Review</div>
+                                <div class="ldss-special-stat-value" id="specialConsiderationPriorityCount">0</div>
+                                <div class="ldss-special-stat-copy">Tagged for priority review under the saved special consideration list.</div>
+                            </div>
+                            <div class="ldss-special-stat-card">
+                                <div class="ldss-special-stat-label">For Approval</div>
+                                <div class="ldss-special-stat-value" id="specialConsiderationApprovalCount">0</div>
+                                <div class="ldss-special-stat-copy">Tagged for direct approval review from the special consideration workflow.</div>
+                            </div>
+                            <div class="ldss-special-stat-card">
+                                <div class="ldss-special-stat-label">Available To Tag</div>
+                                <div class="ldss-special-stat-value" id="specialConsiderationAvailableCount">0</div>
+                                <div class="ldss-special-stat-copy">Applicants still outside the current allow-list for this active school year.</div>
+                            </div>
+                        </div>
                         <div class="card mb-4 ldss-special-shell">
                             <div class="card-header">
                                 <div class="ldss-special-header">
                                     <div>
                                         <div class="ldss-special-header-title">Allowed Students</div>
                                         <div class="ldss-special-header-copy mt-1">This list is visible only in the System Administrator workspace.</div>
+                                    </div>
+                                    <div class="d-flex flex-wrap align-items-center gap-2">
+                                        <button class="btn btn-dark btn-sm" id="specialConsiderationPdfBtn" type="button">Save PDF</button>
+                                        <button class="btn btn-outline-dark btn-sm" id="specialConsiderationPrintBtn" type="button">Print All Tagged</button>
                                     </div>
                                 </div>
                             </div>
@@ -721,22 +1087,27 @@
                                     <table class="table table-sm mb-0 ldss-special-table ldss-applications-table ldss-uniform-data-table ldss-special-allowed-table">
                                         <thead class="bg-light">
                                             <tr>
+                                                <th class="ldss-special-col-no">No.</th>
+                                                <th class="ldss-special-col-rank">Rank</th>
                                                 <th>Applicant</th>
                                                 <th>Application</th>
+                                                <th class="ldss-special-col-score">Score</th>
                                                 <th>Category + Label</th>
                                                 <th>Status</th>
+                                                <th class="ldss-special-col-updated">Updated</th>
                                                 <th class="text-end">Action</th>
                                             </tr>
                                         </thead>
                                         <tbody id="specialConsiderationTableBody">
                                             <tr>
-                                                <td colspan="5" class="text-center py-4 text-muted">Loading active school year settings.</td>
+                                                <td colspan="9" class="text-center py-4 text-muted">Loading active school year settings.</td>
                                             </tr>
                                         </tbody>
                                     </table>
                                 </div>
                             </div>
                         </div>
+                        <div class="ldss-ranking-print-pages" id="specialConsiderationPrintPages" aria-hidden="true"></div>
                     </div>
                 </main>
                 <div class="modal fade ldss-special-state-modal" id="specialConsiderationEnabledModal" tabindex="-1" aria-hidden="true">
@@ -818,11 +1189,13 @@
         </div>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
         <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
         <script src="../js/supabase-config.js"></script>
         <script>window.LDSS_REQUIRED_ROLE = "super_admin";</script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/scripts.js?v=20260401-2"></script>
         <script src="../js/supabase-superadmin-audit-helper.js?v=20260323-2"></script>
-        <script src="../js/supabase-superadmin-special-consideration.js?v=20260401-4"></script>
+        <script src="../js/supabase-superadmin-special-consideration.js?v=20260423-print-10"></script>
     </body>
 </html>
