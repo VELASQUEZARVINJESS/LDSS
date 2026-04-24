@@ -10,6 +10,8 @@
     };
     const MASTERLIST_SECTOR_LIMIT = 76;
     const MASTERLIST_LIKHANG_LIMIT = 50;
+    const MASTERLIST_PRINT_ROWS_PER_PAGE = 25;
+    const MASTERLIST_PRINT_SCORE_RED_THRESHOLD = 70;
     const CATEGORY_META = {
         regular: {
             label: "Regular Applicant",
@@ -24,7 +26,7 @@
             className: "ldss-scholar-category-special"
         },
         likhang: {
-            label: "Dummy Records",
+            label: "Likhang Daeteño Performing Arts",
             className: "ldss-scholar-category-likhang"
         }
     };
@@ -195,6 +197,18 @@
             : (rawLabel + " (" + String(percent).replace(/\.00$/, "") + "%)");
     }
 
+    function masterlistPrintScoreClass(row) {
+        const percent = row && row.sourceRow && typeof row.sourceRow.score_percent !== "undefined"
+            ? Number(row.sourceRow.score_percent)
+            : null;
+
+        if (percent !== null && !Number.isNaN(percent) && percent < MASTERLIST_PRINT_SCORE_RED_THRESHOLD) {
+            return "text-center fw-700 ldss-scholar-masterlist-score ldss-scholar-masterlist-score-below";
+        }
+
+        return "text-center fw-700 ldss-scholar-masterlist-score";
+    }
+
     function assignDisplayRanks(sourceRows) {
         let lastScore = null;
         let lastRank = 0;
@@ -358,6 +372,16 @@
         return safeSlots > 0 ? safeRows.slice(0, safeSlots) : safeRows.slice();
     }
 
+    function chunkRows(sourceRows, rowsPerPage) {
+        const safeRows = Array.isArray(sourceRows) ? sourceRows : [];
+        const safeRowsPerPage = Math.max(1, Math.floor(Number(rowsPerPage || 0)) || MASTERLIST_PRINT_ROWS_PER_PAGE);
+        const chunks = [];
+        for (let index = 0; index < safeRows.length; index += safeRowsPerPage) {
+            chunks.push(safeRows.slice(index, index + safeRowsPerPage));
+        }
+        return chunks;
+    }
+
     function parseLikhangRows() {
         const raw = byId("scholarSelectionLikhangInput") ? byId("scholarSelectionLikhangInput").value : "";
         return raw
@@ -378,7 +402,7 @@
                     applicationNo: "-",
                     barangay: parts[1] || "-",
                     school: parts[2] || "-",
-                    sector: "Dummy Records Performing Art",
+                    sector: "Likhang Daeteño Performing Arts",
                     score: "-",
                     basis: parts[3] || "Manual audition-based selection",
                     sourceRow: null
@@ -443,8 +467,10 @@
                 })
             : [];
 
-        const likhang = limitRows(parseLikhangRows(), settings.likhangSlots);
+        const likhangReservedCount = Math.max(0, Math.floor(Number(settings.likhangSlots || 0)));
+        const likhang = limitRows(parseLikhangRows(), likhangReservedCount);
         const combined = regular.concat(special, sector);
+        const grandTotalCount = combined.length + likhangReservedCount;
 
         const masterlistSelectedApplicationIds = new Set();
         const masterRegular = rankedRows
@@ -492,7 +518,10 @@
             masterlistRegularCount: masterRegular.length,
             masterlistSectorCount: masterSector.length,
             masterlistSpecialCount: masterSpecial.length,
-            rankedCount: rankedRows.length
+            rankedCount: rankedRows.length,
+            likhangCount: likhangReservedCount,
+            likhangActualCount: likhang.length,
+            grandTotalCount: grandTotalCount
         };
     }
 
@@ -585,36 +614,67 @@
     }
 
     function renderMasterlistCorePrintTable(selection) {
-        const tbody = byId("scholarSelectionMasterlistBody");
-        if (!tbody) {
+        const container = byId("scholarSelectionMasterlistPages");
+        if (!container) {
             return;
         }
 
         const masterlistRows = selection.masterlistCore || [];
         if (!currentBatchId && masterlistRows.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="ldss-scholar-empty">No exam batch with assigned examinees is ready yet.</td></tr>';
+            container.innerHTML = '<div class="ldss-scholar-empty">No exam batch with assigned examinees is ready yet.</div>';
             return;
         }
 
         if (!masterlistRows.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="ldss-scholar-empty">No score passers or Special Consideration applicants are ready for masterlist printing.</td></tr>';
+            container.innerHTML = '<div class="ldss-scholar-empty">No score passers or Special Consideration applicants are ready for masterlist printing.</div>';
             return;
         }
 
-        tbody.innerHTML = masterlistRows.map(function (row, index) {
+        const pageChunks = chunkRows(masterlistRows, MASTERLIST_PRINT_ROWS_PER_PAGE);
+        container.innerHTML = pageChunks.map(function (chunk, pageIndex) {
+            const startIndex = pageIndex * MASTERLIST_PRINT_ROWS_PER_PAGE;
+            const rowsHtml = chunk.map(function (row, index) {
+                const displayNo = startIndex + index + 1;
+                return (
+                    "<tr>" +
+                    '<td class="text-center fw-700">' + escapeHtml(String(displayNo)) + "</td>" +
+                    '<td class="text-center fw-700">' + escapeHtml(row.rank || "-") + "</td>" +
+                    "<td class=\"ldss-scholar-masterlist-applicant\">" +
+                    '<div class="fw-700">' + escapeHtml(row.applicantName || "-") + "</div>" +
+                    '<div class="ldss-scholar-masterlist-category">' + categoryPill(row.categoryKey) + "</div>" +
+                    "</td>" +
+                    '<td class="text-center fw-700">' + escapeHtml(row.applicationNo || "-") + "</td>" +
+                    '<td class="text-center">' + escapeHtml(row.sector || "-") + "</td>" +
+                    '<td class="' + masterlistPrintScoreClass(row) + '">' + escapeHtml(row.score || "-") + "</td>" +
+                    "<td class=\"ldss-scholar-masterlist-basis\">" + escapeHtml(row.basis || "-") + "</td>" +
+                    "</tr>"
+                );
+            }).join("");
+
             return (
+                '<div class="ldss-scholar-masterlist-page">' +
+                '<div class="ldss-scholar-masterlist-card">' +
+                '<div class="table-responsive">' +
+                '<table class="table mb-0 ldss-scholar-table">' +
+                "<thead>" +
                 "<tr>" +
-                '<td class="text-center fw-700">' + escapeHtml(String(index + 1)) + "</td>" +
-                '<td class="text-center fw-700">' + escapeHtml(row.rank || "-") + "</td>" +
-                "<td class=\"ldss-scholar-masterlist-applicant\">" +
-                '<div class="fw-700">' + escapeHtml(row.applicantName || "-") + "</div>" +
-                '<div class="ldss-scholar-masterlist-category">' + categoryPill(row.categoryKey) + "</div>" +
-                "</td>" +
-                '<td class="fw-700">' + escapeHtml(row.applicationNo || "-") + "</td>" +
-                "<td>" + escapeHtml(row.sector || "-") + "</td>" +
-                '<td class="text-center fw-700">' + escapeHtml(row.score || "-") + "</td>" +
-                "<td class=\"ldss-scholar-masterlist-basis\">" + escapeHtml(row.basis || "-") + "</td>" +
-                "</tr>"
+                    '<th class="ldss-scholar-masterlist-table-col-no">No.</th>' +
+                    '<th class="ldss-scholar-masterlist-table-col-rank">Rank</th>' +
+                    '<th class="ldss-scholar-masterlist-table-col-applicant">Applicant</th>' +
+                    '<th class="text-center ldss-scholar-masterlist-table-col-appno">Application No.</th>' +
+                    '<th class="text-center ldss-scholar-masterlist-table-col-sector">Sector</th>' +
+                    '<th class="text-center ldss-scholar-masterlist-table-col-score">Score</th>' +
+                    '<th class="ldss-scholar-masterlist-table-col-basis">Basis / Remarks</th>' +
+                "</tr>" +
+                "</thead>" +
+                "<tbody>" +
+                rowsHtml +
+                "</tbody>" +
+                "</table>" +
+                "</div>" +
+                "</div>" +
+                '<div class="ldss-scholar-print-footer">www.iskolarngdaet.app</div>' +
+                "</div>"
             );
         }).join("");
     }
@@ -653,7 +713,8 @@
         setText("scholarSelectionRegularCount", selection.regular.length);
         setText("scholarSelectionSectorCount", selection.sector.length);
         setText("scholarSelectionSpecialCount", selection.special.length);
-        setText("scholarSelectionFinalCount", selection.combined.length);
+        setText("scholarSelectionLikhangCount", selection.likhangCount || 0);
+        setText("scholarSelectionFinalCount", selection.grandTotalCount || selection.combined.length);
 
         const regularSlotLabel = settings.regularSlots > 0
             ? String(settings.regularSlots) + " regular slot(s)"
@@ -667,11 +728,11 @@
 
         setText(
             "scholarSelectionFinalMeta",
-            batchLabel + ". Policy: " + policyLabel() + ". Regular: " + regularSlotLabel + ". Sector: " + sectorSlotLabel + ". Special Consideration follows the regular passers. Showing " + String(filteredRows.length) + " row(s)."
+            batchLabel + ". Policy: " + policyLabel() + ". Regular Applicant: " + regularSlotLabel + ". Sector Classification: " + sectorSlotLabel + ". Special Consideration follows the regular passers. Likhang Daeteño Performing Arts reserved: " + String(selection.likhangCount || 0) + " slot(s). Showing " + String(filteredRows.length) + " row(s)."
         );
         setText(
             "scholarSelectionPrintMeta",
-            batchLabel + " | Passing score: " + String(passingScore).replace(/\.00$/, "") + "+ | Regular passers: " + String(selection.masterlistRegularCount) + " | Sector picks: " + String(selection.masterlistSectorCount) + " | Special add-ons: " + String(selection.masterlistSpecialCount) + " | Overall: " + String(selection.masterlist.length)
+            batchLabel + "\nPass " + String(passingScore).replace(/\.00$/, "") + "+"
         );
     }
 

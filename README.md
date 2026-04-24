@@ -233,7 +233,17 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary navigation now also includes an `All Passed` sidebar page, giving the office a temporary manual batch-by-batch control for marking exam results as `Passed`, `Fail`, or `Pending` while the scoring workflow is still being adjusted.
 - Secretary All Passed now removes the top KPI cards and orders the manual passed list by raw-score rank, with tied scores sharing the same rank and unscored examinees appearing after ranked rows.
 - Secretary navigation now includes `Scholar Selection`, a final-list builder that combines Regular score passers, Sector Classification slot picks from below-passing-score applicants, and Special Consideration tags into one printable list.
-- Secretary Scholar Selection masterlist print now uses one continuous 8.5 x 13 bond-paper table again, so the browser can consume the page space naturally while still avoiding split rows at page breaks.
+- Secretary Scholar Selection now brings back the Likhang Daeteño Performing Arts manual input block, adds a visible Likhang Daeteño Performing Arts count card, and treats the Likhang slot count as reserved audition space in the displayed total while keeping the masterlist print on a responsive 8.5 x 13 bond-paper table with row-break protection and a compact LGU logo header.
+- Secretary Scholar Selection masterlist print now makes the applicant name larger and left-aligns the smaller category badge underneath it so each row reads cleaner in the print preview.
+- Secretary Scholar Selection masterlist print now uses alternating row shading so the bond-paper table is easier to scan than the previous plain-white rows.
+- Secretary Scholar Selection masterlist print now paginates at 25 applicants per bond-paper page, hiding the count cards in print to maximize space.
+- Secretary Scholar Selection masterlist print header now reads `LGU DAET EXPANDED SCHOLARSHIP PROGRAM` with `Batch 2026` underneath.
+- Secretary Scholar Selection masterlist print now uses tighter bond-paper margins, keeps the table inside a bordered card frame, and places a subtle underlined `www.iskolarngdaet.app` footer outside the card at the lower-right of every printed page.
+- Secretary Scholar Selection masterlist print now keeps the Score column black by default and turns scores below 70 red so low scores stand out without coloring every row.
+- Secretary Scholar Selection masterlist print pages now render as bordered card-like sheets so the table stays visually inside the frame during long-bond printing.
+- Secretary Scholar Selection print now shows the counter boxes in print again so Regular, Sector, Special, Likhang, and Total remain visible above the masterlist table.
+- Secretary Scholar Selection masterlist print now centers the Application No. and Sector columns for a cleaner bond-paper layout.
+- Secretary Scholar Selection masterlist print now centers the Score header too, matching the other centered columns in the bond-paper layout.
 - Secretary Scholar Selection sector masterlist rows now come only from the below-passing sector pool, are capped by the selected sector slot count, and fall back to 10% of the batch size when the sector slot field is left blank.
 - Secretary Ranking now shows a phone-friendly card layout on small screens while keeping a folio-sized 8.5 x 13 printable table for the Save as PDF flow.
 - Secretary Ranking now shows barangay under each applicant name in the on-screen table, mobile cards, and print layout for clearer office reporting context.
