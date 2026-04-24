@@ -46,10 +46,6 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
-                            <a class="nav-link" href="admin-approval-queue.html?view=special_consideration">
-                                <div class="nav-link-icon"><i data-feather="bookmark"></i></div>
-                                Special Consideration
-                            </a>
                         </div>
                     </div>
                 </nav>
@@ -73,6 +69,7 @@
                                         </ol>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3" id="adminApprovalHeaderActions">
+                                        <a class="btn btn-outline-dark btn-sm me-2" href="admin-approval-queue.html?view=special_consideration">Special Consideration</a>
                                         <button class="btn btn-outline-dark btn-sm me-2" id="adminApprovalRefreshBtn" type="button">Refresh</button>
                                         <button class="btn btn-dark btn-sm" id="adminApprovalOpenBatchBtn" type="button">Apply Batch Decision</button>
                                     </div>
@@ -82,8 +79,37 @@
                     </header>
                     <div class="container-xl px-4 mt-4">
                         <div class="card border-0 shadow-sm d-none" id="adminSpecialConsiderationShell">
-                            <div class="card-body py-5">
-                                <div class="small text-muted mb-0">Special Consideration content removed. Waiting for your manual instructions.</div>
+                            <div class="card-header bg-white">
+                                <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+                                    <div>
+                                        <div class="small text-uppercase text-muted fw-700">Special Consideration</div>
+                                        <h5 class="mb-1">Added Care Of Table</h5>
+                                        <div class="small text-muted" id="adminSpecialConsiderationShellMeta">Loading special consideration entries...</div>
+                                    </div>
+                                    <div class="d-flex flex-wrap align-items-center gap-2">
+                                        <a class="btn btn-outline-dark btn-sm" href="admin-approval-queue.html">Open Approval Queue</a>
+                                        <button class="btn btn-dark btn-sm" id="adminSpecialConsiderationRefreshBtn" type="button">Refresh</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table mb-0 align-middle">
+                                        <thead class="bg-light">
+                                            <tr>
+                                                <th style="width: 72px;">No.</th>
+                                                <th>Special Consideration</th>
+                                                <th>Care Of</th>
+                                                <th style="width: 180px;">Tagged Applicants</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="adminSpecialConsiderationTableBody">
+                                            <tr>
+                                                <td colspan="4" class="text-center py-4 text-muted">Loading special consideration entries...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
 

@@ -37,6 +37,9 @@
     let filteredRows = [];
     let isProcessing = false;
     let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
+    let activeApprovalSettings = null;
+    let specialShellTaggedCount = 0;
+    let specialShellCountMap = {};
 
     function byId(id) {
         return document.getElementById(id);
@@ -91,7 +94,7 @@
         const fallback = readFallbackControls();
         const result = await authContext.client
             .from("ranking_settings")
-            .select("ranking_basis")
+            .select("school_year, ranking_basis")
             .eq("is_active", true)
             .order("updated_at", { ascending: false })
             .limit(1);
@@ -105,6 +108,7 @@
         }
 
         const active = result.data && result.data.length ? result.data[0] : null;
+        activeApprovalSettings = active || null;
         const controls = active && active.ranking_basis && active.ranking_basis.controls
             ? active.ranking_basis.controls
             : {};
@@ -138,6 +142,10 @@
             && Boolean((row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim());
     }
 
+    function currentSchoolYear() {
+        return (activeApprovalSettings && activeApprovalSettings.school_year ? activeApprovalSettings.school_year : "").toString().trim();
+    }
+
     function applyWorkflowVisibility() {
         const batchSelect = byId("adminApprovalBatchAction");
         if (batchSelect) {
@@ -152,6 +160,126 @@
             }
         }
         setWorkflowMeta();
+    }
+
+    function renderSpecialConsiderationShell() {
+        const shell = byId("adminSpecialConsiderationShell");
+        const tableBody = byId("adminSpecialConsiderationTableBody");
+        const meta = byId("adminSpecialConsiderationShellMeta");
+        const refreshBtn = byId("adminSpecialConsiderationRefreshBtn");
+        const options = specialOptionEntries();
+        const taggedCount = isSpecialConsiderationView() ? specialShellTaggedCount : rows.filter(function (row) {
+            return Boolean((row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim());
+        }).length;
+        const tagCounts = isSpecialConsiderationView() ? specialShellCountMap : specialConsiderationTagCounts();
+
+        if (!shell || !tableBody) {
+            return;
+        }
+
+        if (!isSpecialConsiderationView()) {
+            shell.classList.add("d-none");
+            return;
+        }
+
+        shell.classList.remove("d-none");
+
+        if (refreshBtn) {
+            refreshBtn.disabled = isProcessing;
+        }
+
+        if (!options.length) {
+            if (meta) {
+                meta.textContent = "No saved special consideration entries are available yet.";
+            }
+            tableBody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">No special consideration entries have been added yet.</td></tr>';
+            return;
+        }
+
+        if (meta) {
+            const countLabel = taggedCount === 1 ? "tagged applicant" : "tagged applicants";
+            meta.textContent = "Read-only catalog of saved special consideration care-of entries for the active school year. " + String(taggedCount) + " " + countLabel + ".";
+        }
+
+        tableBody.innerHTML = options.map(function (entry, index) {
+            const count = tagCounts[(entry.value || "").toLowerCase()] || 0;
+            return [
+                "<tr>",
+                '<td class="fw-700 text-center">' + escapeHtml(String(index + 1)) + "</td>",
+                "<td>",
+                '<span class="badge bg-' + (normalizeSpecialTagValue(entry.level) === "for_approval" ? "success" : "warning text-dark") + '">' + escapeHtml(specialConsiderationLevelLabel(entry.level)) + "</span>",
+                "</td>",
+                "<td>",
+                '<div class="fw-700">' + escapeHtml(specialCareOfDisplay(entry.label)) + "</div>",
+                '<div class="small text-muted">' + escapeHtml(entry.label) + "</div>",
+                "</td>",
+                '<td class="fw-700">' + escapeHtml(String(count)) + "</td>",
+                "</tr>"
+            ].join("");
+        }).join("");
+    }
+
+    async function loadSpecialConsiderationCatalog() {
+        showStatus("");
+        await loadWorkflowControls();
+        applyWorkflowVisibility();
+
+        specialShellTaggedCount = 0;
+        specialShellCountMap = {};
+
+        const schoolYear = currentSchoolYear();
+        if (!schoolYear) {
+            renderSpecialConsiderationShell();
+            return;
+        }
+
+        const applicationsResult = await authContext.client
+            .from("applications")
+            .select("id, school_year")
+            .eq("school_year", schoolYear)
+            .neq("status", "draft");
+
+        if (applicationsResult.error) {
+            if (!/does not exist|relation/i.test(applicationsResult.error.message || "")) {
+                throw new Error("Failed to load special consideration applications: " + applicationsResult.error.message);
+            }
+            renderSpecialConsiderationShell();
+            return;
+        }
+
+        const applicationIds = (applicationsResult.data || []).map(function (row) {
+            return row && row.id ? row.id : "";
+        }).filter(Boolean);
+
+        if (!applicationIds.length) {
+            renderSpecialConsiderationShell();
+            return;
+        }
+
+        const flagsResult = await authContext.client
+            .from("application_staff_flags")
+            .select("application_id, special_consideration_tag")
+            .in("application_id", applicationIds);
+
+        if (flagsResult.error) {
+            if (!isMissingTableError(flagsResult.error, "application_staff_flags")) {
+                throw new Error("Failed to load special consideration records: " + flagsResult.error.message);
+            }
+            renderSpecialConsiderationShell();
+            return;
+        }
+
+        (flagsResult.data || []).forEach(function (row) {
+            const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+            if (!tag) {
+                return;
+            }
+            specialShellTaggedCount += 1;
+            const key = tag.toLowerCase();
+            specialShellCountMap[key] = (specialShellCountMap[key] || 0) + 1;
+        });
+
+        renderSpecialConsiderationShell();
     }
 
     function escapeHtml(value) {
@@ -294,6 +422,105 @@
             return String(basis.label);
         }
         return "";
+    }
+
+    function normalizeSpecialTagValue(value) {
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (!raw) {
+            return "";
+        }
+        if (raw === "priority review" || raw === "internal_review" || raw === "internal-review" || raw === "priority_review") {
+            return "internal_review";
+        }
+        if (raw === "for approval" || raw === "for_approval" || raw === "for-approval") {
+            return "for_approval";
+        }
+        return raw;
+    }
+
+    function decodeSpecialConsiderationTag(value) {
+        const raw = (value || "").toString().trim();
+        if (!raw) {
+            return { level: "", label: "" };
+        }
+
+        const delimiterIndex = raw.indexOf("::");
+        if (delimiterIndex >= 0) {
+            return {
+                level: normalizeSpecialTagValue(raw.slice(0, delimiterIndex)),
+                label: (raw.slice(delimiterIndex + 2) || "").toString().trim().replace(/\s+/g, " ")
+            };
+        }
+
+        return {
+            level: normalizeSpecialTagValue(raw),
+            label: ""
+        };
+    }
+
+    function specialConsiderationLevelLabel(level) {
+        return normalizeSpecialTagValue(level) === "for_approval" ? "For Approval" : "Priority Review";
+    }
+
+    function toTitleCase(value) {
+        return (value || "")
+            .toString()
+            .trim()
+            .replace(/\s+/g, " ")
+            .toLowerCase()
+            .replace(/\b[a-z]/g, function (char) {
+                return char.toUpperCase();
+            });
+    }
+
+    function specialCareOfDisplay(value) {
+        const raw = (value || "").toString().trim().replace(/\s+/g, " ");
+        if (!raw) {
+            return "-";
+        }
+        if (/^m\.?\s*o\.?$/i.test(raw) || /^mayors?\s+office$/i.test(raw)) {
+            return "Mayor Office";
+        }
+        return toTitleCase(raw);
+    }
+
+    function specialOptionEntries() {
+        const source = workflowControls && workflowControls.special_consideration_options;
+        const rawEntries = Array.isArray(source)
+            ? source
+            : (typeof source === "string" ? source.split(/\r?\n|\|/) : []);
+        const seen = new Set();
+
+        return rawEntries.map(function (entry) {
+            const decoded = decodeSpecialConsiderationTag(entry);
+            if (!decoded.level || !decoded.label) {
+                return null;
+            }
+            const value = decoded.level + "::" + decoded.label;
+            const key = value.toLowerCase();
+            if (seen.has(key)) {
+                return null;
+            }
+            seen.add(key);
+            return {
+                value: value,
+                level: decoded.level,
+                label: decoded.label
+            };
+        }).filter(Boolean);
+    }
+
+    function specialConsiderationTagCounts() {
+        const map = {};
+        rows.forEach(function (row) {
+            const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+            if (!tag) {
+                return;
+            }
+            const key = tag.toLowerCase();
+            map[key] = (map[key] || 0) + 1;
+        });
+        return map;
     }
 
     async function fetchApplications() {
@@ -533,7 +760,7 @@
             title.innerHTML = '<div class="page-header-icon"><i data-feather="bookmark"></i></div>Special Consideration';
         }
         if (subtitle) {
-            subtitle.textContent = "Workspace cleared and ready for your next Special Consideration instructions.";
+            subtitle.textContent = "Read-only care-of catalog for Special Consideration entries in the active school year.";
         }
         if (breadcrumb) {
             breadcrumb.textContent = "Special Consideration";
@@ -849,6 +1076,10 @@
 
     async function loadData() {
         showStatus("");
+        if (isSpecialConsiderationView()) {
+            await loadSpecialConsiderationCatalog();
+            return;
+        }
         await loadWorkflowControls();
         applyWorkflowVisibility();
 
@@ -867,6 +1098,7 @@
         rows = enrichRows(applications, loaded[0], loaded[1], loaded[2], loaded[3], loaded[4]);
         renderKpis();
         applyFiltersAndRender();
+        renderSpecialConsiderationShell();
     }
 
     function selectedApplicationIds() {
@@ -1018,6 +1250,15 @@
             });
         }
 
+        const specialRefreshBtn = byId("adminSpecialConsiderationRefreshBtn");
+        if (specialRefreshBtn) {
+            specialRefreshBtn.addEventListener("click", function () {
+                loadData().catch(function (error) {
+                    showStatus(error && error.message ? error.message : "Failed to refresh special consideration entries.", "alert-danger");
+                });
+            });
+        }
+
         if (openBatchBtn) {
             openBatchBtn.addEventListener("click", function () {
                 const select = byId("adminApprovalBatchAction");
@@ -1068,9 +1309,6 @@
         applyInitialPageMode();
         if (window.feather && typeof window.feather.replace === "function") {
             window.feather.replace();
-        }
-        if (isSpecialConsiderationView()) {
-            return;
         }
         bindEvents();
         try {

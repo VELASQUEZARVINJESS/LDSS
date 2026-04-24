@@ -199,8 +199,35 @@ window.addEventListener('DOMContentLoaded', event => {
         insertAfter.insertAdjacentElement('afterend', scholarSelectionLink);
     }
 
+    function ensureAdminSpecialConsiderationLink() {
+        const adminAccountTrigger = document.body.querySelector('#adminUser');
+        const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
+
+        if (!adminAccountTrigger || !sidenav) {
+            return;
+        }
+        if (sidenav.querySelector('a.nav-link[href="admin-approval-queue.html?view=special_consideration"]')) {
+            return;
+        }
+
+        const dashboardLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
+            const href = (link.getAttribute('href') || '').trim();
+            return href === 'admin-dashboard.html';
+        });
+        if (!dashboardLink) {
+            return;
+        }
+
+        const specialConsiderationLink = dashboardLink.cloneNode(true);
+        specialConsiderationLink.setAttribute('href', 'admin-approval-queue.html?view=special_consideration');
+        specialConsiderationLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="bookmark"></i></div>\n                                Special Consideration\n                            ';
+
+        dashboardLink.insertAdjacentElement('afterend', specialConsiderationLink);
+    }
+
     ensureSecretaryAllPassedLink();
     ensureSecretaryScholarSelectionLink();
+    ensureAdminSpecialConsiderationLink();
 
     // Activate feather only when the icon library is available
     if (window.feather && typeof window.feather.replace === 'function') {

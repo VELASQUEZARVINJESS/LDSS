@@ -227,7 +227,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Applicant exam tracking now keeps the examination-attendance stage simple for end users, while the `Exam Result` column uses a yellow `Score Consolidation` stage until the office posts the final `Passed` or `Failed` result.
 - Applicant records now use `Examination Status` for simple attendance-stage tracking, so the applicant table reads `Pending`, `Scheduled`, `Completed`, or `Absent` instead of showing the longer workflow-style `Exam Completed` label there.
 - Applicant application-record cards on mobile now reset all desktop column widths, so long labels like `Requirements`, `Final Decision`, and detailed exam text stay horizontal and readable instead of collapsing into vertical letter stacks.
-- Admin navigation is now reduced to `Dashboard` plus `Special Consideration`, and the Special Consideration shortcut opens the Approval Queue already focused on `Special Endorsement Review` records.
+- Admin navigation is now reduced to `Dashboard` plus `Special Consideration`, and the Special Consideration shortcut opens the Approval Queue special view with a read-only table of saved care-of entries and tagged counts.
 - Admin Dashboard and the `Special Consideration` route are now cleared back to simple shell states so the office can rebuild those sections one instruction at a time without old cards, tables, or actions getting in the way.
 - Secretary navigation now includes a dedicated Ranking sidebar link that opens a separate Secretary ranking page with score-based review options for overall, per-room, sector-classification, and top-range ranking views.
 - Secretary navigation now also includes an `All Passed` sidebar page, giving the office a temporary manual batch-by-batch control for marking exam results as `Passed`, `Fail`, or `Pending` while the scoring workflow is still being adjusted.
@@ -244,6 +244,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Scholar Selection print now shows the counter boxes in print again so Regular, Sector, Special, Likhang, and Total remain visible above the masterlist table.
 - Secretary Scholar Selection masterlist print now centers the Application No. and Sector columns for a cleaner bond-paper layout.
 - Secretary Scholar Selection masterlist print now centers the Score header too, matching the other centered columns in the bond-paper layout.
+- Special Consideration is now an Admin-only shortcut in the sidebar, with the Admin approval queue still exposing the same view from its header for the final approve/decline workflow and a care-of catalog shell for the added entries.
 - Secretary Scholar Selection sector masterlist rows now come only from the below-passing sector pool, are capped by the selected sector slot count, and fall back to 10% of the batch size when the sector slot field is left blank.
 - Secretary Ranking now shows a phone-friendly card layout on small screens while keeping a folio-sized 8.5 x 13 printable table for the Save as PDF flow.
 - Secretary Ranking now shows barangay under each applicant name in the on-screen table, mobile cards, and print layout for clearer office reporting context.
