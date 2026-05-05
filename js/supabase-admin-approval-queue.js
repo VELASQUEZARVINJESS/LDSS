@@ -64,6 +64,9 @@
             statusMeta: function (status) { return { label: status || "-", chipClass: "ldss-chip-neutral" }; },
             examSummaryFromRecord: function () {
                 return { controlNo: "-", scoreText: "-", percentageText: "-", resultLabel: "Pending", resultChipClass: "ldss-chip-neutral" };
+            },
+            applicantExamDisplayMeta: function (examSummary) {
+                return examSummary || { result: "pending", displayText: "Pending", chipClass: "ldss-chip-neutral", chipLabel: "Pending", scoreText: "-", hasScore: false };
             }
         };
     }
@@ -826,6 +829,9 @@
         const allowSpecialEndorsement = workflowControls.allow_special_endorsement !== false;
         const isFailedExam = status === "failed_exam";
         const hasSpecialConsideration = hasReservedSlotException(row);
+        const printFormUrl = "certification-placeholder.html?id=" + encodeURIComponent(row.id || "");
+
+        buttons.push('<a class="btn btn-sm btn-outline-secondary" href="' + escapeHtml(printFormUrl) + '" target="_blank" rel="noopener">Print Form</a>');
 
         if (!isFinal) {
             if (!isFailedExam || hasSpecialConsideration) {
@@ -866,6 +872,9 @@
         tbody.innerHTML = filteredRows.map(function (row) {
             const appStatus = statusMeta(row.status);
             const exam = workflow().examSummaryFromRecord(row.exam);
+            const examDisplay = workflow().applicantExamDisplayMeta
+                ? workflow().applicantExamDisplayMeta(exam, { showFailedScore: true })
+                : null;
             const interview = row.interview || {};
             const decision = decisionMeta(row.approval && row.approval.decision_status ? row.approval.decision_status : "pending");
             const priority = row.approval && row.approval.priority ? row.approval.priority : "medium";
@@ -898,8 +907,7 @@
                 "<td>" +
                 '<div class="small"><strong>Control No:</strong> ' + escapeHtml(exam.controlNo || "-") + "</div>" +
                 '<div class="small"><strong>Raw Score:</strong> ' + escapeHtml(exam.scoreText || "-") + "</div>" +
-                '<div class="small"><strong>Percentage:</strong> ' + escapeHtml(exam.percentageText || "-") + "</div>" +
-                '<div class="mt-1"><span class="ldss-chip ' + escapeHtml(exam.resultChipClass || "ldss-chip-neutral") + '">' + escapeHtml(exam.resultLabel || "Pending") + "</span></div>" +
+                '<div class="mt-1"><span class="ldss-chip ' + escapeHtml((examDisplay && examDisplay.result === "failed" ? examDisplay.chipClass : exam.resultChipClass) || "ldss-chip-neutral") + '">' + escapeHtml((examDisplay && examDisplay.result === "failed" ? examDisplay.displayText : exam.resultLabel) || "Pending") + "</span></div>" +
                 "</td>" +
                 "<td>" +
                 '<div class="small"><strong>Schedule:</strong> ' + escapeHtml(formatDateTime(interview.scheduled_at)) + "</div>" +

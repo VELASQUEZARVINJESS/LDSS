@@ -34,6 +34,8 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Exam schedule email queue hotfix is in `supabase/exam_schedule_email_jobs_hotfix_2026_04_05.sql`.
 - Applicant intake school-year hotfix is in `supabase/application_intake_school_year_hotfix_2026_04_22.sql`.
 - Workflow controls exam policy hotfix is in `supabase/workflow_controls_exam_policy_hotfix_2026_04_22.sql`.
+- Special consideration applicant visibility hotfix is in `supabase/special_consideration_applicant_visibility_hotfix_2026_05_05.sql`.
+- Sector-selection applicant visibility hotfix is in `supabase/current_user_application_sector_selection_flags_hotfix_2026_05_05.sql`.
 - Intake date-time enforcement hotfix is in `supabase/application_intake_datetime_hotfix_2026_03_19.sql`.
 - Intake manual receive override hotfix is in `supabase/application_receive_override_hotfix_2026_03_22.sql`.
 - System Administrator audit logs hotfix is in `supabase/audit_logs_hotfix_2026_03_22.sql`.
@@ -101,7 +103,10 @@ This project is deployable as a static frontend. Application data stays in Supab
 - System Administrator Special Consideration now uses the shared popup toast pattern for save/update/remove notices, with a page-level fallback so cached old markup does not reopen the long inline status bars after actions.
 - System Administrator Special Consideration now shows the allowed-students area as its own responsive table section below the main workspace row, keeping the old table-style scanability with a cleaner user-management-style shell.
 - Admin Approval Queue now shows only neutral `final review` wording for those special consideration exceptions instead of exposing the old internal label in the staff queue.
-- System Administrator sidebar now includes a `Special Consideration` shortcut that opens the dedicated allow-list page instead of jumping inside Scholarship Settings.
+- Admin Approval Queue now includes an admin-only `Print Form` link per applicant row that opens the printable application form preview for that record.
+- System Administrator sidebar now restores the direct `Special Consideration` shortcut to the dedicated allow-list page instead of jumping inside Scholarship Settings.
+- System Administrator Special Consideration printing now includes a `Print Tag` dropdown so staff can export or print only one tag group, such as `Mayor Office`, instead of the entire allow-list.
+- System Administrator Special Consideration live table and print/PDF output now fade the rows green when an applicant's saved raw score meets the active passing score.
 - System Administrator Dashboard now includes a direct `Check Exam Room Assignment` button that opens the public room checker without leaving staff to hunt for the applicant-side entry point.
 - Secretary Checking now renders the applicant summary and form state first, while photo previews and queue-navigation hydration finish in the background for a faster first load on localhost and hosted deployments.
 - Secretary applicant-detail corrections no longer report a false success when the profile write is blocked by database policy, and the page now asks for the dedicated Supabase hotfix if the secure staff-save RPC is not deployed yet.
@@ -209,6 +214,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Exam Management status messages now use a cleaner monochrome notice box style so save, review, info, and error states feel more official and easier to scan.
 - Secretary Exam Management now places the room generator in a narrower left workspace and the Eligible Examinees table in a wider right workspace on desktop, while still stacking cleanly on smaller screens.
 - Secretary Exam Management now opens a room-based raw-score sheet for exam encoding, so staff can choose a saved batch plus room, enter whole-number raw scores in printed seat order, and move room-to-room without using a visible passing-threshold rule on the page.
+- Secretary Exam Management now highlights special-consideration examinees with a subtle amber row tint and badge in the room sheet and ranking views, while leaving the raw-score workflow and ranking math unchanged.
 - Secretary Exam Management now includes a room-sheet search bar with Search and Show All buttons so staff can quickly find an examinee, application number, control number, or seat inside the current room result sheet without losing unsaved score inputs.
 - System Administrator Scholarship Settings now includes a Checking Examination toggle so applicant progress views can show that exam scores are in score consolidation without changing the underlying database status list.
 - System Administrator Scholarship Settings now includes an applicant score-visibility toggle so the office can hide or show encoded exam scores plus final pass/fail exam results on the applicant dashboard, My Applications, profile summary, and application detail screens without exposing them too early.
@@ -220,19 +226,26 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Room Score Encoding now includes a `Mark Blank as Failed to Take Exam` action for the selected room, labeling blank/no-show examinees as failed without changing scored rows.
 - Secretary Scholar Selection now excludes blank/no-show records from the Sector Classification failed-score pool, so sector slots come only from applicants with an encoded raw score.
 - Applicant navigation is now simplified for end users: the sidebar keeps only Dashboard, notification links are hidden for now, and the Dashboard now opens directly into the applicant's Application Records view instead of making them jump to a separate tracking-first screen.
-- Applicant Dashboard now uses the same Application Records table view as `My Applications`, and the applicant-facing columns are now trimmed into a smaller responsive list with `No.`, `School Year`, `Applicant ID`, `Submitted On`, `Examination Status`, `Exam Result`, `Requirements`, `Final Decision`, and an `Option` column with a simple `View` button.
+- Applicant Dashboard now uses the same Application Records table view as `My Applications`, and the applicant-facing columns are now trimmed into a smaller responsive list with `No.`, `School Year`, `Applicant ID`, `Submitted On`, `Examination Status`, `Exam Result`, and an `Option` column with a simple `View` button.
+- Applicant application tables now show a small `SCORE | STATUS | RANK` helper line under the `Exam Result` header so the column meaning is easier to read at a glance.
+- Special consideration applicant rows now display the rounded active passing score with `PASSED` and a recomputed rank when score visibility is enabled, while the stored raw score remains unchanged.
+- Sector-classification applicant rows now resolve the final 76 selected sector applicants from the batch itself, and those rows display `SCORE | SELECTED` with a small gray detail line such as `Sector Classification: Person with Disability (PWD)` on the applicant table and detail/dashboard views when score visibility is enabled, with the selected label green and the sector classification detail kept muted on the applicant side.
+- Applicant application tables now show `score | FAIL | Rank ####` for failed rows when score visibility is enabled and the applicant has a computed batch score rank available, with the rank label kept in a muted gray tone on the applicant side.
+- Applicant application rows now resolve `Not Qualified` from the exam result itself, so a failed exam no longer falls through to `Unknown` while the workflow status is still catching up.
 - Applicant Dashboard and `My Applications` now show the `New Application` page action again, and the applicant-side lock now checks only the active school year so previous-cycle records no longer hide fresh filing for the new cycle.
-- Applicant tracking labels now treat draft or unsubmitted records as `Not Submitted` in the requirements column, and the final decision stays `Unknown` until the application reaches the actual final-review stage, where it can then move to `Pending`, `Approved`, or `Disapproved`.
-- Applicant application records now keep the `Exam Result` column simple for tracking: applicants see only `Passed`, `Failed`, `Score Consolidation`, or `Not Taken`, and the table no longer shows room, seat, or hidden-score helper lines there.
+- Applicant tracking labels now treat draft or unsubmitted records as `Not Submitted` in the requirements column, and the final decision stays `Unknown` until the application reaches the actual final-review stage, where it can then move to `Pending`, `Approved`, or `Not Qualified`.
+- Applicant application records now keep the `Exam Result` column simple for regular tracking: applicants see `Passed`, `Failed`, `Score Consolidation`, or `Not Taken`, while special-consideration rows can show the active passing score and rank when score visibility is enabled.
 - Applicant exam tracking now keeps the examination-attendance stage simple for end users, while the `Exam Result` column uses a yellow `Score Consolidation` stage until the office posts the final `Passed` or `Failed` result.
 - Applicant records now use `Examination Status` for simple attendance-stage tracking, so the applicant table reads `Pending`, `Scheduled`, `Completed`, or `Absent` instead of showing the longer workflow-style `Exam Completed` label there.
-- Applicant application-record cards on mobile now reset all desktop column widths, so long labels like `Requirements`, `Final Decision`, and detailed exam text stay horizontal and readable instead of collapsing into vertical letter stacks.
+- Applicant application-record cards on mobile now reset all desktop column widths, so the remaining labels and detailed exam text stay horizontal and readable instead of collapsing into vertical letter stacks.
 - Admin navigation is now reduced to `Dashboard` plus `Special Consideration`, and the Special Consideration shortcut opens the Approval Queue special view with a read-only table of saved care-of entries and tagged counts.
 - Admin Dashboard and the `Special Consideration` route are now cleared back to simple shell states so the office can rebuild those sections one instruction at a time without old cards, tables, or actions getting in the way.
 - Secretary navigation now includes a dedicated Ranking sidebar link that opens a separate Secretary ranking page with score-based review options for overall, per-room, sector-classification, and top-range ranking views.
 - Secretary navigation now also includes an `All Passed` sidebar page, giving the office a temporary manual batch-by-batch control for marking exam results as `Passed`, `Fail`, or `Pending` while the scoring workflow is still being adjusted.
 - Secretary All Passed now removes the top KPI cards and orders the manual passed list by raw-score rank, with tied scores sharing the same rank and unscored examinees appearing after ranked rows.
 - Secretary navigation now includes `Scholar Selection`, a final-list builder that combines Regular score passers, Sector Classification slot picks from below-passing-score applicants, and Special Consideration tags into one printable list.
+- Secretary Scholar Selection now shows Special Consideration rows at the rounded active passing score and recomputes their displayed rank against that score, while keeping the stored raw score intact for audit history.
+- Secretary Scholar Selection now labels the 76-slot sector pool rows as `Selected` with a soft amber/yellow badge, while keeping the sector explanation in the basis text.
 - Secretary Scholar Selection now brings back the Likhang Daeteño Performing Arts manual input block, adds a visible Likhang Daeteño Performing Arts count card, and treats the Likhang slot count as reserved audition space in the displayed total while keeping the masterlist print on a responsive 8.5 x 13 bond-paper table with row-break protection and a compact LGU logo header.
 - Secretary Scholar Selection masterlist print now makes the applicant name larger and left-aligns the smaller category badge underneath it so each row reads cleaner in the print preview.
 - Secretary Scholar Selection masterlist print now uses alternating row shading so the bond-paper table is easier to scan than the previous plain-white rows.
@@ -245,7 +258,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Scholar Selection masterlist print now centers the Application No. and Sector columns for a cleaner bond-paper layout.
 - Secretary Scholar Selection masterlist print now centers the Score header too, matching the other centered columns in the bond-paper layout.
 - Special Consideration is now an Admin-only shortcut in the sidebar, with the Admin approval queue still exposing the same view from its header for the final approve/decline workflow and a care-of catalog shell for the added entries.
-- Secretary Scholar Selection sector masterlist rows now come only from the below-passing sector pool, are capped by the selected sector slot count, and fall back to 10% of the batch size when the sector slot field is left blank.
+- Secretary Scholar Selection sector masterlist rows now come only from the below-passing sector pool, and the sector slot field is fixed at 76 so the summary and masterlist stay aligned with the office rule.
 - Secretary Ranking now shows a phone-friendly card layout on small screens while keeping a folio-sized 8.5 x 13 printable table for the Save as PDF flow.
 - Secretary Ranking now shows barangay under each applicant name in the on-screen table, mobile cards, and print layout for clearer office reporting context.
 - Secretary Ranking now uses an unframed top filter workspace with direct batch, view, and applicant-search controls, keeping the page cleaner while staff can still search by applicant name or LDSP application number without losing each applicant's original saved rank.
@@ -308,12 +321,19 @@ Important:
 Login behavior now:
 - Uses Supabase `signInWithPassword`.
 - The login form now uses email/password only.
+- The login page no longer includes the public exam room lookup shortcut; that checker stays on its dedicated page.
 - Fetches `profiles.role`.
 - Redirects automatically:
   - `applicant` -> `APPLICANT/`
   - `secretary` -> `SECRETARY/`
   - `admin` -> `ADMIN/`
   - `super_admin` -> `SYSTEMADMINISTRATOR/`
+
+Applicant exam display now:
+- The applicant dashboard, My Applications, application detail page, and profile status chip now show `PASSED` for passed exams, and special consideration cases also stay `PASSED` on the applicant side.
+- Failed applicant exam results now show `score | FAIL` inline in the Exam Result column when score visibility is enabled, without the percentage field.
+- When score visibility is disabled, applicant-side exam result/status chips collapse to a yellow `Score Consolidation` state instead of exposing pass/fail.
+- Special consideration applicants are resolved through a safe current-user RPC so the applicant view can treat them as passed without exposing the staff-only tag.
 
 Session/logout behavior:
 - Protected role pages require active authenticated session for the required role (`applicant`, `secretary`, `admin`, `super_admin`).

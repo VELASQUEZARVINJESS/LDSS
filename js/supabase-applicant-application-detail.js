@@ -67,39 +67,42 @@
         return workflowControls().show_applicant_exam_scores !== false;
     }
 
-    function normalizeExamResultValue(value) {
-        if (workflow() && typeof workflow().normalizeExamResult === "function") {
-            return workflow().normalizeExamResult(value || "pending");
-        }
-        const raw = (value || "").toString().trim().toLowerCase();
-        if (raw === "passed" || raw === "pass") {
-            return "passed";
-        }
-        if (raw === "failed" || raw === "fail") {
-            return "failed";
-        }
-        return "pending";
+    function isMissingApplicationsColumnError(error, columnName) {
+        const needle = (columnName || "").toString().trim().toLowerCase();
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        return !!needle && text.includes(needle) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
     }
 
-    function postedExamResultMeta(examSummary) {
-        const result = normalizeExamResultValue(examSummary && examSummary.result ? examSummary.result : "pending");
-        const scoreText = examSummary && examSummary.scoreText ? examSummary.scoreText : "-";
-        return {
-            result: result,
-            hasScore: scoreText !== "-",
-            scoreText: scoreText,
-            displayLabel: result === "passed"
-                ? "PASSED"
-                : (result === "failed" ? (scoreText === "-" ? (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Failed to Take Exam") : "FAIL") : (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Score Consolidation"))
-        };
+    function hasSectorClassification(value) {
+        const raw = (value || "").toString().trim();
+        return !!raw && raw.toLowerCase() !== "none of the above";
     }
 
-    function maskedApplicantStatusValue(status) {
+    function isSectorSelectedApplication(application, approvalRecord) {
+        return Boolean(application && (application.sector_selected === true || application.is_sector_selected === true));
+    }
+
+    function postedExamResultMeta(examSummary, specialConsideration, sectorSelected, sectorClassification) {
+        return workflow().applicantExamDisplayMeta(examSummary, {
+            specialConsideration: specialConsideration === true,
+            sectorSelected: sectorSelected === true,
+            showFailedScore: applicantExamScoresVisible(),
+            sectorClassification: sectorClassification || ""
+        });
+    }
+
+    function maskedApplicantStatusValue(status, specialConsideration, sectorSelected) {
+        if (workflow().applicantVisibleStatus) {
+            return workflow().applicantVisibleStatus(status, specialConsideration === true, sectorSelected === true);
+        }
         const normalized = workflow().normalizeStatus ? workflow().normalizeStatus(status || "") : (status || "").toString().trim().toLowerCase();
-        if (!applicantExamScoresVisible() && (normalized === "passed_exam" || normalized === "failed_exam")) {
-            return "exam_completed";
+        if (specialConsideration === true && (normalized === "exam_completed" || normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "passed_exam";
         }
-        return status;
+        if (sectorSelected === true && (normalized === "exam_completed" || normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "selected";
+        }
+        return normalized;
     }
 
     function showStatus(message, type) {
@@ -125,6 +128,31 @@
         target.textContent = (value || "").toString().trim() || "-";
     }
 
+    function setHtml(id, value) {
+        const target = byId(id);
+        if (!target) {
+            return;
+        }
+        target.innerHTML = value || "";
+    }
+
+    function setTextTone(id, tone) {
+        const target = byId(id);
+        if (!target) {
+            return;
+        }
+        target.classList.remove("text-success", "text-danger", "text-muted", "text-warning");
+        if (tone === "success") {
+            target.classList.add("text-success");
+        } else if (tone === "danger") {
+            target.classList.add("text-danger");
+        } else if (tone === "warning") {
+            target.classList.add("text-warning");
+        } else if (tone === "muted") {
+            target.classList.add("text-muted");
+        }
+    }
+
     function setChip(id, label, chipClass) {
         const chip = byId(id);
         if (!chip) {
@@ -135,6 +163,9 @@
     }
 
     function statusMeta(status) {
+        if (workflow().applicantStatusMeta) {
+            return workflow().applicantStatusMeta(status);
+        }
         return workflow().statusMeta(status);
     }
 
@@ -299,10 +330,18 @@
         if (query.id) {
             result = await client
                 .from("applications")
-                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
+                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked, sector_classification")
                 .eq("id", query.id)
                 .eq("applicant_id", context.user.id)
                 .single();
+            if (result.error && isMissingApplicationsColumnError(result.error, "sector_classification")) {
+                result = await client
+                    .from("applications")
+                    .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
+                    .eq("id", query.id)
+                    .eq("applicant_id", context.user.id)
+                    .single();
+            }
             if (!result.error && result.data) {
                 return result.data;
             }
@@ -311,21 +350,38 @@
         if (query.applicationNo) {
             result = await client
                 .from("applications")
-                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
+                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked, sector_classification")
                 .eq("application_no", query.applicationNo)
                 .eq("applicant_id", context.user.id)
                 .single();
+            if (result.error && isMissingApplicationsColumnError(result.error, "sector_classification")) {
+                result = await client
+                    .from("applications")
+                    .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
+                    .eq("application_no", query.applicationNo)
+                    .eq("applicant_id", context.user.id)
+                    .single();
+            }
             if (!result.error && result.data) {
                 return result.data;
             }
         }
 
-        const fallback = await client
+        let fallback = await client
             .from("applications")
-            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
+            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked, sector_classification")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false })
             .limit(1);
+
+        if (fallback.error && isMissingApplicationsColumnError(fallback.error, "sector_classification")) {
+            fallback = await client
+                .from("applications")
+                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, secretary_remarks, admin_remarks, is_locked")
+                .eq("applicant_id", context.user.id)
+                .order("created_at", { ascending: false })
+                .limit(1);
+        }
 
         if (fallback.error || !fallback.data || fallback.data.length === 0) {
             return null;
@@ -341,7 +397,7 @@
         return !!(error && /room_label|room_seat_no/i.test(error.message || ""));
     }
 
-    async function fetchExamRecord(context, application) {
+    async function fetchExamRecord(context, application, specialConsideration) {
         const primary = await context.client
             .from("exam_records")
             .select("application_id, exam_control_no, raw_score, percentage_score, result, status, remarks, room_label, room_seat_no, updated_at")
@@ -377,7 +433,7 @@
             return null;
         }
 
-        const normalizedStatus = workflow().normalizeStatus ? workflow().normalizeStatus(maskedApplicantStatusValue(application.status)) : (maskedApplicantStatusValue(application.status) || "");
+        const normalizedStatus = workflow().normalizeStatus ? workflow().normalizeStatus(maskedApplicantStatusValue(application.status, specialConsideration)) : (maskedApplicantStatusValue(application.status, specialConsideration) || "");
         let inferredResult = "pending";
         if (normalizedStatus === "passed_exam") {
             inferredResult = "passed";
@@ -426,7 +482,7 @@
     async function fetchApprovalRecord(context, applicationId) {
         const primary = await context.client
             .from("approval_records")
-            .select("application_id, decision_status, decided_at, decision_notes")
+            .select("application_id, decision_status, decided_at, decision_notes, special_endorsement")
             .eq("application_id", applicationId)
             .maybeSingle();
 
@@ -445,6 +501,77 @@
             return null;
         }
         return fallback.data || null;
+    }
+
+    async function loadSpecialConsiderationFlag(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return false;
+        }
+        try {
+            const result = await context.client.rpc("current_user_application_special_consideration_flags", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return false;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return Boolean(row && row.has_special_consideration);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    async function loadSectorSelectionFlag(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return false;
+        }
+        try {
+            const result = await context.client.rpc("current_user_application_sector_selection_flags", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return false;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return Boolean(row && row.is_sector_selected);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    async function loadExamRank(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return null;
+        }
+        try {
+            const result = await context.client.rpc("current_user_application_exam_ranks", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return null;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return row && row.exam_rank !== null && typeof row.exam_rank !== "undefined"
+                ? Number(row.exam_rank)
+                : null;
+        } catch (_error) {
+            return null;
+        }
     }
 
     function renderHeader(application) {
@@ -466,14 +593,23 @@
         editBtn.classList.remove("d-none");
     }
 
-    function renderStatusCards(application, examRecord, interviewRecord, approvalRecord) {
-        const appStatus = statusMeta(maskedApplicantStatusValue(application.status));
+    function renderStatusCards(application, examRecord, interviewRecord, approvalRecord, specialConsideration, examRank) {
+        const sectorSelected = isSectorSelectedApplication(application, approvalRecord);
+        const appStatus = statusMeta(maskedApplicantStatusValue(application.status, specialConsideration, sectorSelected));
         setText("detailOverallStatus", appStatus.label);
         setText("detailSubmittedAt", formatDateTime(application.submitted_at || application.created_at));
         setChip("detailWorkflowChip", appStatus.label, appStatus.chipClass);
 
+        const normalizedApplicationStatus = workflow().normalizeStatus ? workflow().normalizeStatus(application.status) : (application.status || "");
+        const examSummary = workflow().examSummaryFromRecord(examRecord);
+        const examResult = workflow().normalizeExamResult ? workflow().normalizeExamResult(examSummary.result || "") : (examSummary.result || "");
         let finalLabel = "Pending";
         let finalClass = "ldss-chip-neutral";
+
+        if (normalizedApplicationStatus === "failed_exam") {
+            finalLabel = "Not Qualified";
+            finalClass = "ldss-chip-danger";
+        }
 
         if (approvalRecord && approvalRecord.decision_status) {
             if (approvalRecord.decision_status === "approved") {
@@ -485,9 +621,12 @@
             } else if (approvalRecord.decision_status === "rejected") {
                 finalLabel = "Rejected";
                 finalClass = "ldss-chip-danger";
+            } else if (normalizedApplicationStatus === "failed_exam" || examResult === "failed") {
+                finalLabel = "Not Qualified";
+                finalClass = "ldss-chip-danger";
             }
         } else {
-            const normalized = workflow().normalizeStatus ? workflow().normalizeStatus(application.status) : (application.status || "");
+            const normalized = normalizedApplicationStatus;
             if (["approved", "released", "for_release"].includes(normalized)) {
                 finalLabel = "Approved";
                 finalClass = "ldss-chip-success";
@@ -497,53 +636,86 @@
             } else if (normalized === "rejected") {
                 finalLabel = "Rejected";
                 finalClass = "ldss-chip-danger";
+            } else if (normalized === "failed_exam") {
+                finalLabel = "Not Qualified";
+                finalClass = "ldss-chip-danger";
+            } else if (examResult === "failed") {
+                finalLabel = "Not Qualified";
+                finalClass = "ldss-chip-danger";
             }
+        }
+
+        if (
+            sectorSelected
+            && (!approvalRecord || !approvalRecord.decision_status || approvalRecord.decision_status === "pending")
+        ) {
+            finalLabel = "Selected";
+            finalClass = "ldss-chip-success";
         }
 
         setChip("detailFinalDecisionChip", finalLabel, finalClass);
 
-        const examSummary = workflow().examSummaryFromRecord(examRecord);
-        const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
-        const showExamScores = applicantExamScoresVisible();
-        const postedResult = postedExamResultMeta(examSummary);
+        const hasNumericExam = examSummary.scoreText !== "-";
+        const examScoresVisible = applicantExamScoresVisible();
+        const postedResult = postedExamResultMeta(examSummary, specialConsideration, sectorSelected, application && application.sector_classification);
+        const rankLabel = examRank !== null && typeof examRank !== "undefined" ? ("RANK " + String(examRank)) : "";
         setText("detailExamControlNo", examSummary.controlNo || "-");
         setText("detailExamRoom", examSummary.roomLabel || "Not posted yet");
         setText("detailExamSeatNo", examSummary.seatNo || "Not posted yet");
-        setText(
-            "detailExamRawScore",
-            examSummary.status === "absent"
-                ? "-"
-                : (showExamScores ? (examSummary.scoreText || "-") : (hasNumericExam ? "Hidden" : "-"))
-        );
-        setText(
-            "detailExamPercentage",
-            examSummary.status === "absent"
-                ? "-"
-                : (showExamScores ? (examSummary.percentageText || "-") : (hasNumericExam ? "Hidden" : "-"))
-        );
+        if (postedResult.result === "selected") {
+            const sectorText = postedResult.sectorClassificationText || "Sector Classification";
+            const scorePart = postedResult.hasScore
+                ? '<span class="text-danger fw-700">' + escapeHtml(postedResult.scoreText) + '</span><span class="text-muted">|</span>'
+                : "";
+            setHtml(
+                "detailExamRawScore",
+                '<span class="d-inline-flex flex-column align-items-start lh-1">'
+                    + '<span class="d-inline-flex align-items-center flex-wrap gap-1 lh-1">'
+                    + scorePart
+                    + '<span class="text-success fw-700 text-uppercase">SELECTED</span>'
+                    + '</span>'
+                    + '<span class="small text-muted fw-semibold mt-1">Sector Classification: ' + escapeHtml(sectorText) + '</span>'
+                    + '</span>'
+            );
+        } else {
+            setText(
+                "detailExamRawScore",
+                    examSummary.status === "absent"
+                    ? "-"
+                    : (
+                        (postedResult.result === "passed" || postedResult.result === "failed")
+                            ? (postedResult.displayText + ((specialConsideration && postedResult.result === "passed" && postedResult.hasScore && rankLabel) ? (" | " + rankLabel) : ""))
+                            : (!examScoresVisible ? (postedResult.displayText || "Scores are being consolidated") : (hasNumericExam ? (examSummary.scoreText || "-") : "-"))
+                    )
+            );
+            setTextTone(
+                "detailExamRawScore",
+                postedResult.result === "passed"
+                    ? "success"
+                    : (postedResult.result === "failed"
+                        ? "danger"
+                        : (!examScoresVisible ? "warning" : "muted"))
+            );
+        }
         setChip(
             "detailExamResultChip",
             examSummary.status === "absent"
                 ? "No Result"
                 : (
-                    (postedResult.result === "passed" || postedResult.result === "failed")
-                        ? (
-                            showExamScores
-                                ? (postedResult.hasScore ? (postedResult.scoreText + " | " + postedResult.displayLabel) : postedResult.displayLabel)
-                                : "Score Consolidation"
-                        )
-                        : (examSummary.resultLabel || "Score Consolidation")
+                    (postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected")
+                        ? postedResult.chipLabel
+                        : (!examScoresVisible ? (postedResult.chipLabel || "Score Consolidation") : (examSummary.resultLabel || "Score Consolidation"))
                 ),
             examSummary.status === "absent"
                 ? "ldss-chip-neutral"
                 : (
-                    (postedResult.result === "passed" || postedResult.result === "failed") && !showExamScores
-                        ? "ldss-chip-accent"
-                        : (examSummary.resultChipClass || "ldss-chip-accent")
+                    (postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected")
+                        ? postedResult.chipClass
+                        : (!examScoresVisible ? (postedResult.chipClass || "ldss-chip-accent") : (examSummary.resultChipClass || "ldss-chip-accent"))
                 )
         );
 
-        setText("detailNextStepText", workflow().nextStepForApplicant(maskedApplicantStatusValue(application.status)));
+        setText("detailNextStepText", workflow().nextStepForApplicant(maskedApplicantStatusValue(application.status, specialConsideration, sectorSelected)));
 
         if (interviewRecord && interviewRecord.scheduled_at) {
             const iMeta = interviewMeta(interviewRecord.status || "scheduled");
@@ -603,13 +775,14 @@
             .join("");
     }
 
-    function renderTimeline(application, examRecord, interviewRecord, approvalRecord) {
+    function renderTimeline(application, examRecord, interviewRecord, approvalRecord, specialConsideration) {
         const timeline = byId("detailTimelineList");
         if (!timeline) {
             return;
         }
 
         const events = [];
+        const sectorSelected = isSectorSelectedApplication(application, approvalRecord);
         events.push({ label: "Draft created", at: application.created_at });
 
         if (application.submitted_at) {
@@ -617,15 +790,14 @@
         }
         if (examRecord && examRecord.updated_at) {
             const summary = workflow().examSummaryFromRecord(examRecord);
-            const postedResult = postedExamResultMeta(summary);
+            const postedResult = postedExamResultMeta(summary, specialConsideration, sectorSelected, application && application.sector_classification);
+            const scoresVisible = applicantExamScoresVisible();
             events.push({
                 label: (postedResult.result === "passed" || postedResult.result === "failed")
-                    ? (
-                        applicantExamScoresVisible()
-                            ? ("Exam result: " + (postedResult.hasScore ? (postedResult.scoreText + " | " + postedResult.displayLabel) : postedResult.displayLabel))
-                            : "Exam result recorded"
-                    )
-                    : ("Exam result: " + summary.resultLabel),
+                    ? ("Exam result: " + postedResult.displayText)
+                    : (postedResult.result === "selected")
+                        ? ("Exam result: " + postedResult.displayText)
+                    : (!scoresVisible ? ("Exam result: " + (postedResult.displayText || "Scores are being consolidated")) : ("Exam result: " + summary.resultLabel)),
                 at: examRecord.updated_at
             });
         }
@@ -636,7 +808,7 @@
             events.push({ label: "Final decision: " + (approvalRecord.decision_status || "updated"), at: approvalRecord.decided_at });
         }
         if (application.updated_at) {
-            const current = statusMeta(maskedApplicantStatusValue(application.status)).label;
+            const current = statusMeta(maskedApplicantStatusValue(application.status, specialConsideration, sectorSelected)).label;
             events.push({ label: "Current status: " + current, at: application.updated_at });
         }
 
@@ -672,8 +844,11 @@
             return;
         }
 
+        const specialConsiderationFlag = await loadSpecialConsiderationFlag(context, application.id);
+        const sectorSelectionFlag = await loadSectorSelectionFlag(context, application.id);
+        const examRank = await loadExamRank(context, application.id);
         const dataResults = await Promise.all([
-            fetchExamRecord(context, application),
+            fetchExamRecord(context, application, specialConsiderationFlag),
             fetchInterviewRecord(context, application.id),
             fetchApprovalRecord(context, application.id),
             context.client
@@ -690,6 +865,12 @@
         const examRecord = dataResults[0];
         const interviewRecord = dataResults[1];
         const approvalRecord = dataResults[2];
+        const specialConsideration = Boolean(
+            specialConsiderationFlag
+            || (approvalRecord && approvalRecord.special_endorsement)
+            || (workflow().normalizeStatus(application.status) === "special_endorsement_review")
+        );
+        application.sector_selected = sectorSelectionFlag;
         const docsResult = dataResults[3];
         const profileResult = dataResults[4];
 
@@ -712,9 +893,9 @@
         const verifiedPhotoUrl = urlResults[1];
 
         renderHeader(application);
-        renderStatusCards(application, examRecord, interviewRecord, approvalRecord);
+        renderStatusCards(application, examRecord, interviewRecord, approvalRecord, specialConsideration, examRank);
         renderRequirements(documents);
-        renderTimeline(application, examRecord, interviewRecord, approvalRecord);
+        renderTimeline(application, examRecord, interviewRecord, approvalRecord, specialConsideration);
         renderSectorTags(sectorMeta.sectorTags);
 
         setPhotoArea(

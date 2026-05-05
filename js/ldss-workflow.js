@@ -9,6 +9,7 @@
         "exam_completed",
         "passed_exam",
         "failed_exam",
+        "selected",
         "special_endorsement_review",
         "for_interview",
         "interview_scheduled",
@@ -65,6 +66,11 @@
             label: "Failed Exam",
             chipClass: "ldss-chip-danger",
             nextStep: "Wait for official decision or possible Special Endorsement review."
+        },
+        selected: {
+            label: "Selected",
+            chipClass: "ldss-chip-success",
+            nextStep: "Your sector classification has been selected."
         },
         special_endorsement_review: {
             label: "Special Endorsement Review",
@@ -172,6 +178,30 @@
         };
     }
 
+    function specialConsiderationDisplayScore() {
+        const settings = activeRankingSettings();
+        if (settings && typeof settings.passing_score === "number" && !Number.isNaN(settings.passing_score)) {
+            return String(Math.max(0, Math.min(100, Math.ceil(settings.passing_score))));
+        }
+        return "70";
+    }
+
+    function formatSectorClassificationDisplay(value) {
+        const cleaned = (value || "").toString().trim();
+        if (!cleaned) {
+            return "Sector Classification";
+        }
+        if (cleaned.toLowerCase() === "none of the above") {
+            return "Sector Classification";
+        }
+        return cleaned.replace(/\bPwd\b/g, "PWD");
+    }
+
+    function isSectorSelectedStatus(status) {
+        const normalized = normalizeStatus(status || "");
+        return ["approved", "waitlisted", "for_release", "released"].indexOf(normalized) !== -1;
+    }
+
     function deriveExamScorePolicyMeta(examRecord) {
         if (!examRecord) {
             return null;
@@ -231,6 +261,27 @@
             chipClass: "ldss-chip-neutral",
             nextStep: "Wait for an update from the scholarship office."
         };
+    }
+
+    function applicantExamResultsVisible() {
+        return activeWorkflowControls().show_applicant_exam_scores !== false;
+    }
+
+    function applicantStatusMeta(status) {
+        const normalized = normalizeStatus(status);
+        if (!applicantExamResultsVisible() && ["exam_completed", "passed_exam", "failed_exam"].indexOf(normalized) !== -1) {
+            return {
+                label: "Score Consolidation",
+                chipClass: EXAM_RESULT_META.pending.chipClass,
+                nextStep: "The scholarship office is consolidating your exam scores before posting the final result."
+            };
+        }
+
+        const meta = statusMeta(status);
+        if (normalized === "passed_exam") {
+            return Object.assign({}, meta, { label: "PASSED" });
+        }
+        return meta;
     }
 
     function nextStepForApplicant(status) {
@@ -330,16 +381,150 @@
         };
     }
 
+    function applicantVisibleStatus(status, specialConsideration, sectorSelected) {
+        const normalized = normalizeStatus(status);
+        if (specialConsideration === true && ["exam_completed", "passed_exam", "failed_exam"].indexOf(normalized) !== -1) {
+            return "passed_exam";
+        }
+        if (sectorSelected === true && ["exam_completed", "passed_exam", "failed_exam"].indexOf(normalized) !== -1) {
+            return "selected";
+        }
+        if (["exam_completed", "passed_exam", "failed_exam"].indexOf(normalized) !== -1) {
+            if (!applicantExamResultsVisible()) {
+                return "exam_completed";
+            }
+        }
+        return normalized;
+    }
+
+    function applicantExamDisplayMeta(examSummary, options) {
+        const summary = examSummary || {};
+        const specialConsideration = Boolean(options && options.specialConsideration);
+        const sectorSelected = Boolean(options && options.sectorSelected);
+        const showFailedScore = options && Object.prototype.hasOwnProperty.call(options, "showFailedScore")
+            ? options.showFailedScore !== false
+            : true;
+        const recordStatus = normalizeExamRecordStatus(summary.status);
+        const normalizedResult = normalizeExamResult(summary.result || "pending");
+        const scoreText = summary.scoreText === null || typeof summary.scoreText === "undefined" || summary.scoreText === ""
+            ? "-"
+            : String(summary.scoreText);
+        const hasScore = scoreText !== "-";
+        const specialPass = specialConsideration === true;
+
+        if (specialPass) {
+            const specialScoreText = specialConsiderationDisplayScore();
+            return {
+                result: "passed",
+                scoreText: showFailedScore ? specialScoreText : "-",
+                hasScore: showFailedScore,
+                displayText: showFailedScore ? (specialScoreText + " | PASSED") : "PASSED",
+                displayLabel: "PASSED",
+                chipLabel: "PASSED",
+                chipClass: EXAM_RESULT_META.passed.chipClass,
+                textClass: "text-success"
+            };
+        }
+
+        if (sectorSelected === true) {
+            const sectorClassificationText = formatSectorClassificationDisplay(options && options.sectorClassification);
+            return {
+                result: "selected",
+                scoreText: showFailedScore ? scoreText : "-",
+                hasScore: showFailedScore && hasScore,
+                displayText: showFailedScore && hasScore
+                    ? (scoreText + " | SELECTED")
+                    : "SELECTED",
+                displayLabel: "SELECTED",
+                chipLabel: "Selected",
+                chipClass: "ldss-chip-success",
+                textClass: "text-success",
+                sectorClassificationText: sectorClassificationText
+            };
+        }
+
+        if (!showFailedScore) {
+            return {
+                result: "pending",
+                scoreText: "-",
+                hasScore: false,
+                displayText: "Scores are being consolidated",
+                displayLabel: "Score Consolidation",
+                chipLabel: "Score Consolidation",
+                chipClass: EXAM_RESULT_META.pending.chipClass,
+                textClass: "text-warning"
+            };
+        }
+
+        if (recordStatus === "absent") {
+            return {
+                result: "absent",
+                scoreText: "-",
+                hasScore: false,
+                displayText: summary.resultLabel || "No Result",
+                displayLabel: summary.resultLabel || "No Result",
+                chipLabel: "No Result",
+                chipClass: EXAM_RECORD_STATUS_META.absent.chipClass,
+                textClass: "text-muted"
+            };
+        }
+
+        if (normalizedResult === "passed") {
+            return {
+                result: "passed",
+                scoreText: "-",
+                hasScore: false,
+                displayText: "PASSED",
+                displayLabel: "PASSED",
+                chipLabel: "PASSED",
+                chipClass: EXAM_RESULT_META.passed.chipClass,
+                textClass: "text-success"
+            };
+        }
+
+        if (normalizedResult === "failed") {
+            const displayText = showFailedScore && hasScore ? (scoreText + " | FAIL") : "FAIL";
+            return {
+                result: "failed",
+                scoreText: scoreText,
+                hasScore: showFailedScore && hasScore,
+                displayText: displayText,
+                displayLabel: "FAIL",
+                chipLabel: "FAIL",
+                chipClass: EXAM_RESULT_META.failed.chipClass,
+                textClass: "text-danger"
+            };
+        }
+
+        const consolidationLabel = summary.resultLabel || EXAM_RESULT_META.pending.label;
+        return {
+            result: normalizedResult,
+            scoreText: "-",
+            hasScore: false,
+            displayText: consolidationLabel,
+            displayLabel: consolidationLabel,
+            chipLabel: consolidationLabel,
+            chipClass: summary.resultChipClass || EXAM_RESULT_META.pending.chipClass,
+            textClass: "text-muted"
+        };
+    }
+
     window.LDSS_WORKFLOW = {
         STATUS_ORDER: STATUS_ORDER.slice(),
         normalizeStatus: normalizeStatus,
         statusMeta: statusMeta,
+        applicantStatusMeta: applicantStatusMeta,
         nextStepForApplicant: nextStepForApplicant,
         isExamCheckingStage: isExamCheckingStage,
         normalizeExamResult: normalizeExamResult,
         examResultMeta: examResultMeta,
         normalizeExamRecordStatus: normalizeExamRecordStatus,
         examRecordStatusMeta: examRecordStatusMeta,
-        examSummaryFromRecord: examSummaryFromRecord
+        examSummaryFromRecord: examSummaryFromRecord,
+        applicantVisibleStatus: applicantVisibleStatus,
+        applicantExamDisplayMeta: applicantExamDisplayMeta,
+        specialConsiderationDisplayScore: specialConsiderationDisplayScore,
+        formatSectorClassificationDisplay: formatSectorClassificationDisplay,
+        isSectorSelectedStatus: isSectorSelectedStatus
     };
 })(window);

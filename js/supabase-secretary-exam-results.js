@@ -157,6 +157,12 @@
         });
     }
 
+    function isMissingTableError(error, tableName) {
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        const normalizedTable = (tableName || "").toString().trim().toLowerCase();
+        return Boolean(normalizedTable) && text.includes(normalizedTable) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
+    }
+
     function cleanupLookupKey(value) {
         return (value || "")
             .toString()
@@ -505,6 +511,59 @@
         return map;
     }
 
+    async function loadSpecialConsiderationFlagsByIds(applicationIds) {
+        const map = {};
+        const wantedIds = Array.from(new Set((applicationIds || []).filter(Boolean)));
+
+        for (let start = 0; start < wantedIds.length; start += LOOKUP_BATCH_SIZE) {
+            const chunk = wantedIds.slice(start, start + LOOKUP_BATCH_SIZE);
+            if (!chunk.length) {
+                continue;
+            }
+
+            const flagsResult = await context.client
+                .from("application_staff_flags")
+                .select("application_id, special_consideration_tag")
+                .in("application_id", chunk);
+
+            if (flagsResult.error) {
+                if (!isMissingTableError(flagsResult.error, "application_staff_flags")) {
+                    throw new Error("Failed to load special consideration flags: " + flagsResult.error.message);
+                }
+            } else {
+                (flagsResult.data || []).forEach(function (row) {
+                    const applicationId = row && row.application_id ? row.application_id : "";
+                    const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+                    if (!applicationId || !tag) {
+                        return;
+                    }
+                    map[applicationId] = true;
+                });
+            }
+
+            const approvalsResult = await context.client
+                .from("approval_records")
+                .select("application_id, special_endorsement")
+                .in("application_id", chunk);
+
+            if (approvalsResult.error) {
+                if (!isMissingTableError(approvalsResult.error, "approval_records")) {
+                    throw new Error("Failed to load special endorsement records: " + approvalsResult.error.message);
+                }
+            } else {
+                (approvalsResult.data || []).forEach(function (row) {
+                    const applicationId = row && row.application_id ? row.application_id : "";
+                    if (!applicationId || !row || !row.special_endorsement) {
+                        return;
+                    }
+                    map[applicationId] = true;
+                });
+            }
+        }
+
+        return map;
+    }
+
     async function loadProfilesByIds(applicantIds) {
         const map = {};
         const wantedIds = Array.from(new Set((applicantIds || []).filter(Boolean)));
@@ -677,6 +736,17 @@
 
     function rankingSearchQuery() {
         return normalizeSearchText(currentRankingSearchQuery);
+    }
+
+    function hasSpecialConsideration(row) {
+        return Boolean(row && row.has_special_consideration);
+    }
+
+    function specialConsiderationBadgeMarkup(row) {
+        if (!hasSpecialConsideration(row)) {
+            return "";
+        }
+        return '<div class="mt-1"><span class="ldss-chip ldss-chip-special-approval ldss-exam-special-chip">Special Consideration</span></div>';
     }
 
     function matchesRankingApplicantSearch(row, query) {
@@ -1249,12 +1319,13 @@
     function rankingTableRowMarkup(row, index) {
         const counter = index + 1;
         return (
-            "<tr>" +
+            '<tr' + (hasSpecialConsideration(row) ? ' class="ldss-exam-special-row"' : "") + ">" +
             '<td class="text-center fw-700">' + escapeHtml(String(counter)) + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
             "<td>" +
             '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
             '<div class="small text-muted">' + escapeHtml(row.application_no || "-") + "</div>" +
+            specialConsiderationBadgeMarkup(row) +
             "</td>" +
             "<td>" + escapeHtml(row.applicant_barangay || "No barangay") + "</td>" +
             '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
@@ -1275,6 +1346,7 @@
             "<td>" +
             '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
             '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(formatRankingApplicationPrintValue(row)) + "</div>" +
+            specialConsiderationBadgeMarkup(row) +
             "</td>" +
             "<td>" +
             '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_barangay || "No barangay") + "</div>" +
@@ -1414,17 +1486,19 @@
                 row.application_no || "",
                 row.applicant_name || "",
                 row.school_name || "",
-                row.scholarship_type || ""
+                row.scholarship_type || "",
+                hasSpecialConsideration(row) ? "Special Consideration" : ""
             ].join(" "));
 
             return (
-                '<tr data-room-sheet-row="' + escapeHtml(row.id) + '" data-room-search-text="' + escapeHtml(searchText) + '">' +
+                '<tr' + (hasSpecialConsideration(row) ? ' class="ldss-exam-special-row"' : "") + ' data-room-sheet-row="' + escapeHtml(row.id) + '" data-room-search-text="' + escapeHtml(searchText) + '">' +
                 '<td class="ldss-room-score-seat">' + escapeHtml(row.room_seat_no || "-") + "</td>" +
                 '<td class="ldss-room-score-control">' + escapeHtml(row.exam_control_no || "-") + "</td>" +
                 "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
                 "<td>" +
                 '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
                 '<div class="small text-muted">' + escapeHtml(row.school_name || (row.scholarship_type || "-")) + "</div>" +
+                specialConsiderationBadgeMarkup(row) +
                 "</td>" +
                 '<td class="ldss-room-score-score">' +
                 '<input class="form-control form-control-sm ldss-room-score-input" type="number" min="1" max="' + escapeHtml(String(maxRawScore())) + '" step="1" inputmode="numeric" data-room-raw-score="' + escapeHtml(row.id) + '" value="' + escapeHtml(formatRawScoreInput(row.raw_score)) + '" />' +
@@ -1512,7 +1586,7 @@
 
         container.innerHTML = rankingState.rows.map(function (row, index) {
             return (
-                '<article class="ldss-ranking-card">' +
+                '<article class="ldss-ranking-card' + (hasSpecialConsideration(row) ? ' ldss-exam-special-card' : '') + '">' +
                 '<div class="ldss-ranking-card-header">' +
                 '<div class="ldss-ranking-card-badges">' +
                 '<div class="ldss-ranking-card-counter">No. ' + escapeHtml(String(index + 1)) + "</div>" +
@@ -1525,6 +1599,7 @@
                 "</div>" +
                 '<div class="ldss-ranking-card-name">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
                 '<div class="ldss-ranking-card-school">' + escapeHtml(row.application_no || "-") + "</div>" +
+                specialConsiderationBadgeMarkup(row) +
                 '<div class="ldss-ranking-card-grid mt-3">' +
                 '<div><div class="ldss-ranking-card-label">Barangay</div><div class="ldss-ranking-card-value">' + escapeHtml(row.applicant_barangay || "No barangay") + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Room</div><div class="ldss-ranking-card-value">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</div></div>" +
@@ -1722,7 +1797,10 @@
             const application = appMap[applicationId];
             return application ? application.applicant_id : "";
         }).filter(Boolean)));
-        const profileMap = applicantIds.length ? await loadProfilesByIds(applicantIds) : {};
+        const specialConsiderationMapPromise = applicationIds.length ? loadSpecialConsiderationFlagsByIds(applicationIds) : Promise.resolve({});
+        const profileMapPromise = applicantIds.length ? loadProfilesByIds(applicantIds) : Promise.resolve({});
+        const specialConsiderationMap = await specialConsiderationMapPromise;
+        const profileMap = await profileMapPromise;
 
         batches = loadedBatches;
         rows = assignedRows.map(function (row) {
@@ -1748,7 +1826,11 @@
                 raw_score: row.raw_score,
                 percentage_score: row.percentage_score,
                 result: row.result || "pending",
-                record_status: row.status || "scheduled"
+                record_status: row.status || "scheduled",
+                has_special_consideration: Boolean(
+                    specialConsiderationMap[row.application_id] ||
+                    (application && normalizeStatus(application.status || "") === "special_endorsement_review")
+                )
             };
         });
         rankingResultDrafts = {};

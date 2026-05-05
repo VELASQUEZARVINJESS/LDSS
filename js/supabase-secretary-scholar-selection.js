@@ -18,7 +18,7 @@
             className: "ldss-scholar-category-regular"
         },
         sector: {
-            label: "Sector Classification",
+            label: "Selected",
             className: "ldss-scholar-category-sector"
         },
         special: {
@@ -187,7 +187,13 @@
 
     function scoreText(row) {
         if (!row || !hasSavedRawScore(row.raw_score)) {
+            if (row && row.special_consideration_tag) {
+                return String(Math.max(0, Math.min(100, Math.ceil(normalizeNumber(policy.passing_score, DEFAULT_POLICY.passing_score)))));
+            }
             return "-";
+        }
+        if (row.special_consideration_tag) {
+            return String(Math.max(0, Math.min(100, Math.ceil(normalizeNumber(policy.passing_score, DEFAULT_POLICY.passing_score)))));
         }
         const raw = Number(row.raw_score);
         const rawLabel = Number.isInteger(raw) ? String(raw) : String(raw);
@@ -197,7 +203,20 @@
             : (rawLabel + " (" + String(percent).replace(/\.00$/, "") + "%)");
     }
 
+    function effectiveRankScore(row) {
+        if (!row) {
+            return null;
+        }
+        if (row.special_consideration_tag) {
+            return Math.max(0, Math.min(100, Math.ceil(normalizeNumber(policy.passing_score, DEFAULT_POLICY.passing_score))));
+        }
+        return hasSavedRawScore(row.raw_score) ? Number(row.raw_score) : null;
+    }
+
     function masterlistPrintScoreClass(row) {
+        if (row && row.sourceRow && row.sourceRow.special_consideration_tag) {
+            return "text-center fw-700 ldss-scholar-masterlist-score";
+        }
         const percent = row && row.sourceRow && typeof row.sourceRow.score_percent !== "undefined"
             ? Number(row.sourceRow.score_percent)
             : null;
@@ -214,7 +233,7 @@
         let lastRank = 0;
 
         return (sourceRows || []).map(function (row, index) {
-            const score = row.raw_score_value;
+            const score = row.rank_score_value;
             const displayRank = index > 0 && score === lastScore ? lastRank : (index + 1);
             lastScore = score;
             lastRank = displayRank;
@@ -265,10 +284,14 @@
         return decoded.label ? (levelLabel + " - " + decoded.label) : levelLabel;
     }
 
+    function normalizeSectorSlots(value) {
+        return MASTERLIST_SECTOR_LIMIT;
+    }
+
     function currentSettings() {
         return {
             regularSlots: readWholeNumber("scholarSelectionRegularSlots", 0),
-            sectorSlots: readWholeNumber("scholarSelectionSectorSlots", 0),
+            sectorSlots: normalizeSectorSlots(readWholeNumber("scholarSelectionSectorSlots", MASTERLIST_SECTOR_LIMIT)),
             likhangSlots: readWholeNumber("scholarSelectionLikhangSlots", MASTERLIST_LIKHANG_LIMIT),
             includeSpecial: isChecked("scholarSelectionIncludeSpecial"),
             printFilter: (byId("scholarSelectionPrintFilter") ? byId("scholarSelectionPrintFilter").value : "all") || "all",
@@ -297,7 +320,7 @@
             }
 
             writeInput("scholarSelectionRegularSlots", Math.max(0, Math.floor(Number(parsed.regularSlots || 0))));
-            writeInput("scholarSelectionSectorSlots", Math.max(0, Math.floor(Number(parsed.sectorSlots || 0))));
+            writeInput("scholarSelectionSectorSlots", normalizeSectorSlots(parsed.sectorSlots));
             if (Object.prototype.hasOwnProperty.call(parsed, "likhangSlots")) {
                 writeInput("scholarSelectionLikhangSlots", Math.max(0, Math.floor(Number(parsed.likhangSlots))));
             }
@@ -344,26 +367,33 @@
         const unscoredRows = [];
 
         batchRows(batchId).forEach(function (row) {
-            if (hasSavedRawScore(row.raw_score)) {
+            if (hasSavedRawScore(row.raw_score) || row.special_consideration_tag) {
                 scoredRows.push(Object.assign({}, row, {
-                    raw_score_value: Number(row.raw_score)
+                    raw_score_value: hasSavedRawScore(row.raw_score) ? Number(row.raw_score) : null,
+                    rank_score_value: effectiveRankScore(row)
                 }));
                 return;
             }
             unscoredRows.push(Object.assign({}, row, {
                 display_rank: null,
-                raw_score_value: null
+                raw_score_value: null,
+                rank_score_value: effectiveRankScore(row)
             }));
         });
 
         const rankedRows = assignDisplayRanks(scoredRows.sort(function (left, right) {
-            if (right.raw_score_value !== left.raw_score_value) {
-                return right.raw_score_value - left.raw_score_value;
+            if (right.rank_score_value !== left.rank_score_value) {
+                return right.rank_score_value - left.rank_score_value;
             }
             return compareRoomSeatApplication(left, right);
         }));
 
-        return rankedRows.concat(unscoredRows.sort(compareRoomSeatApplication));
+        return rankedRows.concat(unscoredRows.sort(function (left, right) {
+            if (right.rank_score_value !== left.rank_score_value) {
+                return right.rank_score_value - left.rank_score_value;
+            }
+            return compareRoomSeatApplication(left, right);
+        }));
     }
 
     function limitRows(sourceRows, slotCount) {
@@ -430,9 +460,7 @@
         const settings = currentSettings();
         const rankedRows = rankedRowsForBatch(currentBatchId);
         const selectedApplicationIds = new Set();
-        const sectorSlots = settings.sectorSlots > 0
-            ? settings.sectorSlots
-            : Math.max(0, Math.floor(rankedRows.length * 0.10));
+        const sectorSlots = normalizeSectorSlots(settings.sectorSlots);
 
         const regularCandidates = rankedRows.filter(function (row) {
             return row.passed_by_score === true;
@@ -449,12 +477,10 @@
                 && row.passed_by_score !== true
                 && !row.special_consideration_tag;
         });
-        const sector = sectorSlots > 0
-            ? sectorCandidates.slice(0, sectorSlots).map(function (row) {
-                selectedApplicationIds.add(row.application_id);
-                return toSelectionRow(row, "sector", "Sector slot from below-passing-score pool.");
-            })
-            : [];
+        const sector = sectorCandidates.slice(0, sectorSlots).map(function (row) {
+            selectedApplicationIds.add(row.application_id);
+            return toSelectionRow(row, "sector", "Selected from the 76-slot sector classification pool.");
+        });
 
         const special = settings.includeSpecial
             ? rankedRows
@@ -496,10 +522,10 @@
                 masterlistSelectedApplicationIds.add(row.application_id);
                 return toSelectionRow(row, "special", specialTagDisplay(row.special_consideration_tag));
             });
-        const masterSector = limitRows(masterSectorCandidates, sectorSlots || MASTERLIST_SECTOR_LIMIT)
+        const masterSector = limitRows(masterSectorCandidates, MASTERLIST_SECTOR_LIMIT)
             .map(function (row) {
                 masterlistSelectedApplicationIds.add(row.application_id);
-                return toSelectionRow(row, "sector", "Sector Classification from below-passing-score pool.");
+                return toSelectionRow(row, "sector", "Selected from the 76-slot sector classification pool.");
             });
         const masterlistCore = masterRegular.concat(masterSpecial, masterSector);
         const masterlist = masterlistCore;
@@ -521,6 +547,7 @@
             rankedCount: rankedRows.length,
             likhangCount: likhangReservedCount,
             likhangActualCount: likhang.length,
+            sectorSlots: sectorSlots,
             grandTotalCount: grandTotalCount
         };
     }
@@ -708,7 +735,7 @@
         const settings = currentSettings();
         const filteredRows = finalRowsForView(selection);
         const passingScore = normalizeNumber(policy.passing_score, DEFAULT_POLICY.passing_score);
-        const derivedSectorSlots = Math.max(0, Math.floor(Number(selection.rankedCount || 0) * 0.10));
+        const sectorSlots = normalizeSectorSlots(selection.sectorSlots);
 
         setText("scholarSelectionRegularCount", selection.regular.length);
         setText("scholarSelectionSectorCount", selection.sector.length);
@@ -719,9 +746,7 @@
         const regularSlotLabel = settings.regularSlots > 0
             ? String(settings.regularSlots) + " regular slot(s)"
             : String(passingScore).replace(/\.00$/, "") + "+ passers";
-        const sectorSlotLabel = settings.sectorSlots > 0
-            ? String(settings.sectorSlots) + " sector slot(s)"
-            : String(derivedSectorSlots) + " sector slot(s) (10% of " + String(selection.rankedCount || 0) + ")";
+        const sectorSlotLabel = String(sectorSlots) + " sector slot(s)";
         const batchLabel = batch
             ? ((batch.batch_label || "Selected batch") + " | " + formatDate(batch.exam_datetime) + " | " + (batch.venue || "-"))
             : "No exam batch selected";
@@ -748,7 +773,7 @@
             "scholarSelectionSectorBody",
             selection.sector,
             selection.sectorCandidateCount
-                ? "Set Sector Slots above 0 to include sector-classified applicants below the passing score."
+                ? "Sector slots are fixed at 76 and include sector-classified applicants below the passing score."
                 : "No sector-classified below-passing-score applicants found in this batch."
         );
         renderCompactCategoryTable(

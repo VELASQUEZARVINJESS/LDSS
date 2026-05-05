@@ -167,10 +167,20 @@
         return cleaned || "Degree Course";
     }
 
-    function formatApplicationStatusLabel(value) {
+    function formatApplicationStatusLabel(value, specialConsideration) {
         const cleaned = (value || "").toString().trim();
         if (!cleaned) {
             return "No application yet";
+        }
+        const normalized = cleaned.toLowerCase();
+        if (specialConsideration === true && normalized === "passed_exam") {
+            return "PASSED";
+        }
+        if (!applicantExamScoresVisible() && ["exam_completed", "passed_exam", "failed_exam"].includes(normalized)) {
+            return "Score Consolidation";
+        }
+        if (normalized === "passed_exam") {
+            return "PASSED";
         }
         return cleaned
             .replace(/_/g, " ")
@@ -187,20 +197,26 @@
         return workflowControls().show_applicant_exam_scores !== false;
     }
 
-    function maskedApplicantStatusValue(value) {
-        const normalized = (value || "").toString().trim().toLowerCase();
-        if (!applicantExamScoresVisible() && (normalized === "passed_exam" || normalized === "failed_exam")) {
-            return "exam_completed";
+    function maskedApplicantStatusValue(value, specialConsideration, sectorSelected) {
+        if (workflow().applicantVisibleStatus) {
+            return workflow().applicantVisibleStatus(value, specialConsideration === true, sectorSelected === true);
         }
-        return value;
+        const normalized = (value || "").toString().trim().toLowerCase();
+        if (specialConsideration === true && (normalized === "exam_completed" || normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "passed_exam";
+        }
+        if (sectorSelected === true && (normalized === "exam_completed" || normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "selected";
+        }
+        return normalized;
     }
 
-    function applicationStatusTone(value) {
-        const normalized = (maskedApplicantStatusValue(value) || "").toString().trim().toLowerCase();
+    function applicationStatusTone(value, specialConsideration, sectorSelected) {
+        const normalized = (maskedApplicantStatusValue(value, specialConsideration, sectorSelected) || "").toString().trim().toLowerCase();
         if (!normalized) {
             return "neutral";
         }
-        if (["approved", "released", "for_release"].includes(normalized)) {
+        if (["approved", "released", "for_release", "passed_exam", "selected"].includes(normalized)) {
             return "success";
         }
         if (["rejected", "failed_exam"].includes(normalized)) {
@@ -212,7 +228,6 @@
                 "pending_exam",
                 "exam_scheduled",
                 "exam_completed",
-                "passed_exam",
                 "special_endorsement_review",
                 "for_interview",
                 "interview_scheduled",
@@ -587,9 +602,89 @@
         }
 
         const row = latest.data[0];
+        const specialFlagResult = await loadSpecialConsiderationFlag(context, row.id);
+        const sectorSelectionFlag = await loadSectorSelectionFlag(context, row.id);
+        const approvalSpecialEndorsement = await loadApprovalSpecialEndorsement(context, row.id);
+        const specialConsideration = Boolean(
+            specialFlagResult
+            || approvalSpecialEndorsement
+            || String(row.status || "").toLowerCase().trim() === "special_endorsement_review"
+        );
+        row.sector_selected = sectorSelectionFlag;
         setText("profileLatestApplicationNo", row.application_no);
         setText("profileLatestScholarshipType", formatSectorClassificationDisplay(row.sector_classification));
-        setChip("profileLatestStatusChip", formatApplicationStatusLabel(maskedApplicantStatusValue(row.status)), applicationStatusTone(row.status));
+        setChip(
+            "profileLatestStatusChip",
+            formatApplicationStatusLabel(maskedApplicantStatusValue(row.status, specialConsideration, sectorSelectionFlag), specialConsideration),
+            applicationStatusTone(row.status, specialConsideration, sectorSelectionFlag)
+        );
+    }
+
+    async function loadSpecialConsiderationFlag(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return false;
+        }
+        try {
+            const result = await context.client.rpc("current_user_application_special_consideration_flags", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return false;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return Boolean(row && row.has_special_consideration);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    async function loadSectorSelectionFlag(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return false;
+        }
+        try {
+            const result = await context.client.rpc("current_user_application_sector_selection_flags", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return false;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return Boolean(row && row.is_sector_selected);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    async function loadApprovalSpecialEndorsement(context, applicationId) {
+        if (!context || !context.client || !applicationId) {
+            return false;
+        }
+
+        let result = await context.client
+            .from("approval_records")
+            .select("special_endorsement")
+            .eq("application_id", applicationId)
+            .maybeSingle();
+
+        if (result.error && !/does not exist|relation|schema cache/i.test(result.error.message || "")) {
+            return false;
+        }
+        if (!result.error && result.data) {
+            return Boolean(result.data.special_endorsement);
+        }
+
+        return false;
     }
 
     function fillProfileDisplay(profile) {

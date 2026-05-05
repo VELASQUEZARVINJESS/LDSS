@@ -44,7 +44,7 @@ begin
 
     select
         a.applicant_id,
-        coalesce(a.status, ''),
+        coalesce(a.status::text, ''),
         coalesce(a.is_locked, false)
     into
         target_applicant_id,

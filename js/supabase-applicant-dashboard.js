@@ -346,39 +346,42 @@
         return workflowControls().show_applicant_exam_scores !== false;
     }
 
-    function normalizeExamResultValue(value) {
-        if (workflow() && typeof workflow().normalizeExamResult === "function") {
-            return workflow().normalizeExamResult(value || "pending");
-        }
-        const raw = (value || "").toString().trim().toLowerCase();
-        if (raw === "passed" || raw === "pass") {
-            return "passed";
-        }
-        if (raw === "failed" || raw === "fail") {
-            return "failed";
-        }
-        return "pending";
+    function isMissingApplicationsColumnError(error, columnName) {
+        const needle = (columnName || "").toString().trim().toLowerCase();
+        const text = (((error && error.message) || "") + " " + ((error && error.details) || "")).toLowerCase();
+        return !!needle && text.includes(needle) && (text.includes("does not exist") || text.includes("relation") || text.includes("schema cache"));
     }
 
-    function postedExamResultMeta(examSummary) {
-        const result = normalizeExamResultValue(examSummary && examSummary.result ? examSummary.result : "pending");
-        const scoreText = examSummary && examSummary.scoreText ? examSummary.scoreText : "-";
-        return {
-            result: result,
-            hasScore: scoreText !== "-",
-            scoreText: scoreText,
-            displayLabel: result === "passed"
-                ? "PASSED"
-                : (result === "failed" ? (scoreText === "-" ? (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Failed to Take Exam") : "FAIL") : (examSummary && examSummary.resultLabel ? examSummary.resultLabel : "Score Consolidation"))
-        };
+    function hasSectorClassification(value) {
+        const raw = (value || "").toString().trim();
+        return !!raw && raw.toLowerCase() !== "none of the above";
     }
 
-    function maskedApplicantStatusValue(status) {
+    function isSectorSelectedApplication(application, approvalRecord) {
+        return Boolean(application && (application.sector_selected === true || application.is_sector_selected === true));
+    }
+
+    function postedExamResultMeta(examSummary, specialConsideration, sectorSelected, sectorClassification) {
+        return workflow().applicantExamDisplayMeta(examSummary, {
+            specialConsideration: specialConsideration === true,
+            sectorSelected: sectorSelected === true,
+            showFailedScore: applicantExamScoresVisible(),
+            sectorClassification: sectorClassification || ""
+        });
+    }
+
+    function maskedApplicantStatusValue(status, specialConsideration, sectorSelected) {
+        if (workflow().applicantVisibleStatus) {
+            return workflow().applicantVisibleStatus(status, specialConsideration === true, sectorSelected === true);
+        }
         const normalized = workflow().normalizeStatus(status || "");
-        if (!applicantExamScoresVisible() && (normalized === "passed_exam" || normalized === "failed_exam")) {
-            return "exam_completed";
+        if (specialConsideration === true && (normalized === "exam_completed" || normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "passed_exam";
         }
-        return status;
+        if (sectorSelected === true && (normalized === "exam_completed" || normalized === "passed_exam" || normalized === "failed_exam")) {
+            return "selected";
+        }
+        return normalized;
     }
 
     function getProfileReminderModal() {
@@ -452,6 +455,13 @@
         const el = byId(id);
         if (el) {
             el.textContent = valueOrDash(value);
+        }
+    }
+
+    function setHtml(id, value) {
+        const el = byId(id);
+        if (el) {
+            el.innerHTML = value || "";
         }
     }
 
@@ -602,6 +612,9 @@
     }
 
     function statusMeta(status) {
+        if (workflow().applicantStatusMeta) {
+            return workflow().applicantStatusMeta(status);
+        }
         return workflow().statusMeta(status);
     }
 
@@ -688,30 +701,33 @@
 
     function buildDashboardEvents(application, examRecord, interviewRecord, approvalRecord, notifications) {
         const events = [];
+        const sectorSelected = isSectorSelectedApplication(application, approvalRecord);
         if (application) {
             events.push({ label: "Draft created", at: application.created_at });
             if (application.submitted_at) {
                 events.push({ label: "Application submitted", at: application.submitted_at });
             }
             if (application.updated_at && application.status) {
-                events.push({ label: "Current status: " + statusMeta(maskedApplicantStatusValue(application.status)).label, at: application.updated_at });
+                events.push({
+                    label: "Current status: " + statusMeta(maskedApplicantStatusValue(application.status, approvalRecord && approvalRecord.special_endorsement, sectorSelected)).label,
+                    at: application.updated_at
+                });
             }
         }
 
         if (examRecord && examRecord.updated_at) {
             const examSummary = workflow().examSummaryFromRecord(examRecord);
-            const postedResult = postedExamResultMeta(examSummary);
+            const postedResult = postedExamResultMeta(examSummary, approvalRecord && approvalRecord.special_endorsement, sectorSelected, application && application.sector_classification);
+            const scoresVisible = applicantExamScoresVisible();
             events.push({
                 label: examSummary.status === "absent"
                     ? "Examination status: Absent"
                     : (
                         (postedResult.result === "passed" || postedResult.result === "failed")
-                            ? (
-                                applicantExamScoresVisible()
-                                    ? ("Exam result: " + (postedResult.hasScore ? (postedResult.scoreText + " | " + postedResult.displayLabel) : postedResult.displayLabel))
-                                    : "Exam result recorded"
-                            )
-                            : ("Exam result: " + examSummary.resultLabel)
+                            ? ("Exam result: " + postedResult.displayText)
+                            : (postedResult.result === "selected")
+                                ? ("Exam result: " + postedResult.displayText)
+                            : (!scoresVisible ? ("Exam result: " + (postedResult.displayText || "Scores are being consolidated")) : ("Exam result: " + examSummary.resultLabel))
                     ),
                 at: examRecord.updated_at
             });
@@ -877,7 +893,7 @@
         }).join("");
     }
 
-    function renderCards(application, examRecord, interviewRecord, approvalRecord, intakePolicy) {
+    function renderCards(application, examRecord, interviewRecord, approvalRecord, intakePolicy, specialConsideration, examRank) {
         if (!application) {
             const intakeClosed = !!(intakePolicy && !intakePolicy.isOpen);
             setText("dashboardCurrentApplicationValue", "No Application");
@@ -898,7 +914,8 @@
             return;
         }
 
-        const effectiveStatus = maskedApplicantStatusValue(application.status);
+        const sectorSelected = isSectorSelectedApplication(application, approvalRecord);
+        const effectiveStatus = maskedApplicantStatusValue(application.status, specialConsideration, sectorSelected);
         const appMeta = statusMeta(effectiveStatus);
         const normalizedStatus = workflow().normalizeStatus(effectiveStatus);
 
@@ -906,22 +923,36 @@
         setChip("dashboardCurrentApplicationChip", application.application_no || "Active Application", appMeta.chipClass);
 
         const examSummary = workflow().examSummaryFromRecord(examRecord);
-        const hasNumericExam = examSummary.scoreText !== "-" || examSummary.percentageText !== "-";
-        const postedResult = postedExamResultMeta(examSummary);
+        const hasNumericExam = examSummary.scoreText !== "-";
+        const examScoresVisible = applicantExamScoresVisible();
+        const postedResult = postedExamResultMeta(examSummary, specialConsideration, sectorSelected, application && application.sector_classification);
+        const rankLabel = examRank !== null && typeof examRank !== "undefined" ? ("RANK " + String(examRank)) : "";
         let examValue = "No score yet";
+        let examHtml = "";
 
         if ((examSummary.status || "").toString() === "absent") {
             examValue = "Absent from examination";
-        } else if ((postedResult.result === "passed" || postedResult.result === "failed") && applicantExamScoresVisible()) {
-            examValue = postedResult.hasScore
-                ? (postedResult.scoreText + " | " + postedResult.displayLabel)
-                : postedResult.displayLabel;
-        } else if ((postedResult.result === "passed" || postedResult.result === "failed") && !applicantExamScoresVisible()) {
-            examValue = "Result hidden by scholarship office";
-        } else if (hasNumericExam && applicantExamScoresVisible()) {
-            examValue = "Raw: " + examSummary.scoreText + " | %: " + examSummary.percentageText;
-        } else if (hasNumericExam) {
-            examValue = "Score hidden by scholarship office";
+        } else if (postedResult.result === "passed" || postedResult.result === "failed") {
+            examValue = postedResult.displayText;
+            if (specialConsideration && postedResult.result === "passed" && postedResult.hasScore && rankLabel) {
+                examValue += " | " + rankLabel;
+            }
+        } else if (postedResult.result === "selected") {
+            const sectorText = postedResult.sectorClassificationText || "Sector Classification";
+            const scorePart = postedResult.hasScore
+                ? '<span class="text-danger fw-700">' + escapeHtml(postedResult.scoreText) + '</span><span class="text-muted">|</span>'
+                : "";
+            examHtml = '<span class="d-inline-flex flex-column align-items-start lh-1">'
+                + '<span class="d-inline-flex align-items-center flex-wrap gap-1 lh-1">'
+                + scorePart
+                + '<span class="text-success fw-700 text-uppercase">SELECTED</span>'
+                + '</span>'
+                + '<span class="small text-muted fw-semibold mt-1">Sector Classification: ' + escapeHtml(sectorText) + '</span>'
+                + "</span>";
+        } else if (hasNumericExam && examScoresVisible) {
+            examValue = "Raw: " + examSummary.scoreText;
+        } else if (hasNumericExam && !examScoresVisible) {
+            examValue = "Scores are being consolidated";
         } else if (workflow().isExamCheckingStage && workflow().isExamCheckingStage(application.status)) {
             examValue = "Scores are being consolidated";
         } else if (normalizedStatus === "exam_completed") {
@@ -930,23 +961,23 @@
             examValue = "Exam processing";
         }
 
-        setText("dashboardExamValue", examValue);
+        if (postedResult.result === "selected") {
+            setHtml("dashboardExamValue", examHtml);
+        } else {
+            setText("dashboardExamValue", examValue);
+        }
         setChip(
             "dashboardExamChip",
             examSummary.status === "absent"
                 ? "No Result"
-                : (
-                    (postedResult.result === "passed" || postedResult.result === "failed") && !applicantExamScoresVisible()
-                        ? "Score Consolidation"
-                        : examSummary.resultLabel
-                ),
+                : ((postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected")
+                    ? postedResult.chipLabel
+                    : (!examScoresVisible ? postedResult.chipLabel : examSummary.resultLabel)),
             examSummary.status === "absent"
                 ? "ldss-chip-neutral"
-                : (
-                    (postedResult.result === "passed" || postedResult.result === "failed") && !applicantExamScoresVisible()
-                        ? "ldss-chip-accent"
-                        : examSummary.resultChipClass
-                )
+                : ((postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected")
+                    ? postedResult.chipClass
+                    : (!examScoresVisible ? postedResult.chipClass : examSummary.resultChipClass))
         );
 
         if (interviewRecord && interviewRecord.scheduled_at) {
@@ -984,14 +1015,14 @@
         setChip("dashboardNextStepChip", nextChipLabel, nextChipClass);
     }
 
-    function renderStatusOverview(application, approvalRecord, intakePolicy, examRecord) {
+    function renderStatusOverview(application, approvalRecord, intakePolicy, examRecord, specialConsideration, examRank) {
         const metaText = byId("dashboardStatusMetaText");
         const grantValue = byId("dashboardGrantValue");
         const submittedValue = byId("dashboardSubmittedOnValue");
         const submittedAt = application && application.submitted_at ? formatDateOnly(application.submitted_at) : "";
         const updatedAt = application ? formatDateOnly(application.updated_at || application.created_at || application.submitted_at) : "";
 
-        renderCards(application, examRecord || null, null, approvalRecord, intakePolicy);
+        renderCards(application, examRecord || null, null, approvalRecord, intakePolicy, specialConsideration, examRank);
 
         if (!application) {
             if (metaText) {
@@ -1086,12 +1117,21 @@
     }
 
     async function loadLatestApplication(context) {
-        const result = await context.client
+        let result = await context.client
             .from("applications")
-            .select("id, application_no, scholarship_type, status, submitted_at, created_at, updated_at")
+            .select("id, application_no, scholarship_type, status, submitted_at, created_at, updated_at, sector_classification")
             .eq("applicant_id", context.user.id)
             .order("created_at", { ascending: false })
             .limit(1);
+
+        if (result.error && isMissingApplicationsColumnError(result.error, "sector_classification")) {
+            result = await context.client
+                .from("applications")
+                .select("id, application_no, scholarship_type, status, submitted_at, created_at, updated_at")
+                .eq("applicant_id", context.user.id)
+                .order("created_at", { ascending: false })
+                .limit(1);
+        }
 
         if (result.error || !result.data || result.data.length === 0) {
             return null;
@@ -1227,7 +1267,7 @@
         };
     }
 
-    async function loadExamRecord(context, applicationId, applicationStatus) {
+    async function loadExamRecord(context, applicationId, applicationStatus, specialConsideration) {
         const examResult = await context.client
             .from("exam_records")
             .select("application_id, exam_control_no, raw_score, percentage_score, result, status, updated_at")
@@ -1249,7 +1289,7 @@
             return null;
         }
 
-        const normalized = workflow().normalizeStatus(maskedApplicantStatusValue(applicationStatus));
+        const normalized = workflow().normalizeStatus(maskedApplicantStatusValue(applicationStatus, specialConsideration));
         let inferredResult = "pending";
         if (normalized === "passed_exam") {
             inferredResult = "passed";
@@ -1295,7 +1335,7 @@
     async function loadApprovalRecord(context, applicationId) {
         const primary = await context.client
             .from("approval_records")
-            .select("application_id, decision_status, decided_at, updated_at")
+            .select("application_id, decision_status, decided_at, special_endorsement, updated_at")
             .eq("application_id", applicationId)
             .maybeSingle();
 
@@ -1314,6 +1354,79 @@
             return null;
         }
         return fallback.data || null;
+    }
+
+    async function loadSpecialConsiderationFlag(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return false;
+        }
+        try {
+            const result = await context.client.rpc("current_user_application_special_consideration_flags", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return false;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return Boolean(row && row.has_special_consideration);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    async function loadSectorSelectionFlag(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return false;
+        }
+
+        try {
+            const result = await context.client.rpc("current_user_application_sector_selection_flags", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return false;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return Boolean(row && row.is_sector_selected);
+        } catch (_error) {
+            return false;
+        }
+    }
+
+    async function loadExamRank(context, applicationId) {
+        if (!context || !context.client || typeof context.client.rpc !== "function" || !applicationId) {
+            return null;
+        }
+
+        try {
+            const result = await context.client.rpc("current_user_application_exam_ranks", {
+                p_application_ids: [applicationId]
+            });
+
+            if (result.error) {
+                return null;
+            }
+
+            const row = (result.data || []).find(function (item) {
+                return item && item.application_id === applicationId;
+            });
+
+            return row && row.exam_rank !== null && typeof row.exam_rank !== "undefined"
+                ? Number(row.exam_rank)
+                : null;
+        } catch (_error) {
+            return null;
+        }
     }
 
     function renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy) {
@@ -1445,11 +1558,28 @@
             ]);
             const latestDraft = actionResults[0];
             const latestBlockingApplication = actionResults[1];
+            const latestSpecialConsiderationFlag = latestApplication
+                ? await loadSpecialConsiderationFlag(context, latestApplication.id)
+                : false;
+            const latestSectorSelectionFlag = latestApplication
+                ? await loadSectorSelectionFlag(context, latestApplication.id)
+                : false;
+            const latestExamRank = latestApplication
+                ? await loadExamRank(context, latestApplication.id)
+                : null;
             const latestExamRecord = latestApplication
-                ? await loadExamRecord(context, latestApplication.id, latestApplication.status)
+                ? await loadExamRecord(context, latestApplication.id, latestApplication.status, latestSpecialConsiderationFlag)
                 : null;
             const latestApprovalRecord = latestApplication
                 ? await loadApprovalRecord(context, latestApplication.id)
+                : null;
+            const latestSpecialConsideration = Boolean(
+                latestSpecialConsiderationFlag
+                || (latestApprovalRecord && latestApprovalRecord.special_endorsement)
+                || (workflow().normalizeStatus(latestApplication.status) === "special_endorsement_review")
+            );
+            const latestSelectedApplication = latestApplication
+                ? Object.assign({}, latestApplication, { sector_selected: latestSectorSelectionFlag })
                 : null;
             const latestApplicationAuxMeta = latestApplication
                 ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
@@ -1457,7 +1587,7 @@
             const completionReminder = buildCompletionReminder(profileSummary, latestApplication, latestApplicationAuxMeta);
 
             renderProfileHeader(profileSummary, context.user.email);
-            renderStatusOverview(latestApplication, latestApprovalRecord, intakePolicy, latestExamRecord);
+            renderStatusOverview(latestSelectedApplication, latestApprovalRecord, intakePolicy, latestExamRecord, latestSpecialConsideration, latestExamRank);
             renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy);
             showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
             if (completionReminder) {

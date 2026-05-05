@@ -862,8 +862,8 @@
             });
     }
 
-    function specialCounterSnapshot() {
-        const rows = specialRows();
+    function specialCounterSnapshot(sourceRows) {
+        const rows = Array.isArray(sourceRows) ? sourceRows : specialRows();
         const snapshot = {
             tagged: rows.length,
             priority: 0,
@@ -885,8 +885,103 @@
         return snapshot;
     }
 
+    function specialPrintTagEntries() {
+        const seen = new Map();
+
+        specialRows().forEach(function (row) {
+            const label = normalizeSpecialLabel(row && row.special_label ? row.special_label : "");
+            if (!label) {
+                return;
+            }
+
+            const key = label.toLowerCase();
+            const existing = seen.get(key) || {
+                key: key,
+                label: formatCareOfPrintValue(label),
+                count: 0
+            };
+
+            existing.count += 1;
+            seen.set(key, existing);
+        });
+
+        return Array.from(seen.values()).sort(function (left, right) {
+            return left.label.localeCompare(right.label);
+        });
+    }
+
+    function specialPrintTagSelect() {
+        return byId("specialConsiderationPrintTag");
+    }
+
+    function specialPrintSelectedKey() {
+        const select = specialPrintTagSelect();
+        return normalizeSpecialLabel(select ? select.value : "").toLowerCase();
+    }
+
+    function specialPrintSelectedEntry() {
+        const key = specialPrintSelectedKey();
+        if (!key) {
+            return null;
+        }
+        return specialPrintTagEntries().find(function (entry) {
+            return entry.key === key;
+        }) || null;
+    }
+
+    function specialPassingScoreValue() {
+        const value = Number(currentControls().passing_score);
+        return Number.isFinite(value) ? value : null;
+    }
+
+    function specialRowPassedScore(row) {
+        const passingScore = specialPassingScoreValue();
+        const rawScore = row && hasSavedRawScore(row.raw_score_value) ? Number(row.raw_score_value) : null;
+
+        return passingScore !== null && rawScore !== null && rawScore >= passingScore;
+    }
+
+    function specialPrintRows() {
+        const key = specialPrintSelectedKey();
+        const rows = specialRows();
+
+        if (!key) {
+            return rows;
+        }
+
+        return rows.filter(function (row) {
+            return normalizeSpecialLabel(row && row.special_label ? row.special_label : "").toLowerCase() === key;
+        });
+    }
+
+    function renderSpecialPrintTagSelect() {
+        const select = specialPrintTagSelect();
+        if (!select) {
+            return;
+        }
+
+        const rows = specialRows();
+        const entries = specialPrintTagEntries();
+        const currentKey = normalizeSpecialLabel(select.value).toLowerCase();
+        const hasCurrent = currentKey && entries.some(function (entry) {
+            return entry.key === currentKey;
+        });
+
+        select.innerHTML = [
+            '<option value="">All Tagged (' + escapeHtml(String(rows.length)) + ')</option>'
+        ].concat(entries.map(function (entry) {
+            return '<option value="' + escapeHtml(entry.key) + '">' + escapeHtml(entry.label + " (" + String(entry.count) + ")") + "</option>";
+        })).join("");
+
+        select.value = hasCurrent ? currentKey : "";
+        select.disabled = rows.length === 0;
+        select.title = rows.length === 0 ? "No tagged applicants are available yet." : "";
+    }
+
     function renderSpecialCounters() {
+        renderSpecialPrintTagSelect();
         const snapshot = specialCounterSnapshot();
+        const printRows = specialPrintRows();
         const printButton = byId("specialConsiderationPrintBtn");
         const pdfButton = byId("specialConsiderationPdfBtn");
 
@@ -896,10 +991,10 @@
         setText("specialConsiderationAvailableCount", snapshot.available);
 
         if (printButton) {
-            printButton.disabled = !currentSchoolYear() || snapshot.tagged === 0;
+            printButton.disabled = !currentSchoolYear() || printRows.length === 0;
         }
         if (pdfButton) {
-            pdfButton.disabled = !currentSchoolYear() || snapshot.tagged === 0;
+            pdfButton.disabled = !currentSchoolYear() || printRows.length === 0;
         }
     }
 
@@ -1216,8 +1311,9 @@
             const statusLabel = formatStatusLabel(row.status);
             const rankValue = formatRankValue(row.display_rank);
             const scoreValue = formatRawScoreValue(row.raw_score_value);
+            const passingClass = specialRowPassedScore(row) ? " ldss-special-row-passing" : "";
             return [
-                '<tr class="ldss-secretary-app-row" tabindex="0">',
+                '<tr class="ldss-secretary-app-row' + passingClass + '" tabindex="0">',
                 '<td class="ldss-special-col-no" data-label="No.">' + escapeHtml(String(index + 1)) + "</td>",
                 '<td class="ldss-special-col-rank text-center" data-label="Rank"><div class="fw-600">' + escapeHtml(rankValue) + "</div></td>",
                 '<td data-label="Applicant">',
@@ -1258,13 +1354,14 @@
         }).join("");
     }
 
-    function specialPrintSummaryLine(schoolYear, counts) {
+    function specialPrintSummaryLine(schoolYear, counts, filterLabel) {
         return [
             "School Year " + (schoolYear || "-"),
+            filterLabel ? "Tag: " + filterLabel : "",
             "Total Tagged " + String(counts.tagged),
             "Priority Review " + String(counts.priority),
             "For Approval " + String(counts.approval)
-        ].join(" | ");
+        ].filter(Boolean).join(" | ");
     }
 
     function specialPrintTableHeadMarkup() {
@@ -1286,8 +1383,9 @@
         const specialParts = specialCarePrintParts(row);
         const locationParts = barangaySectorPrintParts(row);
         const careTone = specialTagTone(row && row.special_level ? row.special_level : "");
+        const passingClass = specialRowPassedScore(row) ? " ldss-special-print-row-passing" : "";
         return (
-            "<tr>" +
+            '<tr class="' + passingClass.trim() + '">' +
             '<td class="text-center"><span class="ldss-ranking-print-number">' + escapeHtml(String(counter)) + "</span></td>" +
             '<td class="text-center fw-700"><span class="ldss-ranking-print-number">' + escapeHtml(formatRankValue(row.display_rank)) + "</span></td>" +
             "<td>" +
@@ -1314,11 +1412,11 @@
         }
     }
 
-    function renderSpecialPrintPages() {
+    function renderSpecialPrintPages(rows, filterLabel) {
         const container = byId("specialConsiderationPrintPages");
-        const rows = specialRows();
+        const printRows = Array.isArray(rows) ? rows : specialPrintRows();
         const schoolYear = currentSchoolYear();
-        const counts = specialCounterSnapshot();
+        const counts = specialCounterSnapshot(printRows);
         const printedAt = new Date().toLocaleString("en-US", {
             year: "numeric",
             month: "long",
@@ -1331,19 +1429,20 @@
             return false;
         }
 
-        if (!rows.length) {
+        if (!printRows.length) {
             container.innerHTML = "";
             return false;
         }
 
-        const summary = specialPrintSummaryLine(schoolYear, counts);
+        const summary = specialPrintSummaryLine(schoolYear, counts, filterLabel || "");
+        const titleSuffix = filterLabel ? " - " + filterLabel : "";
         container.innerHTML = [
             '<section class="ldss-special-print-document">',
             '<div class="ldss-special-print-header">',
             '<div class="ldss-special-print-brand">',
             '<img class="ldss-special-print-logo" src="' + escapeHtml(specialPrintLogoUrl()) + '" alt="LGU Daet Logo" />',
             '<div class="ldss-special-print-brand-copy">',
-            '<div class="ldss-special-print-title">LDSP Special Consideration Tagged Applicants</div>',
+            '<div class="ldss-special-print-title">LDSP Special Consideration Tagged Applicants' + escapeHtml(titleSuffix) + '</div>',
             '<div class="ldss-special-print-copy">' + escapeHtml(summary) + "</div>",
             '<div class="ldss-special-print-copy">' + escapeHtml("Printed " + printedAt) + "</div>",
             "</div>",
@@ -1352,7 +1451,7 @@
             '<table class="table mb-0 ldss-special-print-table">',
             specialPrintTableHeadMarkup(),
             "<tbody>",
-            rows.map(function (row, index) {
+            printRows.map(function (row, index) {
                 return specialPrintTableRowMarkup(row, index + 1);
             }).join(""),
             "</tbody></table>",
@@ -1363,15 +1462,21 @@
     }
 
     function printAllowedTable() {
-        const rows = specialRows();
+        const rows = specialPrintRows();
+        const selectedEntry = specialPrintSelectedEntry();
 
         if (!rows.length) {
             clearSpecialPrintPages();
-            showManagerStatus("No tagged applicants are available to print yet.", "alert-warning");
+            showManagerStatus(
+                selectedEntry
+                    ? "No tagged applicants match the selected tag yet."
+                    : "No tagged applicants are available to print yet.",
+                "alert-warning"
+            );
             return;
         }
 
-        if (!renderSpecialPrintPages()) {
+        if (!renderSpecialPrintPages(rows, selectedEntry ? selectedEntry.label : "")) {
             showManagerStatus("The print layout could not be prepared right now.", "alert-warning");
             return;
         }
@@ -1380,9 +1485,10 @@
     }
 
     async function downloadAllowedPdf() {
-        const rows = specialRows();
+        const rows = specialPrintRows();
+        const selectedEntry = specialPrintSelectedEntry();
         const schoolYear = currentSchoolYear();
-        const counts = specialCounterSnapshot();
+        const counts = specialCounterSnapshot(rows);
         const printedAt = new Date().toLocaleString("en-US", {
             year: "numeric",
             month: "long",
@@ -1392,7 +1498,12 @@
         });
 
         if (!rows.length) {
-            showManagerStatus("No tagged applicants are available for PDF download yet.", "alert-warning");
+            showManagerStatus(
+                selectedEntry
+                    ? "No tagged applicants match the selected tag yet."
+                    : "No tagged applicants are available for PDF download yet.",
+                "alert-warning"
+            );
             return;
         }
 
@@ -1419,7 +1530,9 @@
             const pageWidth = doc.internal.pageSize.getWidth();
             const left = 18;
             const logoDataUrl = await loadSpecialPrintLogoDataUrl();
-            const summary = specialPrintSummaryLine(schoolYear, counts);
+            const filterLabel = selectedEntry ? selectedEntry.label : "";
+            const summary = specialPrintSummaryLine(schoolYear, counts, filterLabel);
+            const titleSuffix = filterLabel ? " - " + filterLabel : "";
 
             if (logoDataUrl) {
                 doc.addImage(logoDataUrl, "PNG", left, 14, 47, 47);
@@ -1428,7 +1541,7 @@
             doc.setFont("helvetica", "bold");
             doc.setFontSize(16);
             doc.setTextColor(15, 23, 42);
-            doc.text("LDSP Special Consideration Tagged Applicants", left + 55, 30);
+            doc.text("LDSP Special Consideration Tagged Applicants" + titleSuffix, left + 55, 30);
 
             doc.setFont("helvetica", "normal");
             doc.setFontSize(10);
@@ -1484,6 +1597,10 @@
                     if (data.section !== "body") {
                         return;
                     }
+                    if (specialRowPassedScore(rows[data.row.index] || {})) {
+                        data.cell.styles.fillColor = [236, 253, 245];
+                        data.cell.styles.textColor = [15, 23, 42];
+                    }
                     if (data.column.index === 4) {
                         data.cell.styles.fontStyle = "bold";
                     }
@@ -1526,7 +1643,7 @@
                 }
             });
 
-            doc.save("ldss-special-consideration-" + pdfFileSlug(schoolYear, "active-school-year") + ".pdf");
+            doc.save("ldss-special-consideration" + (filterLabel ? "-" + pdfFileSlug(filterLabel, "selected-tag") : "") + "-" + pdfFileSlug(schoolYear, "active-school-year") + ".pdf");
             showManagerStatus("Special consideration PDF downloaded successfully.", "alert-success");
         } catch (error) {
             showManagerStatus(error && error.message ? error.message : "Failed to build the special consideration PDF.", "alert-danger");
@@ -2090,6 +2207,7 @@
         const tableBody = byId("specialConsiderationTableBody");
         const catalogList = byId("specialConsiderationCatalogList");
         const addOptionButton = byId("specialConsiderationAddOption");
+        const printTagSelect = byId("specialConsiderationPrintTag");
         const pdfButton = byId("specialConsiderationPdfBtn");
         const printButton = byId("specialConsiderationPrintBtn");
         const optionSaveButton = byId("specialConsiderationOptionSave");
@@ -2125,6 +2243,12 @@
         if (printButton) {
             printButton.addEventListener("click", function () {
                 printAllowedTable();
+            });
+        }
+
+        if (printTagSelect) {
+            printTagSelect.addEventListener("change", function () {
+                renderSpecialCounters();
             });
         }
 
