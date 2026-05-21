@@ -26,6 +26,7 @@
         Orphan: ["orphan"],
         "None of the above": ["None", "None of Above"]
     };
+    const RANKING_SPECIAL_TAGS_STORAGE_KEY = "ldss:ranking-show-special-tags:v1";
     const PROTECTED_APPLICATION_STATUSES = new Set([
         "special_endorsement_review",
         "for_interview",
@@ -134,6 +135,23 @@
             .map(function (value) { return (value || "").toString().trim(); })
             .filter(Boolean);
         return parts.length ? parts.join(" ") : (profile.email || "Unknown Applicant");
+    }
+
+    function buildApplicantPrintName(profile) {
+        if (!profile) {
+            return "Unknown Applicant";
+        }
+
+        const firstName = (profile.first_name || "").toString().trim();
+        const middleName = (profile.middle_name || "").toString().trim();
+        const lastName = (profile.last_name || "").toString().trim();
+        const trailingNames = [firstName, middleName].filter(Boolean).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames || (profile.email || "Unknown Applicant");
     }
 
     function formatBarangayLabel(value) {
@@ -734,6 +752,51 @@
         return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 10;
     }
 
+    function currentRankingScoreRange() {
+        const fromInput = byId("roomScoreRankingScoreFrom");
+        const toInput = byId("roomScoreRankingScoreTo");
+        const maxScore = maxRawScore();
+
+        function normalizeScoreInput(input) {
+            if (!input) {
+                return null;
+            }
+
+            const raw = (input.value || "").toString().trim();
+            if (!raw) {
+                return null;
+            }
+
+            const numeric = Number(raw);
+            if (!Number.isFinite(numeric)) {
+                return null;
+            }
+
+            return Math.max(1, Math.min(maxScore, Math.trunc(numeric)));
+        }
+
+        const from = normalizeScoreInput(fromInput);
+        const to = normalizeScoreInput(toInput);
+
+        if (from === null || to === null) {
+            return {
+                from: null,
+                to: null,
+                low: null,
+                high: null,
+                hasRange: false
+            };
+        }
+
+        return {
+            from: from,
+            to: to,
+            low: Math.min(from, to),
+            high: Math.max(from, to),
+            hasRange: true
+        };
+    }
+
     function rankingSearchQuery() {
         return normalizeSearchText(currentRankingSearchQuery);
     }
@@ -742,8 +805,55 @@
         return Boolean(row && row.has_special_consideration);
     }
 
+    function rankingSpecialTagToggle() {
+        return byId("roomScoreRankingSpecialTagToggle");
+    }
+
+    function shouldShowRankingSpecialTags() {
+        const toggle = rankingSpecialTagToggle();
+        return !toggle || toggle.checked !== false;
+    }
+
+    function syncRankingSpecialTagLabel() {
+        const label = byId("roomScoreRankingSpecialTagLabel");
+        if (!label) {
+            return;
+        }
+        label.textContent = shouldShowRankingSpecialTags() ? "Visible" : "Hidden";
+    }
+
+    function restoreRankingSpecialTagPreference() {
+        const toggle = rankingSpecialTagToggle();
+        if (!toggle) {
+            return;
+        }
+        try {
+            const saved = localStorage.getItem(RANKING_SPECIAL_TAGS_STORAGE_KEY);
+            if (saved === "0") {
+                toggle.checked = false;
+            } else if (saved === "1") {
+                toggle.checked = true;
+            }
+        } catch (_error) {
+            // Non-fatal convenience only.
+        }
+        syncRankingSpecialTagLabel();
+    }
+
+    function persistRankingSpecialTagPreference() {
+        const toggle = rankingSpecialTagToggle();
+        if (!toggle) {
+            return;
+        }
+        try {
+            localStorage.setItem(RANKING_SPECIAL_TAGS_STORAGE_KEY, toggle.checked ? "1" : "0");
+        } catch (_error) {
+            // Non-fatal convenience only.
+        }
+    }
+
     function specialConsiderationBadgeMarkup(row) {
-        if (!hasSpecialConsideration(row)) {
+        if (!hasSpecialConsideration(row) || !shouldShowRankingSpecialTags()) {
             return "";
         }
         return '<div class="mt-1"><span class="ldss-chip ldss-chip-special-approval ldss-exam-special-chip">Special Consideration</span></div>';
@@ -837,7 +947,43 @@
         if (mode === "top") {
             return "Top Range Ranking";
         }
+        if (mode === "score-range") {
+            return "Score Range Ranking";
+        }
         return "Overall Ranking";
+    }
+
+    function rankingScoreRangeTitle(range) {
+        if (!range || !range.hasRange) {
+            return "Score Range Ranking List";
+        }
+
+        if (range.from !== null && range.to !== null) {
+            return "Score Range " + String(range.high) + " to " + String(range.low) + " Ranking List";
+        }
+
+        if (range.from !== null) {
+            return "Score Range " + String(range.from) + " and Up Ranking List";
+        }
+
+        if (range.to !== null) {
+            return "Score Range Up to " + String(range.to) + " Ranking List";
+        }
+
+        return "Score Range Ranking List";
+    }
+
+    function rankingRowsWithinScoreRange(sourceRows) {
+        const range = currentRankingScoreRange();
+        const rows = Array.isArray(sourceRows) ? sourceRows : [];
+        if (!range.hasRange) {
+            return rows.slice();
+        }
+
+        return rows.filter(function (row) {
+            const score = Number(row && row.raw_score_value);
+            return Number.isFinite(score) && score >= range.low && score <= range.high;
+        });
     }
 
     function rankingRowsForCurrentView() {
@@ -865,6 +1011,8 @@
             if (topCount > 0) {
                 filteredRows = filteredRows.slice(0, topCount);
             }
+        } else if (mode === "score-range") {
+            filteredRows = rankingRowsWithinScoreRange(filteredRows);
         }
 
         const clonedRows = filteredRows.map(function (row) {
@@ -1012,6 +1160,7 @@
         const roomWrap = byId("roomScoreRankingRoomWrap");
         const sectorWrap = byId("roomScoreRankingSectorWrap");
         const topWrap = byId("roomScoreRankingTopWrap");
+        const scoreWrap = byId("roomScoreRankingScoreWrap");
 
         if (roomWrap) {
             roomWrap.classList.toggle("d-none", mode !== "room");
@@ -1021,6 +1170,9 @@
         }
         if (topWrap) {
             topWrap.classList.toggle("d-none", mode !== "top");
+        }
+        if (scoreWrap) {
+            scoreWrap.classList.toggle("d-none", mode !== "score-range");
         }
     }
 
@@ -1117,6 +1269,11 @@
                 title = topCount > 0 ? ("Top " + String(topCount) + " Ranking List") : "All Ranked Records";
                 tableMeta = "Only the selected top range is included in this ranking print view. Same scores share one counted rank.";
                 summary = formatBatchLabel(currentBatchId) + " | " + title + " | Records: " + String(filteredRows.length);
+            } else if (mode === "score-range") {
+                const scoreRange = currentRankingScoreRange();
+                title = rankingScoreRangeTitle(scoreRange);
+                tableMeta = "Only applicants within the selected score range are included in this ranking print view. Same scores share one counted rank.";
+                summary = formatBatchLabel(currentBatchId) + " | " + title + " | Records: " + String(filteredRows.length);
             } else {
                 title = "Overall Ranking List";
                 tableMeta = "All ranked applicants in the selected batch are ordered by score only. Same scores share one counted rank.";
@@ -1195,7 +1352,7 @@
         if (!tbody) {
             return;
         }
-        tbody.innerHTML = '<tr><td colspan="8" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+        tbody.innerHTML = '<tr><td colspan="9" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
     }
 
     function renderEmptyRankingCards(message) {
@@ -1248,7 +1405,9 @@
                 rows: [],
                 message: rankingSearchQuery()
                     ? "No ranked applicants matched the current search."
-                    : "No saved scores matched the selected ranking option."
+                    : (currentRankingMode() === "score-range"
+                        ? "No ranked applicants matched the selected score range."
+                        : "No saved scores matched the selected ranking option.")
             };
         }
 
@@ -1316,6 +1475,21 @@
         return hasSectorClassification(value || "") ? normalizeSectorClassification(value || "") : "";
     }
 
+    function rankingDetailsUrl(row) {
+        if (!row || !row.application_id) {
+            return "";
+        }
+        return "secretary-interview-verification.html?id=" + encodeURIComponent(row.application_id);
+    }
+
+    function rankingDetailsActionMarkup(row, extraClassName) {
+        const href = rankingDetailsUrl(row);
+        if (!href) {
+            return '<span class="btn btn-outline-secondary btn-sm disabled ' + escapeHtml(extraClassName || "") + '" aria-disabled="true">No Details</span>';
+        }
+        return '<a class="btn btn-outline-dark btn-sm ' + escapeHtml(extraClassName || "") + '" href="' + escapeHtml(href) + '" target="_blank" rel="noopener">Open Details</a>';
+    }
+
     function rankingTableRowMarkup(row, index) {
         const counter = index + 1;
         return (
@@ -1332,6 +1506,7 @@
             '<td class="text-center">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</td>" +
             '<td class="text-center">' + sectorClassificationMarkup(row.sector_classification || "") + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</td>" +
+            '<td class="text-center">' + rankingDetailsActionMarkup(row) + "</td>" +
             "</tr>"
         );
     }
@@ -1344,7 +1519,7 @@
             '<td class="text-center"><span class="ldss-ranking-print-number">' + escapeHtml(formatPrintWholeNumber(counter)) + "</span></td>" +
             '<td class="text-center fw-700"><span class="ldss-ranking-print-number">' + escapeHtml(formatPrintWholeNumber(row.display_rank)) + "</span></td>" +
             "<td>" +
-            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_print_name || row.applicant_name || "Unknown Applicant") + "</div>" +
             '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(formatRankingApplicationPrintValue(row)) + "</div>" +
             specialConsiderationBadgeMarkup(row) +
             "</td>" +
@@ -1432,6 +1607,8 @@
         const rankingRoomFilter = byId("roomScoreRankingRoomFilter");
         const rankingSectorFilter = byId("roomScoreRankingSectorFilter");
         const rankingTopFilter = byId("roomScoreRankingTopFilter");
+        const rankingScoreFrom = byId("roomScoreRankingScoreFrom");
+        const rankingScoreTo = byId("roomScoreRankingScoreTo");
         const rankingSearchInput = byId("roomScoreRankingSearchInput");
 
         if (rankingModeFilter) {
@@ -1445,6 +1622,12 @@
         }
         if (rankingTopFilter) {
             rankingTopFilter.value = "all";
+        }
+        if (rankingScoreFrom) {
+            rankingScoreFrom.value = "";
+        }
+        if (rankingScoreTo) {
+            rankingScoreTo.value = "";
         }
 
         currentRankingSearchQuery = "";
@@ -1606,6 +1789,7 @@
                 '<div><div class="ldss-ranking-card-label">Seat</div><div class="ldss-ranking-card-value">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Sector</div><div class="ldss-ranking-card-value">' + sectorClassificationMarkup(row.sector_classification || "") + "</div></div>" +
                 "</div>" +
+                '<div class="mt-3">' + rankingDetailsActionMarkup(row, "w-100") + "</div>" +
                 "</article>"
             );
         }).join("");
@@ -1815,6 +1999,7 @@
                 scholarship_type: application ? application.scholarship_type : "",
                 sector_classification: application ? normalizeSectorClassification(application.sector_classification || "") : "Unspecified",
                 applicant_name: buildApplicantName(profile),
+                applicant_print_name: buildApplicantPrintName(profile),
                 applicant_barangay: formatBarangayLabel(profile && profile.barangay ? profile.barangay : ""),
                 applicant_contact: profile ? (profile.mobile_number || profile.email || "-") : "-",
                 school_name: profile && profile.school_name ? profile.school_name : "",
@@ -2155,8 +2340,11 @@
         const rankingRoomFilter = byId("roomScoreRankingRoomFilter");
         const rankingSectorFilter = byId("roomScoreRankingSectorFilter");
         const rankingTopFilter = byId("roomScoreRankingTopFilter");
+        const rankingScoreFrom = byId("roomScoreRankingScoreFrom");
+        const rankingScoreTo = byId("roomScoreRankingScoreTo");
         const rankingSearchInput = byId("roomScoreRankingSearchInput");
         const rankingSearchClearBtn = byId("roomScoreRankingSearchClearBtn");
+        const rankingSpecialTagToggleInput = rankingSpecialTagToggle();
         const rankingSaveBtn = byId("roomScoreRankingSaveBtn");
         const rankingSortBtn = byId("roomScoreRankingSortBtn");
         const rankingTableBody = byId("roomScoreRankingBody");
@@ -2212,6 +2400,18 @@
             });
         }
 
+        if (rankingScoreFrom) {
+            rankingScoreFrom.addEventListener("change", function () {
+                renderAll();
+            });
+        }
+
+        if (rankingScoreTo) {
+            rankingScoreTo.addEventListener("change", function () {
+                renderAll();
+            });
+        }
+
         if (rankingSearchInput) {
             rankingSearchInput.addEventListener("input", function () {
                 currentRankingSearchQuery = rankingSearchInput.value || "";
@@ -2240,6 +2440,14 @@
                     rankingSearchInput.value = "";
                     rankingSearchInput.focus();
                 }
+                renderAll();
+            });
+        }
+
+        if (rankingSpecialTagToggleInput) {
+            rankingSpecialTagToggleInput.addEventListener("change", function () {
+                persistRankingSpecialTagPreference();
+                syncRankingSpecialTagLabel();
                 renderAll();
             });
         }
@@ -2393,6 +2601,7 @@
             return;
         }
 
+        restoreRankingSpecialTagPreference();
         bindEvents();
         try {
             await fetchData("", "");
