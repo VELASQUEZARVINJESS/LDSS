@@ -27,6 +27,7 @@
         "None of the above": ["None", "None of Above"]
     };
     const RANKING_SPECIAL_TAGS_STORAGE_KEY = "ldss:ranking-show-special-tags:v1";
+    const RANKING_PHOTO_HYDRATION_BATCH_SIZE = 6;
     const PROTECTED_APPLICATION_STATUSES = new Set([
         "special_endorsement_review",
         "for_interview",
@@ -55,6 +56,8 @@
     let currentRoomSearchQuery = "";
     let currentRankingSearchQuery = "";
     let rankingResultDrafts = {};
+    let rankingPhotoHydrationToken = 0;
+    const applicantPhotoUrlCache = new Map();
 
     function byId(id) {
         return document.getElementById(id);
@@ -152,6 +155,71 @@
         }
 
         return lastName || trailingNames || (profile.email || "Unknown Applicant");
+    }
+
+    function buildApplicantInitials(name) {
+        const words = (name || "")
+            .toString()
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+
+        if (!words.length) {
+            return "NA";
+        }
+
+        const first = (words[0].charAt(0) || "").toUpperCase();
+        const lastSource = words.length > 1 ? words[words.length - 1] : words[0];
+        const last = (words.length > 1 ? lastSource.charAt(0) : lastSource.charAt(1) || "").toUpperCase();
+        return (first + last) || first || "NA";
+    }
+
+    async function createApplicantPhotoUrl(path) {
+        const cleanPath = (path || "").toString().trim();
+        if (!cleanPath || !context || !context.client) {
+            return "";
+        }
+
+        if (applicantPhotoUrlCache.has(cleanPath)) {
+            return applicantPhotoUrlCache.get(cleanPath) || "";
+        }
+
+        if (window.ldssUploads && typeof window.ldssUploads.createObjectUrl === "function") {
+            try {
+                const url = await window.ldssUploads.createObjectUrl(context, cleanPath);
+                applicantPhotoUrlCache.set(cleanPath, url || "");
+                return url || "";
+            } catch (error) {
+                const message = error && error.message ? error.message : "";
+                const isPreviewRouteIssue =
+                    message.includes("Upload API route was not found")
+                    || message.includes("Upload API returned an HTML page")
+                    || message.includes("Upload server is not available right now")
+                    || message.includes("Failed to fetch");
+
+                if (isPreviewRouteIssue) {
+                    applicantPhotoUrlCache.set(cleanPath, "");
+                    return "";
+                }
+            }
+        }
+
+        try {
+            const result = await context.client.storage
+                .from(window.LDSS_STORAGE_BUCKET || "ldss-documents")
+                .createSignedUrl(cleanPath, 60 * 30);
+
+            if (result.error || !result.data || !result.data.signedUrl) {
+                applicantPhotoUrlCache.set(cleanPath, "");
+                return "";
+            }
+
+            applicantPhotoUrlCache.set(cleanPath, result.data.signedUrl || "");
+            return result.data.signedUrl || "";
+        } catch (error) {
+            applicantPhotoUrlCache.set(cleanPath, "");
+            return "";
+        }
     }
 
     function formatBarangayLabel(value) {
@@ -594,7 +662,7 @@
 
             const result = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number, barangay")
+                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number, barangay, applicant_photo_path")
                 .in("id", chunk);
 
             if (result.error) {
@@ -602,6 +670,11 @@
             }
 
             (result.data || []).forEach(function (profile) {
+                const photoPath = profile && profile.applicant_photo_path ? profile.applicant_photo_path : "";
+                const cachedPhotoUrl = photoPath && applicantPhotoUrlCache.has(photoPath)
+                    ? (applicantPhotoUrlCache.get(photoPath) || "")
+                    : "";
+                profile.applicant_photo_url = cachedPhotoUrl;
                 map[profile.id] = profile;
             });
         }
@@ -1490,6 +1563,124 @@
         return '<a class="btn btn-outline-dark btn-sm ' + escapeHtml(extraClassName || "") + '" href="' + escapeHtml(href) + '" target="_blank" rel="noopener">Open Details</a>';
     }
 
+    function rankingApplicantAvatarMarkup(row, extraClassName) {
+        const applicantName = row && row.applicant_name ? row.applicant_name : "Unknown Applicant";
+        const photoUrl = row && row.applicant_photo_url ? row.applicant_photo_url : "";
+        const className = extraClassName ? " " + escapeHtml(extraClassName) : "";
+        const href = rankingDetailsUrl(row);
+        let avatarContent = "";
+
+        if (photoUrl) {
+            avatarContent = (
+                '<span class="ldss-ranking-avatar' + className + '">' +
+                '<img src="' + escapeHtml(photoUrl) + '" alt="' + escapeHtml(applicantName + " profile picture") + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" />' +
+                "</span>"
+            );
+        } else {
+            avatarContent = '<span class="ldss-ranking-avatar' + className + '" aria-hidden="true">' + escapeHtml(buildApplicantInitials(applicantName)) + "</span>";
+        }
+
+        if (!href) {
+            return avatarContent;
+        }
+
+        return (
+            '<a class="ldss-ranking-avatar-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" aria-label="' + escapeHtml("Open details for " + applicantName) + '" title="' + escapeHtml("Open details for " + applicantName) + '">' +
+            avatarContent +
+            "</a>"
+        );
+    }
+
+    function rankingApplicantCopyMarkup(row, options) {
+        const applicantName = row && row.applicant_name ? row.applicant_name : "Unknown Applicant";
+        const applicationNo = row && row.application_no ? row.application_no : "-";
+        const href = rankingDetailsUrl(row);
+        const nameClassName = options && options.nameClassName ? options.nameClassName : "fw-700";
+        const metaClassName = options && options.metaClassName ? options.metaClassName : "small text-muted";
+        const content = (
+            '<div class="' + escapeHtml(nameClassName) + '">' + escapeHtml(applicantName) + "</div>" +
+            '<div class="' + escapeHtml(metaClassName) + '">' + escapeHtml(applicationNo) + "</div>"
+        );
+
+        if (!href) {
+            return content;
+        }
+
+        return (
+            '<a class="ldss-ranking-copy-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" aria-label="' + escapeHtml("Open details for " + applicantName) + '" title="' + escapeHtml("Open details for " + applicantName) + '">' +
+            content +
+            "</a>"
+        );
+    }
+
+    function rankingPhotoRowsForCurrentView() {
+        const seenPaths = new Set();
+        return rankingDatasetForRender().rows.filter(function (row) {
+            const photoPath = row && row.applicant_photo_path ? row.applicant_photo_path : "";
+            if (!photoPath || seenPaths.has(photoPath)) {
+                return false;
+            }
+            seenPaths.add(photoPath);
+            return !row.applicant_photo_url;
+        });
+    }
+
+    function applyApplicantPhotoUrl(row, photoUrl) {
+        const applicantId = row && row.applicant_id ? row.applicant_id : "";
+        const photoPath = row && row.applicant_photo_path ? row.applicant_photo_path : "";
+        if (!applicantId || !photoPath) {
+            return false;
+        }
+
+        let changed = false;
+        rows.forEach(function (entry) {
+            if (entry && entry.applicant_id === applicantId && entry.applicant_photo_path === photoPath && entry.applicant_photo_url !== photoUrl) {
+                entry.applicant_photo_url = photoUrl;
+                changed = true;
+            }
+        });
+        return changed;
+    }
+
+    async function hydrateRankingPhotosForCurrentView() {
+        if (!isRankingPage()) {
+            return;
+        }
+
+        const token = ++rankingPhotoHydrationToken;
+        const pendingRows = rankingPhotoRowsForCurrentView();
+        if (!pendingRows.length) {
+            return;
+        }
+
+        for (let start = 0; start < pendingRows.length; start += RANKING_PHOTO_HYDRATION_BATCH_SIZE) {
+            if (token !== rankingPhotoHydrationToken) {
+                return;
+            }
+
+            const batch = pendingRows.slice(start, start + RANKING_PHOTO_HYDRATION_BATCH_SIZE);
+            const results = await Promise.all(batch.map(async function (row) {
+                return {
+                    row: row,
+                    photoUrl: await createApplicantPhotoUrl(row.applicant_photo_path || "")
+                };
+            }));
+
+            if (token !== rankingPhotoHydrationToken) {
+                return;
+            }
+
+            const changed = results.some(function (entry) {
+                return applyApplicantPhotoUrl(entry.row, entry.photoUrl || "");
+            });
+
+            if (changed) {
+                renderRankingTable();
+                renderRankingCards();
+            }
+        }
+    }
+
     function rankingTableRowMarkup(row, index) {
         const counter = index + 1;
         return (
@@ -1497,9 +1688,13 @@
             '<td class="text-center fw-700">' + escapeHtml(String(counter)) + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
             "<td>" +
-            '<div class="fw-700">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-            '<div class="small text-muted">' + escapeHtml(row.application_no || "-") + "</div>" +
+            '<div class="ldss-ranking-applicant-cell">' +
+            rankingApplicantAvatarMarkup(row) +
+            '<div class="ldss-ranking-applicant-copy">' +
+            rankingApplicantCopyMarkup(row) +
             specialConsiderationBadgeMarkup(row) +
+            "</div>" +
+            "</div>" +
             "</td>" +
             "<td>" + escapeHtml(row.applicant_barangay || "No barangay") + "</td>" +
             '<td class="text-center">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</td>" +
@@ -1780,9 +1975,16 @@
                 '<div class="ldss-ranking-card-score-value">' + escapeHtml(formatRawScoreInput(row.raw_score_value)) + "</div>" +
                 "</div>" +
                 "</div>" +
-                '<div class="ldss-ranking-card-name">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
-                '<div class="ldss-ranking-card-school">' + escapeHtml(row.application_no || "-") + "</div>" +
+                '<div class="ldss-ranking-card-identity">' +
+                rankingApplicantAvatarMarkup(row, "ldss-ranking-avatar-card") +
+                '<div class="ldss-ranking-applicant-copy">' +
+                rankingApplicantCopyMarkup(row, {
+                    nameClassName: "ldss-ranking-card-name",
+                    metaClassName: "ldss-ranking-card-school"
+                }) +
                 specialConsiderationBadgeMarkup(row) +
+                "</div>" +
+                "</div>" +
                 '<div class="ldss-ranking-card-grid mt-3">' +
                 '<div><div class="ldss-ranking-card-label">Barangay</div><div class="ldss-ranking-card-value">' + escapeHtml(row.applicant_barangay || "No barangay") + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Room</div><div class="ldss-ranking-card-value">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</div></div>" +
@@ -1962,6 +2164,7 @@
         renderRankingCards();
         renderRankingPrintPages();
         syncActionButtons();
+        hydrateRankingPhotosForCurrentView();
     }
 
     async function fetchData(preferredBatchId, preferredRoomLabel) {
@@ -2000,6 +2203,8 @@
                 sector_classification: application ? normalizeSectorClassification(application.sector_classification || "") : "Unspecified",
                 applicant_name: buildApplicantName(profile),
                 applicant_print_name: buildApplicantPrintName(profile),
+                applicant_photo_path: profile && profile.applicant_photo_path ? profile.applicant_photo_path : "",
+                applicant_photo_url: profile && profile.applicant_photo_url ? profile.applicant_photo_url : "",
                 applicant_barangay: formatBarangayLabel(profile && profile.barangay ? profile.barangay : ""),
                 applicant_contact: profile ? (profile.mobile_number || profile.email || "-") : "-",
                 school_name: profile && profile.school_name ? profile.school_name : "",
