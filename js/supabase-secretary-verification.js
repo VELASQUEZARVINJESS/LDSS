@@ -667,6 +667,14 @@
         return CORRECTION_TARGET_LABELS[normalized] ? normalized : "";
     }
 
+    function buildPrintFormUrl(applicationId, autoPrint) {
+        let url = "secretary-print-form.html?id=" + encodeURIComponent(applicationId || "");
+        if (autoPrint) {
+            url += "&download=1";
+        }
+        return url;
+    }
+
     function normalizeCorrectionTargetKeys(rawValue) {
         let values = [];
         if (Array.isArray(rawValue)) {
@@ -4043,7 +4051,11 @@
                     showStatus("No application is loaded yet.", "alert-warning");
                     return;
                 }
-                window.location.href = "secretary-print-form.html?id=" + encodeURIComponent(currentApplication.id);
+                const printUrl = buildPrintFormUrl(currentApplication.id, true);
+                const printWindow = window.open(printUrl, "_blank", "noopener");
+                if (!printWindow) {
+                    window.location.href = printUrl;
+                }
             });
         }
 

@@ -5,21 +5,7 @@
     const TAX_DOC_TYPE = "income_certificate";
     const PHOTO_DOC_TYPE = "applicant_photo";
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
-    const PRINT_READY_STATUSES = [
-        "passed_exam",
-        "failed_exam",
-        "special_endorsement_review",
-        "for_interview",
-        "interview_scheduled",
-        "interview_completed",
-        "hard_copy_verified",
-        "for_approval",
-        "approved",
-        "waitlisted",
-        "rejected",
-        "for_release",
-        "released"
-    ];
+    const NON_PRINTABLE_STATUSES = ["draft"];
 
     const TAX_DOC_STATUS_META = {
         pending: { label: "For Review", chipClass: "ldss-chip-accent" },
@@ -29,6 +15,7 @@
         missing: { label: "Missing", chipClass: "ldss-chip-neutral" }
     };
 
+    let autoPrintTriggered = false;
     let profilesSupportsPlaceOfBirth = true;
     let applicationAuxDataAvailable = true;
 
@@ -45,6 +32,10 @@
                 };
             }
         };
+    }
+
+    function normalizeStatusValue(status) {
+        return (status || "").toString().trim().toLowerCase();
     }
 
     function valueOrDash(value) {
@@ -117,16 +108,24 @@
         alert.textContent = message;
     }
 
+    function canPrintApplication(application) {
+        const status = normalizeStatusValue(application && application.status);
+        return Boolean(application && status && !NON_PRINTABLE_STATUSES.includes(status));
+    }
+
     function buildApplicantName(profile) {
-        const parts = [profile && profile.first_name, profile && profile.middle_name, profile && profile.last_name]
-            .map(function (value) {
-                return (value || "").toString().trim();
-            })
-            .filter(function (value) {
-                return value.length > 0;
-            });
-        const fullName = parts.join(" ");
-        return fullName || (profile && profile.email ? profile.email : "-");
+        const firstName = (profile && profile.first_name ? profile.first_name : "").toString().trim();
+        const middleName = (profile && profile.middle_name ? profile.middle_name : "").toString().trim();
+        const lastName = (profile && profile.last_name ? profile.last_name : "").toString().trim();
+        const trailingNames = [firstName, middleName].filter(function (value) {
+            return value.length > 0;
+        }).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames || (profile && profile.email ? profile.email : "-");
     }
 
     function normalizeAddressSegment(value) {
@@ -273,7 +272,8 @@
         const params = new URLSearchParams(window.location.search);
         return {
             id: params.get("id"),
-            applicationNo: params.get("application_no")
+            applicationNo: params.get("application_no"),
+            download: params.get("download") === "1"
         };
     }
 
@@ -360,19 +360,19 @@
         placeholder.classList.add("d-none");
     }
 
-    function setPrintAvailability(status) {
+    function setPrintAvailability(application) {
         const printBtn = byId("secretaryPrintBtn");
         if (!printBtn) {
             return;
         }
 
-        const ready = PRINT_READY_STATUSES.includes(status || "");
-        printBtn.disabled = !ready;
-        if (ready) {
+        const printable = canPrintApplication(application);
+        printBtn.disabled = !printable;
+        if (printable) {
             printBtn.removeAttribute("title");
             return;
         }
-        printBtn.title = "Printing is enabled after exam or interview stage onward.";
+        printBtn.title = "Printing is available after the application is submitted.";
     }
 
     async function createSignedUrl(context, path) {
@@ -382,7 +382,23 @@
         if (!window.ldssUploads || typeof window.ldssUploads.createObjectUrl !== "function") {
             return "";
         }
-        return window.ldssUploads.createObjectUrl(context, path);
+        try {
+            return await window.ldssUploads.createObjectUrl(context, path);
+        } catch (error) {
+            const message = error && error.message ? error.message : "";
+            const isHostedPreviewRouteIssue =
+                message.includes("Upload API route was not found")
+                || message.includes("Upload API returned an HTML page")
+                || message.includes("Upload server is not available right now")
+                || message.includes("Failed to fetch");
+
+            // Keep the printable form usable even if an older hosted file
+            // preview cannot be loaded on the current deployment.
+            if (isHostedPreviewRouteIssue) {
+                return "";
+            }
+            throw error;
+        }
     }
 
     function latestDocumentsByType(rows) {
@@ -433,6 +449,7 @@
         const latestResult = await context.client
             .from("applications")
             .select(selectFields)
+            .neq("status", "draft")
             .order("updated_at", { ascending: false })
             .limit(1);
 
@@ -516,7 +533,7 @@
         setText("secretaryPrintApplicantName", profile ? buildApplicantName(profile) : "-");
         setText("secretaryPrintUpdatedAt", application ? formatDateTime(application.updated_at) : "-");
         setTaxChip(taxDoc ? taxDoc.verification_status : "missing");
-        setPrintAvailability(application ? application.status : "");
+        setPrintAvailability(application);
     }
 
     function renderSheet(application, profile, auxMeta, taxDoc) {
@@ -578,51 +595,65 @@
     async function loadRecord(context, lookup, requestedByUser) {
         showStatus("Loading application record...", "alert-info");
 
-        const application = await fetchApplication(context, lookup || {});
-        if (!application) {
-            renderMeta(null, null, null);
-            renderSheet(null, null, {}, null);
+        try {
+            const application = await fetchApplication(context, lookup || {});
+            if (!application) {
+                renderMeta(null, null, null);
+                renderSheet(null, null, {}, null);
+                setPhoto("");
+                setTaxFileLink("");
+                showStatus("No application records found.", "alert-warning");
+                return false;
+            }
+
+            const [profile, docs, auxMeta] = await Promise.all([
+                fetchProfile(context, application.applicant_id),
+                fetchDocuments(context, application.id),
+                fetchSharedAuxMeta(context, application.id)
+            ]);
+
+            const latestDocs = latestDocumentsByType(docs);
+            const taxDoc = latestDocs[TAX_DOC_TYPE] || null;
+            const photoDoc = latestDocs[PHOTO_DOC_TYPE] || null;
+
+            renderMeta(application, profile, taxDoc);
+            renderSheet(application, profile, auxMeta || {}, taxDoc);
             setPhoto("");
             setTaxFileLink("");
-            showStatus("No application records found.", "alert-warning");
-            return;
-        }
 
-        const [profile, docs, auxMeta] = await Promise.all([
-            fetchProfile(context, application.applicant_id),
-            fetchDocuments(context, application.id),
-            fetchSharedAuxMeta(context, application.id)
-        ]);
+            const applicantPhotoPath = (profile && profile.applicant_photo_path) || (photoDoc ? photoDoc.storage_path : "");
+            const taxFilePath = taxDoc ? taxDoc.storage_path : "";
 
-        const latestDocs = latestDocumentsByType(docs);
-        const taxDoc = latestDocs[TAX_DOC_TYPE] || null;
-        const photoDoc = latestDocs[PHOTO_DOC_TYPE] || null;
+            const [photoUrl, taxUrl] = await Promise.all([
+                createSignedUrl(context, applicantPhotoPath),
+                createSignedUrl(context, taxFilePath)
+            ]);
 
-        const applicantPhotoPath = (profile && profile.applicant_photo_path) || (photoDoc ? photoDoc.storage_path : "");
-        const taxFilePath = taxDoc ? taxDoc.storage_path : "";
+            setPhoto(photoUrl);
+            setTaxFileLink(taxUrl);
 
-        const [photoUrl, taxUrl] = await Promise.all([
-            createSignedUrl(context, applicantPhotoPath),
-            createSignedUrl(context, taxFilePath)
-        ]);
+            if (!canPrintApplication(application)) {
+                showStatus(
+                    "Draft records are not ready for printing yet. Submit the application first or load a different application record.",
+                    "alert-warning"
+                );
+                return false;
+            }
 
-        renderMeta(application, profile, taxDoc);
-        renderSheet(application, profile, auxMeta || {}, taxDoc);
-        setPhoto(photoUrl);
-        setTaxFileLink(taxUrl);
-
-        if (!PRINT_READY_STATUSES.includes(application.status || "")) {
+            if (requestedByUser) {
+                showStatus("Loaded " + application.application_no + " successfully.", "alert-success");
+            } else {
+                showStatus("");
+            }
+            return true;
+        } catch (error) {
+            console.error("Secretary print form failed to load record.", error);
             showStatus(
-                "This record is still before exam/interview flow. Print is enabled once exam stage begins.",
-                "alert-warning"
+                "Unable to finish loading this printable application record. "
+                + (error && error.message ? error.message : "Please try again."),
+                "alert-danger"
             );
-            return;
-        }
-
-        if (requestedByUser) {
-            showStatus("Loaded " + application.application_no + " successfully.", "alert-success");
-        } else {
-            showStatus("");
+            return false;
         }
     }
 
@@ -680,7 +711,13 @@
             if (input) {
                 input.value = autoLookup.id || autoLookup.applicationNo;
             }
-            await loadRecord(context, autoLookup, false);
+            const loaded = await loadRecord(context, autoLookup, false);
+            if (loaded && query.download && !autoPrintTriggered) {
+                autoPrintTriggered = true;
+                window.setTimeout(function () {
+                    window.print();
+                }, 350);
+            }
             return;
         }
 
