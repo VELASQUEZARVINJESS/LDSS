@@ -40,6 +40,9 @@ const SPECIAL_EXAM_RESCHEDULE_MAX_RECIPIENTS = 500;
 const DEFAULT_SPECIAL_EXAM_RESCHEDULE_SUBJECT = "LDSP Special Examination Reschedule Notice";
 const DEFAULT_ONLINE_APPLICATION_SUBMISSION_DEADLINE_LABEL = "March 23, 2026";
 const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
+const PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE = "Exam room lookup is temporarily unavailable. Please try again later.";
+const PUBLIC_LOOKUP_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const PUBLIC_LOOKUP_RATE_LIMIT_MAX_REQUESTS = 12;
 const WALK_IN_TEMP_PASSWORD_LENGTH = 16;
 const SUPABASE_FETCH_LIMIT = 1000;
 const SUPPORT_FACEBOOK_PAGE_URL = "https://www.facebook.com/profile.php?id=61583672829501";
@@ -93,6 +96,7 @@ let reminderCampaignProcessorRunning = false;
 let reminderCampaignProcessorInterval = null;
 let examScheduleEmailProcessorRunning = false;
 let examScheduleEmailProcessorInterval = null;
+const publicLookupRateLimitState = new Map();
 const MIME_BY_KIND = {
     jpg: "image/jpeg",
     png: "image/png",
@@ -196,6 +200,41 @@ function applyUploadCors(request, response) {
     response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     response.setHeader("Access-Control-Max-Age", "86400");
+}
+
+function requestClientAddress(request) {
+    const forwardedFor = (request.headers["x-forwarded-for"] || "").toString().split(",")[0].trim();
+    if (forwardedFor) {
+        return forwardedFor;
+    }
+
+    return (
+        request.ip ||
+        (request.socket && request.socket.remoteAddress) ||
+        ""
+    ).toString().trim() || "unknown";
+}
+
+function consumeRateLimit(store, key, windowMs, maxRequests) {
+    const now = Date.now();
+    const timestamps = (store.get(key) || []).filter(function (timestamp) {
+        return now - timestamp < windowMs;
+    });
+
+    if (timestamps.length >= maxRequests) {
+        store.set(key, timestamps);
+        return {
+            allowed: false,
+            retryAfterSeconds: Math.ceil((windowMs - (now - timestamps[0])) / 1000)
+        };
+    }
+
+    timestamps.push(now);
+    store.set(key, timestamps);
+    return {
+        allowed: true,
+        retryAfterSeconds: 0
+    };
 }
 
 function createSupabaseClient(accessToken) {
@@ -3544,8 +3583,20 @@ app.post("/api/super-admin/users/:userId/reset-walk-in-password", authenticate, 
 
 app.post("/api/public/exam-room-lookup", async function (request, response) {
     try {
+        const rateLimit = consumeRateLimit(
+            publicLookupRateLimitState,
+            requestClientAddress(request),
+            PUBLIC_LOOKUP_RATE_LIMIT_WINDOW_MS,
+            PUBLIC_LOOKUP_RATE_LIMIT_MAX_REQUESTS
+        );
+        if (!rateLimit.allowed) {
+            response.setHeader("Retry-After", String(rateLimit.retryAfterSeconds));
+            writeJsonError(response, 429, "Too many exam room lookup attempts. Please wait a few minutes and try again.");
+            return;
+        }
+
         if (!SUPABASE_SERVICE_ROLE_KEY) {
-            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            writeJsonError(response, 503, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
             return;
         }
 
@@ -3563,7 +3614,7 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
 
         const adminClient = createSupabaseAdminClient();
         if (!adminClient) {
-            writeJsonError(response, 503, "Server is missing LDSS_SUPABASE_SERVICE_ROLE_KEY.");
+            writeJsonError(response, 503, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
             return;
         }
 
@@ -3574,7 +3625,8 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
             .maybeSingle();
 
         if (applicationResult.error) {
-            writeJsonError(response, 400, applicationResult.error.message || "Failed to load application record.");
+            console.error("[public-exam-room-lookup] applications lookup failed:", applicationResult.error.message || applicationResult.error);
+            writeJsonError(response, 503, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
             return;
         }
         if (!applicationResult.data || !applicationResult.data.id || !applicationResult.data.applicant_id) {
@@ -3589,7 +3641,8 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
             .maybeSingle();
 
         if (profileResult.error) {
-            writeJsonError(response, 400, profileResult.error.message || "Failed to load applicant record.");
+            console.error("[public-exam-room-lookup] profiles lookup failed:", profileResult.error.message || profileResult.error);
+            writeJsonError(response, 503, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
             return;
         }
         if (!profileResult.data || !profileResult.data.id) {
@@ -3646,7 +3699,8 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
         }
 
         if (recordResult.error) {
-            writeJsonError(response, 400, recordResult.error.message || "Failed to load exam assignment.");
+            console.error("[public-exam-room-lookup] exam_records lookup failed:", recordResult.error.message || recordResult.error);
+            writeJsonError(response, 503, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
             return;
         }
 
@@ -3663,7 +3717,8 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
                 .maybeSingle();
 
             if (batchResult.error) {
-                writeJsonError(response, 400, batchResult.error.message || "Failed to load exam batch.");
+                console.error("[public-exam-room-lookup] exam_batches lookup failed:", batchResult.error.message || batchResult.error);
+                writeJsonError(response, 503, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
                 return;
             }
             batch = batchResult.data || null;
@@ -3702,7 +3757,8 @@ app.post("/api/public/exam-room-lookup", async function (request, response) {
             }
         });
     } catch (error) {
-        writeJsonError(response, 500, error && error.message ? error.message : "Public exam room lookup failed.");
+        console.error("[public-exam-room-lookup] unexpected error:", error && error.stack ? error.stack : error);
+        writeJsonError(response, 500, PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE);
     }
 });
 

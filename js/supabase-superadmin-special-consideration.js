@@ -20,6 +20,8 @@
     let specialCandidates = [];
     let specialApplicationsById = {};
     let specialFlagsAvailable = true;
+    let finalListInclusionAvailable = true;
+    let finalListInclusionEndorsedByAvailable = true;
     let specialLoadToken = 0;
     let specialFlowModalTimer = 0;
     let specialStatusToastInstance = null;
@@ -37,6 +39,13 @@
             return null;
         }
         return JSON.parse(JSON.stringify(settings));
+    }
+
+    function normalizeFinalListEndorsedBy(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s+/g, " ")
+            .trim();
     }
 
     function readFallbackStorage() {
@@ -373,6 +382,23 @@
             upperText(profile.middle_name || ""),
             upperText(profile.last_name || "")
         ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    }
+
+    function buildApplicantPrintName(profile) {
+        if (!profile || typeof profile !== "object") {
+            return "";
+        }
+
+        const firstName = upperText(profile.first_name || "");
+        const middleName = upperText(profile.middle_name || "");
+        const lastName = upperText(profile.last_name || "");
+        const trailingNames = [firstName, middleName].filter(Boolean).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames;
     }
 
     function formatBarangayPrintValue(value) {
@@ -754,6 +780,14 @@
         return window.bootstrap.Modal.getOrCreateInstance(modalEl);
     }
 
+    function finalListModalInstance() {
+        const modalEl = byId("finalListInclusionEditModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        return window.bootstrap.Modal.getOrCreateInstance(modalEl);
+    }
+
     function openCatalogModal() {
         const modal = catalogModalInstance();
         const labelInput = byId("specialConsiderationOptionLabel");
@@ -794,15 +828,56 @@
         modal.show();
     }
 
+    function openFinalListModal(applicationId) {
+        const row = specialApplicationsById[applicationId];
+        const modal = finalListModalInstance();
+        const applicationInput = byId("finalListInclusionApplicationId");
+        const title = byId("finalListInclusionModalTitle");
+        const applicantName = byId("finalListInclusionApplicantName");
+        const applicationMeta = byId("finalListInclusionApplicationMeta");
+        const endorsedByInput = byId("finalListInclusionEndorsedBy");
+        const saveButton = byId("finalListInclusionSave");
+        const isEditing = Boolean(row && row.is_final_list_inclusion === true);
+
+        if (!row || !modal || !applicationInput || !title || !applicantName || !applicationMeta || !endorsedByInput || !saveButton) {
+            return;
+        }
+        if (!specialFlagsAvailable || !finalListInclusionAvailable) {
+            showManagerStatus("Final list inclusion storage is not installed yet. Apply the 2026-05-08 SQL hotfix first.", "alert-warning");
+            return;
+        }
+        if (!finalListInclusionEndorsedByAvailable) {
+            showManagerStatus("Apply the updated 2026-05-08 SQL hotfix first to record Care Of / Endorsed By.", "alert-warning");
+            return;
+        }
+
+        applicationInput.value = applicationId;
+        title.textContent = isEditing ? "Update Final List Inclusion" : "Add To Final List";
+        applicantName.textContent = row.applicant_name || "Unknown Applicant";
+        applicationMeta.textContent = (row.application_no || "-") + " | " + formatStatusLabel(row.status);
+        endorsedByInput.value = normalizeFinalListEndorsedBy(row.final_list_inclusion_endorsed_by);
+        saveButton.textContent = isEditing ? "Save Changes" : "Save Final List Entry";
+        modal.show();
+        window.setTimeout(function () {
+            endorsedByInput.focus();
+            endorsedByInput.select();
+        }, 150);
+    }
+
     function syncManagerState() {
         const searchInput = byId("specialConsiderationSearchInput");
         const meta = byId("specialConsiderationMeta");
+        const finalSearchInput = byId("finalListInclusionSearchInput");
+        const finalMeta = byId("finalListInclusionMeta");
         const schoolYear = currentSchoolYear();
         const addOptionButton = byId("specialConsiderationAddOption");
         const controlsDisabled = !specialFlagsAvailable || !schoolYear;
 
         if (searchInput) {
             searchInput.disabled = !specialFlagsAvailable || !schoolYear;
+        }
+        if (finalSearchInput) {
+            finalSearchInput.disabled = !specialFlagsAvailable || !finalListInclusionAvailable || !finalListInclusionEndorsedByAvailable || !schoolYear;
         }
         if (addOptionButton) {
             addOptionButton.disabled = controlsDisabled;
@@ -824,9 +899,25 @@
             }
         }
 
+        if (finalMeta) {
+            finalMeta.classList.remove("d-none");
+            if (!schoolYear) {
+                finalMeta.textContent = "Save Scholarship Settings first to set the active school year.";
+            } else if (!specialFlagsAvailable) {
+                finalMeta.textContent = "Final list inclusion storage is not installed yet. Apply the 2026-05-08 SQL hotfix first.";
+            } else if (!finalListInclusionAvailable) {
+                finalMeta.textContent = "Final list inclusion columns are not installed yet. Apply the 2026-05-08 SQL hotfix first.";
+            } else if (!finalListInclusionEndorsedByAvailable) {
+                finalMeta.textContent = "Apply the updated 2026-05-08 SQL hotfix first to capture Care Of / Endorsed By for Final List Inclusion.";
+            } else {
+                finalMeta.textContent = "This list only affects the Secretary Scholar Selection final total. Applicant-side score and rank stay based on the real exam record.";
+            }
+        }
+
         renderFlowChip();
         renderOptionCatalog();
         renderSpecialCounters();
+        renderFinalListCounters();
     }
 
     function applySettingsRecord(record) {
@@ -862,6 +953,16 @@
             });
     }
 
+    function finalListInclusionRows() {
+        return specialCandidates
+            .filter(function (row) { return row.is_final_list_inclusion === true; })
+            .sort(function (left, right) {
+                const leftStamp = new Date(left.final_list_inclusion_updated_at || left.updated_at || left.created_at || 0).getTime();
+                const rightStamp = new Date(right.final_list_inclusion_updated_at || right.updated_at || right.created_at || 0).getTime();
+                return rightStamp - leftStamp;
+            });
+    }
+
     function specialCounterSnapshot(sourceRows) {
         const rows = Array.isArray(sourceRows) ? sourceRows : specialRows();
         const snapshot = {
@@ -883,6 +984,16 @@
         });
 
         return snapshot;
+    }
+
+    function finalListCounterSnapshot(sourceRows) {
+        const rows = Array.isArray(sourceRows) ? sourceRows : finalListInclusionRows();
+        return {
+            tagged: rows.length,
+            available: specialCandidates.filter(function (row) {
+                return row.is_final_list_inclusion !== true;
+            }).length
+        };
     }
 
     function specialPrintTagEntries() {
@@ -931,7 +1042,7 @@
 
     function specialPassingScoreValue() {
         const value = Number(currentControls().passing_score);
-        return Number.isFinite(value) ? value : null;
+        return Number.isFinite(value) ? Math.round(value) : null;
     }
 
     function specialRowPassedScore(row) {
@@ -998,6 +1109,12 @@
         }
     }
 
+    function renderFinalListCounters() {
+        const snapshot = finalListCounterSnapshot();
+        setText("finalListInclusionTaggedCount", snapshot.tagged);
+        setText("finalListInclusionAvailableCount", snapshot.available);
+    }
+
     function pdfFileSlug(value, fallback) {
         const slug = (value || "")
             .toString()
@@ -1044,6 +1161,8 @@
     function setLoadingState(message) {
         const searchResults = byId("specialConsiderationSearchResults");
         const tableBody = byId("specialConsiderationTableBody");
+        const finalSearchResults = byId("finalListInclusionSearchResults");
+        const finalTableBody = byId("finalListInclusionTableBody");
         const safeMessage = escapeHtml(message || "Loading special consideration students...");
 
         if (searchResults) {
@@ -1052,7 +1171,14 @@
         if (tableBody) {
             tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">' + safeMessage + "</td></tr>";
         }
+        if (finalSearchResults) {
+            finalSearchResults.innerHTML = '<div class="px-3 pb-3 small text-muted">' + safeMessage + "</div>";
+        }
+        if (finalTableBody) {
+            finalTableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">' + safeMessage + "</td></tr>";
+        }
         renderSpecialCounters();
+        renderFinalListCounters();
     }
 
     async function fetchProfiles(context, applicantIds) {
@@ -1181,12 +1307,48 @@
         let start = 0;
 
         while (true) {
-            const result = await context.client
+            let result = await context.client
                 .from(APPLICATION_STAFF_FLAGS_TABLE)
-                .select("application_id, special_consideration_tag, updated_at, created_at")
-                .not("special_consideration_tag", "is", null)
+                .select("application_id, special_consideration_tag, special_consideration_marked_by, final_list_inclusion, final_list_inclusion_marked_by, final_list_inclusion_updated_at, final_list_inclusion_endorsed_by, updated_at, created_at")
                 .order("updated_at", { ascending: false })
                 .range(start, start + SPECIAL_FLAG_BATCH_SIZE - 1);
+
+            if (result.error && /final_list_inclusion_endorsed_by/i.test(result.error.message || "")) {
+                finalListInclusionEndorsedByAvailable = false;
+                result = await context.client
+                    .from(APPLICATION_STAFF_FLAGS_TABLE)
+                    .select("application_id, special_consideration_tag, special_consideration_marked_by, final_list_inclusion, final_list_inclusion_marked_by, final_list_inclusion_updated_at, updated_at, created_at")
+                    .order("updated_at", { ascending: false })
+                    .range(start, start + SPECIAL_FLAG_BATCH_SIZE - 1);
+
+                if (!result.error) {
+                    result.data = (result.data || []).map(function (row) {
+                        return Object.assign({}, row, {
+                            final_list_inclusion_endorsed_by: ""
+                        });
+                    });
+                }
+            }
+
+            if (result.error && /final_list_inclusion/i.test(result.error.message || "")) {
+                finalListInclusionAvailable = false;
+                result = await context.client
+                    .from(APPLICATION_STAFF_FLAGS_TABLE)
+                    .select("application_id, special_consideration_tag, special_consideration_marked_by, updated_at, created_at")
+                    .order("updated_at", { ascending: false })
+                    .range(start, start + SPECIAL_FLAG_BATCH_SIZE - 1);
+
+                if (!result.error) {
+                    result.data = (result.data || []).map(function (row) {
+                        return Object.assign({}, row, {
+                            final_list_inclusion: false,
+                            final_list_inclusion_marked_by: null,
+                            final_list_inclusion_updated_at: null,
+                            final_list_inclusion_endorsed_by: ""
+                        });
+                    });
+                }
+            }
 
             if (result.error) {
                 throw result.error;
@@ -1196,12 +1358,18 @@
             batch.forEach(function (row) {
                 const applicationId = row && row.application_id ? row.application_id : "";
                 const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
-                if (!applicationId || !tag) {
+                const finalListInclusion = Boolean(row && row.final_list_inclusion === true);
+                if (!applicationId || (!tag && !finalListInclusion)) {
                     return;
                 }
                 flagMap[applicationId] = {
                     tag: tag,
-                    updated_at: row.updated_at || row.created_at || null
+                    updated_at: row.updated_at || row.created_at || null,
+                    special_marked_by: row && row.special_consideration_marked_by ? row.special_consideration_marked_by : null,
+                    final_list_inclusion: finalListInclusion,
+                    final_list_inclusion_marked_by: row && row.final_list_inclusion_marked_by ? row.final_list_inclusion_marked_by : null,
+                    final_list_inclusion_updated_at: row && row.final_list_inclusion_updated_at ? row.final_list_inclusion_updated_at : null,
+                    final_list_inclusion_endorsed_by: normalizeFinalListEndorsedBy(row && row.final_list_inclusion_endorsed_by ? row.final_list_inclusion_endorsed_by : "")
                 };
             });
 
@@ -1354,6 +1522,179 @@
         }).join("");
     }
 
+    function finalListSearchQuery() {
+        return (byId("finalListInclusionSearchInput") ? byId("finalListInclusionSearchInput").value : "")
+            .toString()
+            .trim()
+            .toLowerCase();
+    }
+
+    function renderFinalListSearchResults() {
+        const target = byId("finalListInclusionSearchResults");
+        const schoolYear = currentSchoolYear();
+        const query = finalListSearchQuery();
+
+        if (!target) {
+            return;
+        }
+        if (!schoolYear) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">Save Scholarship Settings first to set the active school year.</div>';
+            return;
+        }
+        if (!specialFlagsAvailable || !finalListInclusionAvailable) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">Final list inclusion storage is not installed yet.</div>';
+            return;
+        }
+        if (!finalListInclusionEndorsedByAvailable) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">Apply the updated 2026-05-08 SQL hotfix first to capture Care Of / Endorsed By.</div>';
+            return;
+        }
+        if (!specialCandidates.length) {
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">No application records were found for ' + escapeHtml(schoolYear) + '.</div>';
+            return;
+        }
+
+        let matches = specialCandidates.filter(function (row) {
+            return row.is_final_list_inclusion !== true;
+        });
+        let alreadyIncludedMatches = finalListInclusionRows();
+
+        if (query) {
+            matches = matches.filter(function (row) {
+                return matchesSpecialSearch(row, query);
+            });
+            alreadyIncludedMatches = alreadyIncludedMatches.filter(function (row) {
+                return matchesSpecialSearch(row, query);
+            });
+        }
+
+        matches = matches.slice(0, SPECIAL_RESULT_LIMIT);
+
+        if (!matches.length) {
+            if (query && alreadyIncludedMatches.length) {
+                target.innerHTML = '<div class="px-3 pb-3 small text-muted">Matching student records are already inside the Final List Inclusion table below. Use Remove there if you need to take them out.</div>';
+                return;
+            }
+            target.innerHTML = '<div class="px-3 pb-3 small text-muted">No matching students are available to add.</div>';
+            return;
+        }
+
+        target.innerHTML = matches.map(function (row) {
+            return [
+                '<button class="ldss-special-item ldss-special-item-button" type="button" data-final-list-inclusion-pick="' + escapeHtml(row.id) + '">',
+                '<div class="ldss-special-item-copy">',
+                '<div class="ldss-special-item-name">' + escapeHtml(row.applicant_name || "Unknown Applicant") + '</div>',
+                '<div class="ldss-special-item-note">' + escapeHtml((row.application_no || "-") + " | " + formatStatusLabel(row.status) + " | " + (row.scholarship_type || "-")) + '</div>',
+                '</div>',
+                '<div class="ldss-special-item-actions">',
+                '<span class="ldss-special-item-pick">Add To Final List</span>',
+                '</div>',
+                '</button>'
+            ].join("");
+        }).join("");
+    }
+
+    function renderFinalListTable() {
+        const tableBody = byId("finalListInclusionTableBody");
+        const rows = finalListInclusionRows();
+
+        if (!tableBody) {
+            return;
+        }
+        renderFinalListCounters();
+        if (!currentSchoolYear()) {
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">Save Scholarship Settings first to set the active school year.</td></tr>';
+            return;
+        }
+        if (!specialFlagsAvailable || !finalListInclusionAvailable) {
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">Final list inclusion storage is not installed yet. Apply the 2026-05-08 SQL hotfix first.</td></tr>';
+            return;
+        }
+        if (!rows.length) {
+            tableBody.innerHTML = '<tr><td colspan="9" class="text-center py-4 text-muted">No applicants are currently in Final List Inclusion.</td></tr>';
+            return;
+        }
+
+        tableBody.innerHTML = rows.map(function (row, index) {
+            const applicantName = row.applicant_name || "Unknown Applicant";
+            const applicantEmail = row.applicant_email || "";
+            const scholarshipType = row.scholarship_type || "-";
+            const applicationNo = row.application_no || "-";
+            const updatedDate = formatDateDisplay((row.final_list_inclusion_updated_at || row.updated_at || "").slice(0, 10));
+            const statusLabel = formatStatusLabel(row.status);
+            const rankValue = formatRankValue(row.display_rank);
+            const scoreValue = formatRawScoreValue(row.raw_score_value);
+            const endorsedBy = normalizeFinalListEndorsedBy(row.final_list_inclusion_endorsed_by);
+            return [
+                '<tr class="ldss-secretary-app-row" tabindex="0">',
+                '<td class="ldss-special-col-no" data-label="No.">' + escapeHtml(String(index + 1)) + '</td>',
+                '<td class="ldss-special-col-rank text-center" data-label="Rank"><div class="fw-600">' + escapeHtml(rankValue) + '</div></td>',
+                '<td data-label="Applicant">',
+                '<div class="ldss-queue-applicant">',
+                '<div class="ldss-queue-applicant-body">',
+                '<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + '</span>',
+                '<span class="ldss-queue-applicant-note">' + escapeHtml(applicantEmail || scholarshipType) + '</span>',
+                '</div>',
+                '</div>',
+                '</td>',
+                '<td data-label="Application">',
+                '<div class="fw-600">' + escapeHtml(applicationNo) + '</div>',
+                '<div class="small text-muted">' + escapeHtml((row.school_year || "-") + " | " + scholarshipType) + '</div>',
+                '</td>',
+                '<td class="ldss-special-col-score text-center" data-label="Score">',
+                '<div class="fw-600">' + escapeHtml(scoreValue) + '</div>',
+                '<div class="small text-muted">Applicant result stays unchanged</div>',
+                '</td>',
+                '<td data-label="Status"><span class="ldss-chip ldss-chip-neutral">' + escapeHtml(statusLabel) + '</span></td>',
+                '<td data-label="Care Of / Endorsed By">',
+                '<div class="fw-600">' + escapeHtml(endorsedBy || "-") + '</div>',
+                '<div class="small text-muted">Recorded final-list endorsement</div>',
+                '</td>',
+                '<td class="ldss-special-col-updated" data-label="Updated">',
+                '<div class="fw-600">' + escapeHtml(updatedDate) + '</div>',
+                '<div class="small text-muted">Latest inclusion update</div>',
+                '</td>',
+                '<td class="ldss-actions-cell text-end" data-label="Action">',
+                '<div class="ldss-special-action-row">',
+                '<button class="btn btn-outline-dark btn-sm" type="button" data-final-list-inclusion-edit="' + escapeHtml(row.id) + '">Edit</button>',
+                '<button class="btn btn-outline-dark btn-sm" type="button" data-final-list-inclusion-remove="' + escapeHtml(row.id) + '">Remove</button>',
+                '</div>',
+                '</td>',
+                '</tr>'
+            ].join("");
+        }).join("");
+    }
+
+    function renderManagerWorkspace() {
+        renderSearchResults();
+        renderAllowedTable();
+        renderFinalListSearchResults();
+        renderFinalListTable();
+        syncManagerState();
+    }
+
+    function currentSpecialTagValue(row) {
+        return row && row.is_reserved_slot && row.special_level
+            ? encodeSpecialTag(row.special_level, row.special_label || "")
+            : null;
+    }
+
+    function buildStaffFlagPayload(row, overrides) {
+        const payload = {
+            application_id: row.id,
+            special_consideration_tag: currentSpecialTagValue(row),
+            special_consideration_marked_by: row && row.is_reserved_slot ? (row.special_marked_by || null) : null,
+            final_list_inclusion: Boolean(row && row.is_final_list_inclusion === true),
+            final_list_inclusion_marked_by: row && row.is_final_list_inclusion === true ? (row.final_list_inclusion_marked_by || null) : null,
+            final_list_inclusion_updated_at: row && row.is_final_list_inclusion === true ? (row.final_list_inclusion_updated_at || null) : null,
+            final_list_inclusion_endorsed_by: row && row.is_final_list_inclusion === true
+                ? (normalizeFinalListEndorsedBy(row.final_list_inclusion_endorsed_by) || null)
+                : null
+        };
+
+        return Object.assign(payload, overrides || {});
+    }
+
     function specialPrintSummaryLine(schoolYear, counts, filterLabel) {
         return [
             "School Year " + (schoolYear || "-"),
@@ -1389,7 +1730,7 @@
             '<td class="text-center"><span class="ldss-ranking-print-number">' + escapeHtml(String(counter)) + "</span></td>" +
             '<td class="text-center fw-700"><span class="ldss-ranking-print-number">' + escapeHtml(formatRankValue(row.display_rank)) + "</span></td>" +
             "<td>" +
-            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_name || "Unknown Applicant") + "</div>" +
+            '<div class="fw-700 ldss-ranking-print-primary">' + escapeHtml(row.applicant_print_name || row.applicant_name || "Unknown Applicant") + "</div>" +
             '<div class="small text-muted ldss-ranking-print-secondary">' + escapeHtml(formatApplicationPrintValue(row)) + "</div>" +
             "</td>" +
             "<td>" +
@@ -1559,7 +1900,7 @@
                     return [
                         String(index + 1),
                         formatRankValue(row.display_rank),
-                        [row.applicant_name || "Unknown Applicant", formatApplicationPrintValue(row)].join("\n"),
+                        [row.applicant_print_name || row.applicant_name || "Unknown Applicant", formatApplicationPrintValue(row)].join("\n"),
                         [locationParts.barangay, locationParts.sector].filter(Boolean).join("\n"),
                         formatRawScoreValue(row.raw_score_value),
                         formatSpecialCarePrintValue(row)
@@ -1936,6 +2277,8 @@
         }
         let flagMap = {};
         if (specialFlagsAvailable) {
+            finalListInclusionAvailable = true;
+            finalListInclusionEndorsedByAvailable = true;
             try {
                 flagMap = await fetchAllSpecialConsiderationFlags(context);
                 specialFlagsAvailable = true;
@@ -2003,6 +2346,7 @@
 
             return Object.assign({}, row, {
                 applicant_name: buildApplicantName(profile) || (profile && profile.email ? profile.email : row.application_no || "Unknown Applicant"),
+                applicant_print_name: buildApplicantPrintName(profile) || buildApplicantName(profile) || (profile && profile.email ? profile.email : row.application_no || "Unknown Applicant"),
                 applicant_email: profile && profile.email ? profile.email : "",
                 applicant_barangay: profile && profile.barangay ? profile.barangay : "",
                 raw_score_value: hasSavedRawScore(examRecord && examRecord.raw_score) ? Number(examRecord.raw_score) : null,
@@ -2011,7 +2355,12 @@
                 is_reserved_slot: Boolean(decodedTag.level),
                 special_level: decodedTag.level || "",
                 special_label: decodedTag.label || "",
-                flag_updated_at: flagged && flagged.updated_at ? flagged.updated_at : null
+                flag_updated_at: flagged && flagged.updated_at ? flagged.updated_at : null,
+                special_marked_by: flagged && flagged.special_marked_by ? flagged.special_marked_by : null,
+                is_final_list_inclusion: Boolean(flagged && flagged.final_list_inclusion === true),
+                final_list_inclusion_marked_by: flagged && flagged.final_list_inclusion_marked_by ? flagged.final_list_inclusion_marked_by : null,
+                final_list_inclusion_updated_at: flagged && flagged.final_list_inclusion_updated_at ? flagged.final_list_inclusion_updated_at : null,
+                final_list_inclusion_endorsed_by: flagged && flagged.final_list_inclusion_endorsed_by ? flagged.final_list_inclusion_endorsed_by : ""
             });
         });
         const rankMap = rankMapForSpecialCandidates(preparedCandidates, schoolYear);
@@ -2024,9 +2373,7 @@
             return enrichedCandidate;
         });
 
-        renderSearchResults();
-        renderAllowedTable();
-        syncManagerState();
+        renderManagerWorkspace();
     }
 
     async function addSpecialConsideration(context, applicationId, selectedLevel, selectedLabel) {
@@ -2046,18 +2393,22 @@
 
         const result = await context.client
             .from(APPLICATION_STAFF_FLAGS_TABLE)
-            .upsert({
-                application_id: applicationId,
-                special_consideration_tag: encodeSpecialTag(normalizedSelectedLevel, normalizedSelectedLabel),
-                special_consideration_marked_by: context.user.id
-            }, { onConflict: "application_id" });
+            .upsert(
+                buildStaffFlagPayload(Object.assign({}, row, {
+                    is_reserved_slot: true,
+                    special_level: normalizedSelectedLevel,
+                    special_label: normalizedSelectedLabel,
+                    special_marked_by: context.user.id
+                }), {
+                    special_consideration_marked_by: context.user.id
+                }),
+                { onConflict: "application_id" }
+            );
 
         if (result.error) {
             if (/does not exist|relation|schema cache/i.test(result.error.message || "")) {
                 specialFlagsAvailable = false;
-                syncManagerState();
-                renderSearchResults();
-                renderAllowedTable();
+                renderManagerWorkspace();
                 showManagerStatus("Special consideration storage is not installed yet. Apply the 2026-03-24 SQL hotfix first.", "alert-warning");
                 return;
             }
@@ -2067,9 +2418,9 @@
         row.is_reserved_slot = true;
         row.special_level = normalizedSelectedLevel;
         row.special_label = normalizedSelectedLabel;
+        row.special_marked_by = context.user.id;
         row.flag_updated_at = new Date().toISOString();
-        renderSearchResults();
-        renderAllowedTable();
+        renderManagerWorkspace();
         showManagerStatus("Special consideration saved for " + row.applicant_name + " as " + specialTagLabel(normalizedSelectedLevel) + " / " + normalizedSelectedLabel + ".", "alert-success");
 
         await writeAuditEntry(context, {
@@ -2108,11 +2459,17 @@
 
         const result = await context.client
             .from(APPLICATION_STAFF_FLAGS_TABLE)
-            .upsert({
-                application_id: applicationId,
-                special_consideration_tag: encodeSpecialTag(normalizedSelectedLevel, normalizedSelectedLabel),
-                special_consideration_marked_by: context.user.id
-            }, { onConflict: "application_id" });
+            .upsert(
+                buildStaffFlagPayload(Object.assign({}, row, {
+                    is_reserved_slot: true,
+                    special_level: normalizedSelectedLevel,
+                    special_label: normalizedSelectedLabel,
+                    special_marked_by: context.user.id
+                }), {
+                    special_consideration_marked_by: context.user.id
+                }),
+                { onConflict: "application_id" }
+            );
 
         if (result.error) {
             throw new Error("Failed to update special consideration details: " + result.error.message);
@@ -2121,9 +2478,9 @@
         row.is_reserved_slot = true;
         row.special_level = normalizedSelectedLevel;
         row.special_label = normalizedSelectedLabel;
+        row.special_marked_by = context.user.id;
         row.flag_updated_at = new Date().toISOString();
-        renderSearchResults();
-        renderAllowedTable();
+        renderManagerWorkspace();
         showManagerStatus("Updated special consideration for " + row.applicant_name + " to " + specialTagLabel(normalizedSelectedLevel) + " / " + normalizedSelectedLabel + ".", "alert-success");
 
         await writeAuditEntry(context, {
@@ -2154,10 +2511,25 @@
             return;
         }
 
-        const result = await context.client
-            .from(APPLICATION_STAFF_FLAGS_TABLE)
-            .delete()
-            .eq("application_id", applicationId);
+        const result = row.is_final_list_inclusion
+            ? await context.client
+                .from(APPLICATION_STAFF_FLAGS_TABLE)
+                .upsert(
+                    buildStaffFlagPayload(Object.assign({}, row, {
+                        is_reserved_slot: false,
+                        special_level: "",
+                        special_label: "",
+                        special_marked_by: null
+                    }), {
+                        special_consideration_tag: null,
+                        special_consideration_marked_by: null
+                    }),
+                    { onConflict: "application_id" }
+                )
+            : await context.client
+                .from(APPLICATION_STAFF_FLAGS_TABLE)
+                .delete()
+                .eq("application_id", applicationId);
 
         if (result.error) {
             throw new Error("Failed to remove special consideration student: " + result.error.message);
@@ -2166,9 +2538,9 @@
         row.is_reserved_slot = false;
         row.special_level = "";
         row.special_label = "";
+        row.special_marked_by = null;
         row.flag_updated_at = new Date().toISOString();
-        renderSearchResults();
-        renderAllowedTable();
+        renderManagerWorkspace();
         showManagerStatus("Removed special consideration for " + row.applicant_name + ".", "alert-success");
 
         await writeAuditEntry(context, {
@@ -2200,11 +2572,151 @@
         return addSpecialConsideration(context, applicationId, decoded.level, decoded.label);
     }
 
+    async function saveFinalListInclusion(context, applicationId, endorsedByValue) {
+        const row = specialApplicationsById[applicationId];
+        if (!row) {
+            throw new Error("This application record is no longer available. Reload the page and try again.");
+        }
+        if (!specialFlagsAvailable || !finalListInclusionAvailable) {
+            showManagerStatus("Final list inclusion storage is not installed yet. Apply the 2026-05-08 SQL hotfix first.", "alert-warning");
+            return;
+        }
+        if (!finalListInclusionEndorsedByAvailable) {
+            showManagerStatus("Apply the updated 2026-05-08 SQL hotfix first to record Care Of / Endorsed By.", "alert-warning");
+            return;
+        }
+
+        const normalizedEndorsedBy = normalizeFinalListEndorsedBy(endorsedByValue);
+        const wasIncluded = row.is_final_list_inclusion === true;
+        if (!normalizedEndorsedBy) {
+            throw new Error("Enter Care Of / Person In Charge / Endorsed By first.");
+        }
+        const inclusionUpdatedAt = new Date().toISOString();
+        const result = await context.client
+            .from(APPLICATION_STAFF_FLAGS_TABLE)
+            .upsert(
+                buildStaffFlagPayload(Object.assign({}, row, {
+                    is_final_list_inclusion: true,
+                    final_list_inclusion_marked_by: context.user.id,
+                    final_list_inclusion_updated_at: inclusionUpdatedAt,
+                    final_list_inclusion_endorsed_by: normalizedEndorsedBy
+                }), {
+                    final_list_inclusion: true,
+                    final_list_inclusion_marked_by: context.user.id,
+                    final_list_inclusion_updated_at: inclusionUpdatedAt,
+                    final_list_inclusion_endorsed_by: normalizedEndorsedBy
+                }),
+                { onConflict: "application_id" }
+            );
+
+        if (result.error) {
+            if (/final_list_inclusion_endorsed_by/i.test(result.error.message || "")) {
+                finalListInclusionEndorsedByAvailable = false;
+                renderManagerWorkspace();
+                showManagerStatus("Apply the updated 2026-05-08 SQL hotfix first to record Care Of / Endorsed By.", "alert-warning");
+                return;
+            }
+            if (/does not exist|relation|schema cache/i.test(result.error.message || "")) {
+                finalListInclusionAvailable = false;
+                renderManagerWorkspace();
+                showManagerStatus("Final list inclusion storage is not installed yet. Apply the 2026-05-08 SQL hotfix first.", "alert-warning");
+                return;
+            }
+            throw new Error("Failed to add final list inclusion student: " + result.error.message);
+        }
+
+        row.is_final_list_inclusion = true;
+        row.final_list_inclusion_marked_by = context.user.id;
+        row.final_list_inclusion_updated_at = inclusionUpdatedAt;
+        row.final_list_inclusion_endorsed_by = normalizedEndorsedBy;
+        renderManagerWorkspace();
+        showManagerStatus((wasIncluded ? "Updated " : "Added ") + row.applicant_name + " in Final List Inclusion.", "alert-success");
+
+        await writeAuditEntry(context, {
+            module: "final_list_inclusion",
+            action: wasIncluded ? "update_final_list_inclusion_student" : "add_final_list_inclusion_student",
+            recordType: "application_staff_flags",
+            recordId: applicationId,
+            targetUserId: row.applicant_id || null,
+            targetLabel: row.applicant_name,
+            summary: (wasIncluded ? "Updated " : "Added ") + row.applicant_name + " in Final List Inclusion.",
+            details: {
+                application_no: row.application_no || "",
+                school_year: row.school_year || "",
+                status: normalizeStatus(row.status),
+                endorsed_by: normalizedEndorsedBy
+            }
+        });
+    }
+
+    async function removeFinalListInclusion(context, applicationId) {
+        const row = specialApplicationsById[applicationId];
+        if (!row) {
+            throw new Error("This application record is no longer available. Reload the page and try again.");
+        }
+        if (!specialFlagsAvailable || !finalListInclusionAvailable) {
+            showManagerStatus("Final list inclusion storage is not installed yet. Apply the 2026-05-08 SQL hotfix first.", "alert-warning");
+            return;
+        }
+
+        const result = row.is_reserved_slot
+            ? await context.client
+                .from(APPLICATION_STAFF_FLAGS_TABLE)
+                .upsert(
+                    buildStaffFlagPayload(Object.assign({}, row, {
+                        is_final_list_inclusion: false,
+                        final_list_inclusion_marked_by: null,
+                        final_list_inclusion_updated_at: null,
+                        final_list_inclusion_endorsed_by: null
+                    }), {
+                        final_list_inclusion: false,
+                        final_list_inclusion_marked_by: null,
+                        final_list_inclusion_updated_at: null,
+                        final_list_inclusion_endorsed_by: null
+                    }),
+                    { onConflict: "application_id" }
+                )
+            : await context.client
+                .from(APPLICATION_STAFF_FLAGS_TABLE)
+                .delete()
+                .eq("application_id", applicationId);
+
+        if (result.error) {
+            throw new Error("Failed to remove final list inclusion student: " + result.error.message);
+        }
+
+        row.is_final_list_inclusion = false;
+        row.final_list_inclusion_marked_by = null;
+        row.final_list_inclusion_updated_at = null;
+        row.final_list_inclusion_endorsed_by = "";
+        renderManagerWorkspace();
+        showManagerStatus("Removed " + row.applicant_name + " from Final List Inclusion.", "alert-success");
+
+        await writeAuditEntry(context, {
+            module: "final_list_inclusion",
+            action: "remove_final_list_inclusion_student",
+            recordType: "application_staff_flags",
+            recordId: applicationId,
+            targetUserId: row.applicant_id || null,
+            targetLabel: row.applicant_name,
+            summary: "Removed " + row.applicant_name + " from Final List Inclusion.",
+            details: {
+                application_no: row.application_no || "",
+                school_year: row.school_year || "",
+                status: normalizeStatus(row.status)
+            }
+        });
+    }
+
     function bindEvents(context) {
         const toggle = byId("specialConsiderationFlowToggle");
         const searchInput = byId("specialConsiderationSearchInput");
         const searchResults = byId("specialConsiderationSearchResults");
         const tableBody = byId("specialConsiderationTableBody");
+        const finalSearchInput = byId("finalListInclusionSearchInput");
+        const finalSearchResults = byId("finalListInclusionSearchResults");
+        const finalTableBody = byId("finalListInclusionTableBody");
+        const finalSaveButton = byId("finalListInclusionSave");
         const catalogList = byId("specialConsiderationCatalogList");
         const addOptionButton = byId("specialConsiderationAddOption");
         const printTagSelect = byId("specialConsiderationPrintTag");
@@ -2225,6 +2737,12 @@
         if (searchInput) {
             searchInput.addEventListener("input", function () {
                 renderSearchResults();
+            });
+        }
+
+        if (finalSearchInput) {
+            finalSearchInput.addEventListener("input", function () {
+                renderFinalListSearchResults();
             });
         }
 
@@ -2282,6 +2800,16 @@
             });
         }
 
+        if (finalSearchResults) {
+            finalSearchResults.addEventListener("click", function (event) {
+                const button = event.target && event.target.closest ? event.target.closest("[data-final-list-inclusion-pick]") : null;
+                if (!button) {
+                    return;
+                }
+                openFinalListModal(button.getAttribute("data-final-list-inclusion-pick"));
+            });
+        }
+
         if (tableBody) {
             tableBody.addEventListener("click", function (event) {
                 const editButton = event.target && event.target.closest ? event.target.closest("[data-special-consideration-edit]") : null;
@@ -2295,6 +2823,41 @@
                 }
                 removeSpecialConsideration(context, button.getAttribute("data-special-consideration-remove")).catch(function (error) {
                     showManagerStatus(error && error.message ? error.message : "Failed to remove special consideration student.", "alert-danger");
+                });
+            });
+        }
+
+        if (finalTableBody) {
+            finalTableBody.addEventListener("click", function (event) {
+                const editButton = event.target && event.target.closest ? event.target.closest("[data-final-list-inclusion-edit]") : null;
+                if (editButton) {
+                    openFinalListModal(editButton.getAttribute("data-final-list-inclusion-edit"));
+                    return;
+                }
+                const button = event.target && event.target.closest ? event.target.closest("[data-final-list-inclusion-remove]") : null;
+                if (!button) {
+                    return;
+                }
+                removeFinalListInclusion(context, button.getAttribute("data-final-list-inclusion-remove")).catch(function (error) {
+                    showManagerStatus(error && error.message ? error.message : "Failed to remove Final List Inclusion student.", "alert-danger");
+                });
+            });
+        }
+
+        if (finalSaveButton) {
+            finalSaveButton.addEventListener("click", function () {
+                const applicationId = byId("finalListInclusionApplicationId");
+                const endorsedByInput = byId("finalListInclusionEndorsedBy");
+                const modal = finalListModalInstance();
+                const selectedApplicationId = applicationId ? applicationId.value : "";
+                const endorsedBy = endorsedByInput ? endorsedByInput.value : "";
+
+                saveFinalListInclusion(context, selectedApplicationId, endorsedBy).then(function () {
+                    if (modal) {
+                        modal.hide();
+                    }
+                }).catch(function (error) {
+                    showManagerStatus(error && error.message ? error.message : "Failed to save Final List Inclusion details.", "alert-danger");
                 });
             });
         }

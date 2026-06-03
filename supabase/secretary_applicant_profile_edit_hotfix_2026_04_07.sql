@@ -159,6 +159,14 @@ begin
         student_number = case
             when safe_patch ? 'student_number' then nullif(regexp_replace(btrim(coalesce(safe_patch ->> 'student_number', '')), '\s+', ' ', 'g'), '')
             else p.student_number
+        end,
+        applicant_photo_path = case
+            when safe_patch ? 'applicant_photo_path' then nullif(btrim(coalesce(safe_patch ->> 'applicant_photo_path', '')), '')
+            else p.applicant_photo_path
+        end,
+        verified_interview_photo_path = case
+            when safe_patch ? 'verified_interview_photo_path' then nullif(btrim(coalesce(safe_patch ->> 'verified_interview_photo_path', '')), '')
+            else p.verified_interview_photo_path
         end
     where p.id = target_applicant_id
       and p.role = 'applicant';
@@ -200,6 +208,8 @@ begin
         'course_or_strand', old_profile ->> 'course_or_strand',
         'year_level', old_profile ->> 'year_level',
         'student_number', old_profile ->> 'student_number',
+        'applicant_photo_path', old_profile ->> 'applicant_photo_path',
+        'verified_interview_photo_path', old_profile ->> 'verified_interview_photo_path',
         'place_of_birth', old_profile ->> 'place_of_birth'
     );
 
@@ -217,6 +227,8 @@ begin
         'course_or_strand', saved_profile ->> 'course_or_strand',
         'year_level', saved_profile ->> 'year_level',
         'student_number', saved_profile ->> 'student_number',
+        'applicant_photo_path', saved_profile ->> 'applicant_photo_path',
+        'verified_interview_photo_path', saved_profile ->> 'verified_interview_photo_path',
         'place_of_birth', saved_profile ->> 'place_of_birth'
     );
 

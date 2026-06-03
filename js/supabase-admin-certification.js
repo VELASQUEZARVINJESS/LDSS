@@ -104,15 +104,18 @@
     }
 
     function buildApplicantName(profile) {
-        const parts = [profile && profile.first_name, profile && profile.middle_name, profile && profile.last_name]
-            .map(function (value) {
-                return (value || "").toString().trim();
-            })
-            .filter(function (value) {
-                return value.length > 0;
-            });
-        const fullName = parts.join(" ");
-        return fullName || (profile && profile.email ? profile.email : "-");
+        const firstName = (profile && profile.first_name ? profile.first_name : "").toString().trim();
+        const middleName = (profile && profile.middle_name ? profile.middle_name : "").toString().trim();
+        const lastName = (profile && profile.last_name ? profile.last_name : "").toString().trim();
+        const trailingNames = [firstName, middleName].filter(function (value) {
+            return value.length > 0;
+        }).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames || (profile && profile.email ? profile.email : "-");
     }
 
     function normalizeAddressSegment(value) {

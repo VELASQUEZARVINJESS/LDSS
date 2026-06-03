@@ -42,6 +42,10 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="folder"></i></div>
+                                Manage Application
+                            </a>
                         </div>
                     </div>
                 </nav>
@@ -64,8 +68,12 @@
                                             <li>Application Detail</li>
                                         </ol>
                                     </div>
-                                    <div class="col-12 col-xl-auto mb-3">
-                                        <a class="btn btn-dark btn-sm me-2 d-none" href="applicant-application-form.html" id="detailEditApplicationBtn">Edit Application</a>
+                                    <div class="col-12 col-xl-auto mb-3 d-flex flex-wrap gap-2">
+                                        <a class="btn btn-dark btn-sm d-none d-inline-flex align-items-center gap-2" href="javascript:void(0);" id="detailPrintApplicationBtn">
+                                            <i data-feather="download"></i>
+                                            <span>Download PDF</span>
+                                        </a>
+                                        <a class="btn btn-dark btn-sm d-none" href="applicant-application-form.html" id="detailEditApplicationBtn">Edit Application</a>
                                         <a class="btn btn-outline-dark btn-sm" href="applicant-applications.html">Back to Applications</a>
                                     </div>
                                 </div>
@@ -229,8 +237,8 @@
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js"></script>
         <script src="../js/ldss-workflow-controls.js?v=20260422-1"></script>
-        <script src="../js/ldss-workflow.js?v=20260505-sector-selected-2"></script>
-        <script src="../js/supabase-applicant-application-detail.js?v=20260505-sector-selected-5"></script>
+        <script src="../js/ldss-workflow.js?v=20260506-pass-score-1"></script>
+        <script src="../js/supabase-applicant-application-detail.js?v=20260512-print-links-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

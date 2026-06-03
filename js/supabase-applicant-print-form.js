@@ -2,6 +2,7 @@
     "use strict";
 
     const PHOTO_DOC_TYPE = "applicant_photo";
+    const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     let autoPrintTriggered = false;
     let profilesSupportsPlaceOfBirth = true;
@@ -19,6 +20,24 @@
                 };
             }
         };
+    }
+
+    function workflowControls() {
+        return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
+    }
+
+    function normalizeStatusValue(status) {
+        return (status || "").toString().trim().toLowerCase();
+    }
+
+    function canEditApplication(application) {
+        if (!application || application.is_locked) {
+            return false;
+        }
+        if (workflowControls().allow_applicant_application_edits === false) {
+            return false;
+        }
+        return EDITABLE_STATUSES.includes(normalizeStatusValue(application.status));
     }
 
     function valueOrDash(value) {
@@ -79,15 +98,18 @@
     }
 
     function buildApplicantName(profile) {
-        const parts = [profile && profile.first_name, profile && profile.middle_name, profile && profile.last_name]
-            .map(function (value) {
-                return (value || "").toString().trim();
-            })
-            .filter(function (value) {
-                return value.length > 0;
-            });
-        const fullName = parts.join(" ");
-        return fullName || (profile && profile.email ? profile.email : "-");
+        const firstName = (profile && profile.first_name ? profile.first_name : "").toString().trim();
+        const middleName = (profile && profile.middle_name ? profile.middle_name : "").toString().trim();
+        const lastName = (profile && profile.last_name ? profile.last_name : "").toString().trim();
+        const trailingNames = [firstName, middleName].filter(function (value) {
+            return value.length > 0;
+        }).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames || (profile && profile.email ? profile.email : "-");
     }
 
     function normalizeAddressSegment(value) {
@@ -424,6 +446,33 @@
         setText("applicantPrintApplicationIdDisplay", "Application ID: " + valueOrDash(applicationNo));
     }
 
+    function updateEditButtons(application) {
+        const buttons = [
+            byId("applicantPrintEditBtn"),
+            byId("applicantPrintEditBtnMobile")
+        ].filter(Boolean);
+
+        if (!buttons.length) {
+            return;
+        }
+
+        const editHref = application && application.id
+            ? "applicant-application-form.html?application_id=" + encodeURIComponent(application.id) + "&force_edit=1"
+            : "";
+
+        buttons.forEach(function (button) {
+            if (!editHref) {
+                button.classList.add("d-none");
+                button.removeAttribute("href");
+                return;
+            }
+
+            button.href = editHref;
+            button.textContent = "Edit Application";
+            button.classList.remove("d-none");
+        });
+    }
+
     function renderSheet(application, profile, auxMeta) {
         const safeMeta = auxMeta || {};
         const fatherName = buildPersonName([
@@ -438,6 +487,7 @@
         ], "");
 
         renderApplicationId(application ? application.application_no : "-");
+        updateEditButtons(application);
         setText("appSheetApplicationNo", application ? application.application_no : "-");
         setText("appSheetDateFiled", application ? formatDate(application.submitted_at || application.created_at) : "-");
         setText("appSheetScholarshipType", application ? application.scholarship_type : "-");
@@ -507,18 +557,23 @@
 
         renderSheet(application, profile, auxMeta);
         setPhoto(photoUrl);
-        showStatus("Printable form is ready. Use Print and choose Save as PDF if needed.", "alert-success");
+        showStatus("Printable form is ready. Tap Download PDF and choose Save as PDF if needed.", "alert-success");
         return true;
     }
 
-    function bindActions() {
-        const printBtn = byId("applicantPrintBtn");
+    function bindPrintButton(id) {
+        const printBtn = byId(id);
         if (!printBtn) {
             return;
         }
         printBtn.addEventListener("click", function () {
             window.print();
         });
+    }
+
+    function bindActions() {
+        bindPrintButton("applicantPrintBtn");
+        bindPrintButton("applicantPrintBtnMobile");
     }
 
     async function init() {

@@ -365,6 +365,23 @@
         return parts.length ? parts.join(" ") : (profile.email || "Unknown Applicant");
     }
 
+    function buildApplicantPrintName(profile) {
+        if (!profile) {
+            return "Unknown Applicant";
+        }
+
+        const firstName = (profile.first_name || "").toString().trim();
+        const middleName = (profile.middle_name || "").toString().trim();
+        const lastName = (profile.last_name || "").toString().trim();
+        const trailingNames = [firstName, middleName].filter(Boolean).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames || (profile.email || "Unknown Applicant");
+    }
+
     function appById(applicationId) {
         for (let index = 0; index < applications.length; index += 1) {
             if (applications[index].id === applicationId) {
@@ -1827,6 +1844,7 @@
                 application_no: row.application_no || "",
                 status: normalizeStatus(row.status),
                 applicant_name: buildApplicantName(profile),
+                applicant_print_name: buildApplicantPrintName(profile),
                 school_name: profile && profile.school_name ? profile.school_name : "",
                 email: profile && profile.email ? profile.email : ""
             };
@@ -3276,10 +3294,10 @@
                                 "<tr>" +
                                     (isAttendanceMode
                                         ? '<td class="print-col-seat">' + escapeHtml(row.room_seat_no || "-") + "</td>" +
-                                            '<td class="print-col-name"><strong>' + escapeHtml(row.applicant_name || "Unknown Applicant") + '</strong></td>' +
+                                            '<td class="print-col-name"><strong>' + escapeHtml(row.applicant_print_name || row.applicant_name || "Unknown Applicant") + '</strong></td>' +
                                             '<td class="print-col-ldsp">' + escapeHtml(row.application_no || "-") + "</td>" +
                                             '<td class="print-signature-cell print-col-signature"></td>'
-                                        : "<td>" + (isRoomListMode ? "<strong>" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</strong>" : escapeHtml(row.applicant_name || "Unknown Applicant")) + "</td>" +
+                                        : "<td>" + (isRoomListMode ? "<strong>" + escapeHtml(row.applicant_print_name || row.applicant_name || "Unknown Applicant") + "</strong>" : escapeHtml(row.applicant_print_name || row.applicant_name || "Unknown Applicant")) + "</td>" +
                                             "<td>" + escapeHtml(row.application_no || "-") + "</td>" +
                                             "<td>" + escapeHtml(row.room_seat_no || "-") + "</td>") +
                                 "</tr>"
@@ -3295,7 +3313,7 @@
             '<div class="master-banner">OFFICIAL EXAMINATION MASTERLIST</div>' +
             '<table class="print-table"><thead><tr><th>Room</th><th>Applicant Full Name</th><th>LDSP No.</th><th>Seat No.</th></tr></thead><tbody>' +
             rows.map(function (row) {
-                return "<tr><td><strong>" + escapeHtml(upperRoomLabel(row.room_label || "-")) + "</strong></td><td>" + escapeHtml(row.applicant_name || "Unknown Applicant") + "</td><td>" + escapeHtml(row.application_no || "-") + "</td><td>" + escapeHtml(row.room_seat_no || "-") + "</td></tr>";
+                return "<tr><td><strong>" + escapeHtml(upperRoomLabel(row.room_label || "-")) + "</strong></td><td>" + escapeHtml(row.applicant_print_name || row.applicant_name || "Unknown Applicant") + "</td><td>" + escapeHtml(row.application_no || "-") + "</td><td>" + escapeHtml(row.room_seat_no || "-") + "</td></tr>";
             }).join("") +
             "</tbody></table>";
 
@@ -3532,7 +3550,7 @@
                     head: [["Applicant Full Name", "LDSP No.", "Seat No."]],
                     body: room.rows.map(function (row) {
                         return [
-                            row.applicant_name || "Unknown Applicant",
+                            row.applicant_print_name || row.applicant_name || "Unknown Applicant",
                             row.application_no || "-",
                             row.room_seat_no || "-"
                         ];
@@ -3579,7 +3597,7 @@
                     body: room.rows.map(function (row) {
                         return [
                             row.room_seat_no || "-",
-                            row.applicant_name || "Unknown Applicant",
+                            row.applicant_print_name || row.applicant_name || "Unknown Applicant",
                             row.application_no || "-",
                             ""
                         ];
@@ -3621,7 +3639,7 @@
                 body: rows.map(function (row) {
                     return [
                         upperRoomLabel(row.room_label || "-"),
-                        row.applicant_name || "Unknown Applicant",
+                        row.applicant_print_name || row.applicant_name || "Unknown Applicant",
                         row.application_no || "-",
                         row.room_seat_no || "-"
                     ];

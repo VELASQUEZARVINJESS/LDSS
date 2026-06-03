@@ -199,6 +199,35 @@ window.addEventListener('DOMContentLoaded', event => {
         insertAfter.insertAdjacentElement('afterend', scholarSelectionLink);
     }
 
+    function ensureSecretarySubmittedApplicationsLink() {
+        const secretaryAccountTrigger = document.body.querySelector('#secretaryUser');
+        const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
+
+        if (!secretaryAccountTrigger || !sidenav) {
+            return;
+        }
+        if (sidenav.querySelector('a.nav-link[href="secretary-applications.html?view=submitted_requirements"]')) {
+            return;
+        }
+
+        const scholarSelectionLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
+            const href = (link.getAttribute('href') || '').trim();
+            return href === 'secretary-scholar-selection.html';
+        });
+
+        if (!scholarSelectionLink) {
+            return;
+        }
+
+        const submittedApplicationsLink = scholarSelectionLink.cloneNode(true);
+        submittedApplicationsLink.classList.remove('active');
+        submittedApplicationsLink.removeAttribute('aria-current');
+        submittedApplicationsLink.setAttribute('href', 'secretary-applications.html?view=submitted_requirements');
+        submittedApplicationsLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>\n                                Submitted Requirements\n                            ';
+
+        scholarSelectionLink.insertAdjacentElement('afterend', submittedApplicationsLink);
+    }
+
     function ensureAdminSpecialConsiderationLink() {
         const adminAccountTrigger = document.body.querySelector('#adminUser');
         const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
@@ -253,6 +282,7 @@ window.addEventListener('DOMContentLoaded', event => {
 
     ensureSecretaryAllPassedLink();
     ensureSecretaryScholarSelectionLink();
+    ensureSecretarySubmittedApplicationsLink();
     ensureAdminSpecialConsiderationLink();
     ensureSuperAdminSpecialConsiderationLink();
 

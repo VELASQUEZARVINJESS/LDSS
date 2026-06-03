@@ -719,12 +719,13 @@
             const examSummary = workflow().examSummaryFromRecord(examRecord);
             const postedResult = postedExamResultMeta(examSummary, approvalRecord && approvalRecord.special_endorsement, sectorSelected, application && application.sector_classification);
             const scoresVisible = applicantExamScoresVisible();
+            const rankLabel = examRank !== null && typeof examRank !== "undefined" ? ("RANK " + String(examRank)) : "";
             events.push({
                 label: examSummary.status === "absent"
                     ? "Examination status: Absent"
                     : (
                         (postedResult.result === "passed" || postedResult.result === "failed")
-                            ? ("Exam result: " + postedResult.displayText)
+                            ? ("Exam result: " + postedResult.displayText + ((postedResult.result === "passed" && postedResult.hasScore && rankLabel) ? (" | " + rankLabel) : ""))
                             : (postedResult.result === "selected")
                                 ? ("Exam result: " + postedResult.displayText)
                             : (!scoresVisible ? ("Exam result: " + (postedResult.displayText || "Scores are being consolidated")) : ("Exam result: " + examSummary.resultLabel))
@@ -934,7 +935,7 @@
             examValue = "Absent from examination";
         } else if (postedResult.result === "passed" || postedResult.result === "failed") {
             examValue = postedResult.displayText;
-            if (specialConsideration && postedResult.result === "passed" && postedResult.hasScore && rankLabel) {
+            if (postedResult.result === "passed" && postedResult.hasScore && rankLabel) {
                 examValue += " | " + rankLabel;
             }
         } else if (postedResult.result === "selected") {

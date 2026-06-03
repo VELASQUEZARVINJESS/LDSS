@@ -15,7 +15,8 @@
         const params = new URLSearchParams(window.location.search);
         return {
             completeBarangay: params.get("complete") === "barangay",
-            completeGender: params.get("complete") === "gender"
+            completeGender: params.get("complete") === "gender",
+            openSection: (params.get("open") || "").toString().trim().toLowerCase()
         };
     }
 
@@ -114,6 +115,10 @@
         return raw;
     }
 
+    function normalizedEmail(value) {
+        return (value || "").toString().trim().toLowerCase();
+    }
+
     function explainProfileSaveError(message) {
         const text = (message || "").toString();
         const normalized = text.toLowerCase();
@@ -122,6 +127,22 @@
             (normalized.includes("duplicate key value") && normalized.includes("mobile_number"))
         ) {
             return "Mobile number is already used by another account. Please enter a different contact number.";
+        }
+        if (
+            normalized.includes("profiles_email_key") ||
+            (normalized.includes("duplicate key value") && normalized.includes("email"))
+        ) {
+            return "Login email is already used by another account.";
+        }
+        if (
+            normalized.includes("row-level security") ||
+            normalized.includes("permission denied") ||
+            normalized.includes("new row violates row-level security policy")
+        ) {
+            return "Profile saving was blocked by the live Supabase policy. Check the deployed profile policies and retry.";
+        }
+        if (normalized.includes("cannot coerce the result to a single json object")) {
+            return "The database did not return the updated profile row. Check the live Supabase policies and retry.";
         }
         return text;
     }
@@ -577,6 +598,32 @@
         return upsertResult.data;
     }
 
+    async function syncProfileEmailFromAuth(context, profile) {
+        if (!context || !context.client || !context.user) {
+            return profile;
+        }
+
+        const authEmail = normalizedEmail(context.user.email || "");
+        const profileEmail = normalizedEmail(profile && profile.email ? profile.email : "");
+        if (!authEmail || authEmail === profileEmail) {
+            return profile;
+        }
+
+        const result = await context.client
+            .from("profiles")
+            .update({ email: authEmail })
+            .eq("id", context.user.id)
+            .select("*")
+            .single();
+
+        if (result.error || !result.data) {
+            return profile;
+        }
+
+        writeProfileCache(context.user.id, result.data);
+        return result.data;
+    }
+
     async function loadLatestApplicationSummary(context, profile) {
         let latest = await context.client
             .from("applications")
@@ -735,13 +782,30 @@
     }
 
     function contextUserEmailFallback(profile) {
-        if (profile && profile.email) {
-            return profile.email;
-        }
         if (window.ldssAuthContext && window.ldssAuthContext.user && window.ldssAuthContext.user.email) {
             return window.ldssAuthContext.user.email;
         }
+        if (profile && profile.email) {
+            return profile.email;
+        }
         return "-";
+    }
+
+    function requestedModalIdFromQuery(query) {
+        const section = query && query.openSection ? query.openSection : "";
+        if (section === "personal") {
+            return "modalEditPersonal";
+        }
+        if (section === "contact") {
+            return "modalEditContact";
+        }
+        if (section === "education") {
+            return "modalEditEducation";
+        }
+        if (section === "family") {
+            return "modalEditFamily";
+        }
+        return "";
     }
 
     async function fillProfileModal(profile) {
@@ -755,7 +819,7 @@
         selectSetValue(byId("modalCivilStatus"), profile.civil_status || "");
         selectSetValue(byId("modalSex"), profile.sex || "");
         if (byId("modalEmail")) {
-            byId("modalEmail").value = profile.email || "";
+            byId("modalEmail").value = contextUserEmailFallback(profile) || "";
         }
         if (byId("modalMobile")) {
             const mobileDisplay = formatMobileDisplay(profile.mobile_number);
@@ -863,7 +927,6 @@
             saveContactBtn.addEventListener("click", async function () {
                 hideProfileStatus();
                 const patch = {
-                    email: byId("modalEmail") ? (byId("modalEmail").value.trim().toLowerCase() || null) : null,
                     mobile_number: byId("modalMobile") ? normalizeMobileForStorage(byId("modalMobile").value) : null,
                     address: byId("modalAddress")
                         ? (dedupeAddressSegments(byId("modalAddress").value.trim()) || null)
@@ -919,7 +982,8 @@
 
         try {
             hideProfileStatus();
-            const profile = await ensureProfileRow(authContext);
+            let profile = await ensureProfileRow(authContext);
+            profile = await syncProfileEmailFromAuth(authContext, profile);
             writeProfileCache(authContext.user.id, profile);
             fillProfileDisplay(profile);
             await fillProfileModal(profile);
@@ -927,6 +991,7 @@
             await loadLatestApplicationSummary(authContext, profile);
             bindSaveHandlers(authContext);
             const query = parseQuery();
+            const requestedModalId = requestedModalIdFromQuery(query);
             if (query.completeBarangay || query.completeGender) {
                 showProfileStatus(
                     query.completeGender
@@ -941,6 +1006,8 @@
                         targetField.focus();
                     }
                 }, 180);
+            } else if (requestedModalId) {
+                openModal(requestedModalId);
             }
         } catch (error) {
             showProfileStatus("Failed to load profile record. Please refresh.", "alert-danger");

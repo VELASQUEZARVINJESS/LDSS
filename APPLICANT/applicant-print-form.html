@@ -42,6 +42,10 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="folder"></i></div>
+                                Manage Application
+                            </a>
                         </div>
                     </div>
                 </nav>
@@ -65,20 +69,42 @@
                                         </ol>
                                     </div>
                                     <div class="col-12 col-xl-auto mb-3 ldss-print-hide d-flex flex-wrap gap-2">
+                                        <a class="btn btn-outline-dark btn-sm d-none" href="javascript:void(0);" id="applicantPrintEditBtn">Edit Application</a>
                                         <a class="btn btn-outline-dark btn-sm" href="applicant-applications.html">Back to Applications</a>
-                                        <button class="btn btn-dark btn-sm" id="applicantPrintBtn" type="button">Print / Save as PDF</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </header>
 
+                    <div class="container-xl px-4 mt-3 ldss-print-hide d-md-none">
+                        <div class="card border-0 shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-grid gap-2">
+                                        <button class="btn btn-dark btn-lg d-inline-flex align-items-center justify-content-center gap-2" id="applicantPrintBtnMobile" type="button">
+                                            <i data-feather="download"></i>
+                                            <span>Download PDF</span>
+                                        </button>
+                                        <a class="btn btn-outline-dark btn-lg d-none" href="javascript:void(0);" id="applicantPrintEditBtnMobile">Edit Application</a>
+                                        <a class="btn btn-outline-dark btn-lg" href="applicant-applications.html">Back to Applications</a>
+                                    </div>
+                                    <div class="small text-muted mt-2">On mobile, tap Download PDF and choose Save to Files or Save as PDF.</div>
+                                </div>
+                            </div>
+                    </div>
+
                     <div class="container-xl px-4 mt-4">
                         <div class="alert d-none ldss-print-hide" id="applicantPrintStatus" role="alert"></div>
                         <div class="card">
                             <div class="card-header ldss-print-hide d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
-                                <span>Print Preview</span>
-                                <span class="small text-muted ldss-print-hide">Use browser Print and choose Save as PDF for the signed copy.</span>
+                                <div class="d-flex flex-column flex-md-row align-items-md-center gap-2">
+                                    <span>Print Preview</span>
+                                    <span class="small text-muted ldss-print-hide">Tap Download PDF, then choose Save as PDF for the signed copy.</span>
+                                </div>
+                                <button class="btn btn-dark btn-sm d-none d-md-inline-flex align-items-center gap-2" id="applicantPrintBtn" type="button">
+                                    <i data-feather="download"></i>
+                                    <span>Download PDF</span>
+                                </button>
                             </div>
                             <div class="card-body">
                                 <div class="ldss-print-zone">
@@ -212,7 +238,7 @@
                                                     <td id="appSheetMotherAddress">-</td>
                                                 </tr>
                                                 <tr>
-                                                    <td class="ldss-print-label">Parents Monthly Gross Income</td>
+                                                    <td class="ldss-print-label">Parents Annual Gross Income</td>
                                                     <td id="appSheetGrossIncome">-</td>
                                                     <td class="ldss-print-label">No. of Children</td>
                                                     <td id="appSheetChildrenInFamily">-</td>
@@ -286,8 +312,8 @@
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js"></script>
-        <script src="../js/ldss-workflow.js?v=20260505-sector-selected-2"></script>
-        <script src="../js/supabase-applicant-print-form.js?v=20260315-2"></script>
+        <script src="../js/ldss-workflow.js?v=20260506-pass-score-1"></script>
+        <script src="../js/supabase-applicant-print-form.js?v=20260512-pdf-mobile-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

@@ -42,6 +42,10 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="folder"></i></div>
+                                Manage Application
+                            </a>
                         </div>
                     </div>
                 </nav>
@@ -65,7 +69,11 @@
                                             <li>New Application</li>
                                         </ol>
                                     </div>
-                                    <div class="col-12 col-xl-auto mb-3">
+                                    <div class="col-12 col-xl-auto mb-3 d-flex flex-wrap gap-2">
+                                        <a class="btn btn-dark btn-sm d-none d-inline-flex align-items-center gap-2" href="javascript:void(0);" id="applicationPrintBtn">
+                                            <i data-feather="download"></i>
+                                            <span>Download PDF</span>
+                                        </a>
                                         <a class="btn btn-outline-dark btn-sm" href="applicant-applications.html">Back to Applications</a>
                                     </div>
                                 </div>
@@ -361,7 +369,7 @@
                                         <input class="form-control" id="sisterCount" type="number" min="0" step="1" />
                                     </div>
                                     <div class="col-12 col-sm-6 col-xl-3">
-                                        <label class="small mb-1" for="totalParentsGrossIncome">Total Parents Monthly Gross Income (PHP)</label>
+                                        <label class="small mb-1" for="totalParentsGrossIncome">Total Parents Annual Gross Income (PHP)</label>
                                         <input class="form-control" id="totalParentsGrossIncome" type="number" min="0" step="0.01" />
                                     </div>
                                 </div>
@@ -439,6 +447,10 @@
                     </div>
                     <div class="modal-footer">
                         <button class="btn btn-outline-dark" type="button" data-bs-dismiss="modal">Close</button>
+                        <a class="btn btn-outline-dark d-none d-inline-flex align-items-center gap-2" href="javascript:void(0);" id="applicationSubmittedModalPrintBtn" role="button">
+                            <i data-feather="download"></i>
+                            <span>Download PDF</span>
+                        </a>
                         <button class="btn btn-dark" id="applicationSubmittedModalOpenBtn" type="button">Open Tracking Page</button>
                     </div>
                 </div>
@@ -555,7 +567,7 @@
         <script src="../js/supabase-config.js?v=20260312-1"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js?v=20260312-1"></script>
-        <script src="../js/supabase-applicant-application-form.js?v=20260422-1"></script>
+        <script src="../js/supabase-applicant-application-form.js?v=20260512-print-links-1"></script>
         <script src="../js/scripts.js"></script>
     </body>
 </html>

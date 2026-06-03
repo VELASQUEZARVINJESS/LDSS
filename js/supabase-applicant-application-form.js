@@ -7,6 +7,7 @@
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
     const DEFAULT_WORKFLOW_CONTROLS = {
+        allow_applicant_application_edits: true,
         require_applicant_photo_on_submit: true
     };
     const PROFILE_CACHE_PREFIX = "ldss:profile-cache:";
@@ -123,12 +124,14 @@
     let submitErrorActionHandler = null;
     let pendingSubmitContext = null;
     let submittedTrackingUrl = "";
+    let submittedPrintUrl = "";
     let applicationsSupportsSectorClassification = true;
     let profilesSupportsPlaceOfBirth = true;
     let applicationAuxDataAvailable = true;
     let legacyBarangayPendingAllowed = false;
     let initialPrivacyModalQueued = false;
     let formActionsBound = false;
+    let forceEditMode = false;
     let workflowControls = Object.assign({}, DEFAULT_WORKFLOW_CONTROLS);
 
     function byId(id) {
@@ -161,6 +164,10 @@
 
     function isApplicantPhotoRequiredOnSubmit() {
         return workflowControls.require_applicant_photo_on_submit !== false;
+    }
+
+    function applicantApplicationEditsEnabled() {
+        return workflowControls.allow_applicant_application_edits !== false;
     }
 
     function defaultFileHelperMessage(inputId) {
@@ -520,9 +527,27 @@
         }
         if (!applicationNo) {
             target.textContent = "Application ID: New draft (not yet saved)";
+            updatePrintableAction(null);
             return;
         }
         target.textContent = "Application ID: " + applicationNo;
+        updatePrintableAction(currentApplication);
+    }
+
+    function updatePrintableAction(application) {
+        const printBtn = byId("applicationPrintBtn");
+        if (!printBtn) {
+            return;
+        }
+
+        if (!application || !application.id) {
+            printBtn.classList.add("d-none");
+            printBtn.removeAttribute("href");
+            return;
+        }
+
+        printBtn.href = "applicant-print-form.html?id=" + encodeURIComponent(application.id) + "&download=1";
+        printBtn.classList.remove("d-none");
     }
 
     function isUploadServerUnavailableMessage(message) {
@@ -544,13 +569,23 @@
         ) {
             return "Mobile number is already used by another account. Please enter a different contact number.";
         }
+        if (
+            normalized.includes("profiles_email_key") ||
+            (normalized.includes("duplicate key value") && normalized.includes("email"))
+        ) {
+            return "Email address is already used by another account. Please enter a different email address.";
+        }
+        if (
+            normalized.includes("row-level security") ||
+            normalized.includes("permission denied") ||
+            normalized.includes("new row violates row-level security policy")
+        ) {
+            return "Applicant editing was blocked by the live Supabase policy. Apply `supabase/submitted_application_edit_hotfix_2026_03_12.sql` and confirm `supabase/application_aux_data_hotfix_2026_03_14.sql` is deployed.";
+        }
         if (!normalized.includes("cannot coerce the result to a single json object")) {
             return text;
         }
-        if (currentApplication && currentApplication.status === "submitted" && currentApplication.is_locked === false) {
-            return "Submitted application edits are blocked by an outdated database policy. Run submitted_application_edit_hotfix_2026_03_12.sql in Supabase, then retry.";
-        }
-        return "The database did not return the updated record. If submitted application editing was enabled recently, run submitted_application_edit_hotfix_2026_03_12.sql in Supabase and retry.";
+        return "The database did not return the updated record. Check the live Supabase edit policy and retry.";
     }
 
     function shouldUppercaseField(input) {
@@ -727,6 +762,7 @@
         const correctionTargets = parseCorrectionTargetKeys(params.get("correction_targets"), params.get("correction"));
         return {
             applicationId: params.get("application_id"),
+            forceEdit: params.get("force_edit") === "1" || params.get("force_edit") === "true",
             correctionTarget: correctionTargets[0] || params.get("correction"),
             correctionTargets: correctionTargets,
             correctionType: params.get("correction_type"),
@@ -1043,11 +1079,22 @@
         };
     }
 
+    function applicationFormUrl(applicationId) {
+        if (!applicationId) {
+            return "applicant-application-form.html";
+        }
+        let url = "applicant-application-form.html?application_id=" + encodeURIComponent(applicationId);
+        if (forceEditMode) {
+            url += "&force_edit=1";
+        }
+        return url;
+    }
+
     function clearCorrectionQueryFromUrl(applicationId) {
         if (!applicationId) {
             return;
         }
-        window.history.replaceState({}, "", "applicant-application-form.html?application_id=" + encodeURIComponent(applicationId));
+        window.history.replaceState({}, "", applicationFormUrl(applicationId));
     }
 
     function maybeShowCorrectionPrompt(query, application) {
@@ -1271,6 +1318,7 @@
         const submittedId = submittedApplication && submittedApplication.id ? submittedApplication.id : "";
         const submittedNo = submittedApplication && submittedApplication.application_no ? submittedApplication.application_no : submittedId;
         submittedTrackingUrl = submittedId ? "application-detail.html?id=" + encodeURIComponent(submittedId) : "";
+        submittedPrintUrl = submittedId ? "applicant-print-form.html?id=" + encodeURIComponent(submittedId) + "&download=1" : "";
 
         const titleEl = byId("applicationSubmittedModalLabel");
         if (titleEl) {
@@ -1291,6 +1339,17 @@
         const openBtn = byId("applicationSubmittedModalOpenBtn");
         if (openBtn) {
             openBtn.disabled = !submittedTrackingUrl;
+        }
+
+        const printBtn = byId("applicationSubmittedModalPrintBtn");
+        if (printBtn) {
+            if (submittedPrintUrl) {
+                printBtn.href = submittedPrintUrl;
+                printBtn.classList.remove("d-none");
+            } else {
+                printBtn.classList.add("d-none");
+                printBtn.removeAttribute("href");
+            }
         }
 
         const modal = getSubmittedModal();
@@ -2056,7 +2115,7 @@
             { id: "motherOccupation", label: "Mother Occupation", value: motherOccupation },
             { id: "fatherEducationAttainment", label: "Father Educational Attainment", value: fatherEducationAttainment },
             { id: "motherEducationAttainment", label: "Mother Educational Attainment", value: motherEducationAttainment },
-            { id: "totalParentsGrossIncome", label: "Total Parents Monthly Gross Income", value: monthlyIncomeRaw },
+            { id: "totalParentsGrossIncome", label: "Total Parents Annual Gross Income", value: monthlyIncomeRaw },
             { id: "childrenInFamily", label: "No. of Children in Family", value: childrenInFamilyRaw },
             { id: "brotherCount", label: "No. of Brothers", value: brotherCountRaw },
             { id: "sisterCount", label: "No. of Sisters", value: sisterCountRaw }
@@ -2097,13 +2156,13 @@
 
         if (submitting && !monthlyIncomeRaw) {
             setInputValidity("totalParentsGrossIncome", true);
-            errors.push("Total Parents Monthly Gross Income is required before submission.");
+            errors.push("Total Parents Annual Gross Income is required before submission.");
         } else if (monthlyIncomeRaw) {
             const income = Number(monthlyIncomeRaw);
             const invalidIncome = Number.isNaN(income) || income < 0;
             setInputValidity("totalParentsGrossIncome", invalidIncome);
             if (invalidIncome) {
-                errors.push("Total Parents Monthly Gross Income must be a valid non-negative number.");
+                errors.push("Total Parents Annual Gross Income must be a valid non-negative number.");
             }
         } else {
             setInputValidity("totalParentsGrossIncome", false);
@@ -2233,16 +2292,51 @@
     }
 
     function isEditable(application) {
-        if (!application) {
-            return true;
+        return true;
+    }
+
+    function editBlockedMessage(application, detailLink, reason) {
+        const link = detailLink || (application && application.id
+            ? "application-detail.html?id=" + encodeURIComponent(application.id)
+            : "applicant-applications.html");
+
+        if (!applicantApplicationEditsEnabled()) {
+            return "Application editing is currently disabled by the System Administrator. Use tracking page instead: <a href=\"" + link + "\">Open Tracking</a>.";
         }
-        if (application.is_locked) {
-            return false;
+
+        if (reason === "attempt_limit") {
+            return "Only 1 application attempt is allowed per school year. Your current record is not editable. Use tracking instead: <a href=\"" + link + "\">Open Tracking</a>.";
         }
-        return EDITABLE_STATUSES.includes(application.status);
+
+        return "This application is no longer editable. Use tracking page instead: <a href=\"" + link + "\">Open Tracking</a>.";
     }
 
     function actionLabels(application) {
+        if (forceEditMode && application) {
+            const normalizedStatus = (application.status || "").toString().trim().toLowerCase();
+            if (normalizedStatus === "submitted") {
+                return {
+                    save: "Save Changes",
+                    submit: "Update Submitted Application"
+                };
+            }
+            if (normalizedStatus === "returned_for_correction") {
+                return {
+                    save: "Save Changes",
+                    submit: "Resubmit Application"
+                };
+            }
+            return {
+                save: "Save Draft",
+                submit: "Submit Application"
+            };
+        }
+        if (!application || !isEditable(application)) {
+            return {
+                save: "Save Draft",
+                submit: "Submit Application"
+            };
+        }
         if (application && !application.is_locked && application.status === "submitted") {
             return {
                 save: "Update Information",
@@ -2429,6 +2523,20 @@
         }
 
         const result = await query;
+
+        if (result.error || !result.data || result.data.length === 0) {
+            return null;
+        }
+        return result.data[0];
+    }
+
+    async function findLatestOwnedApplication(context) {
+        const result = await context.client
+            .from("applications")
+            .select("id, application_no, school_year, status, is_locked")
+            .eq("applicant_id", context.user.id)
+            .order("updated_at", { ascending: false })
+            .limit(1);
 
         if (result.error || !result.data || result.data.length === 0) {
             return null;
@@ -2676,6 +2784,9 @@
     }
 
     async function saveOrCreateDraft(context) {
+        if (forceEditMode && !currentApplication) {
+            throw new Error("Edit mode could not load the existing application. Reopen it from My Applications and retry.");
+        }
         const payload = collectApplicationPayload();
         if (!payload.school_year || !payload.scholarship_type) {
             throw new Error("School Year and Scholarship Type are required.");
@@ -2765,7 +2876,7 @@
 
         currentApplication = insertResult.data;
         setApplicationIdDisplay(currentApplication.application_no || "");
-        window.history.replaceState({}, "", "applicant-application-form.html?application_id=" + encodeURIComponent(currentApplication.id));
+        window.history.replaceState({}, "", applicationFormUrl(currentApplication.id));
         return currentApplication;
     }
 
@@ -2777,12 +2888,7 @@
             throw new Error("This application is no longer editable.");
         }
 
-        const currentStatus = (currentApplication.status || "").toString().trim().toLowerCase();
         const submittedAt = currentApplication.submitted_at || new Date().toISOString();
-
-        if (currentStatus === "draft") {
-            await assertApplicationIntakeOpen(context);
-        }
 
         await ensureSingleAttemptPerSchoolYear(
             context,
@@ -3012,7 +3118,7 @@
             await persistAuxMeta(context, context.user.id, application.id);
             const profileErrorMessage = await saveProfile(context);
             const uploadResult = await uploadSelectedDocuments(context, application.id);
-            const successPrefix = wasSubmitted ? "Application changes saved" : "Draft saved";
+            const successPrefix = currentApplication ? "Your changes were saved successfully" : "Draft saved successfully";
 
             if (uploadResult.errors.length > 0 || profileErrorMessage) {
                 const details = [];
@@ -3041,7 +3147,8 @@
             }
         } catch (error) {
             const message = explainMutationSingleRowError(error && error.message ? error.message : "Unknown error");
-            setStatus((isSubmittedEdit ? "Failed to save changes: " : "Failed to save draft: ") + message, "alert-danger");
+            console.error("Applicant save failed:", message);
+            setStatus(message, "alert-danger");
         } finally {
             isSaving = false;
             setActionLoading("draft", false);
@@ -3105,11 +3212,8 @@
             showSubmittedModal(submitted, profileErrorMessage, wasPreviouslySubmitted ? "updated" : "submitted");
         } catch (error) {
             const message = explainMutationSingleRowError(error && error.message ? error.message : "Unknown error");
-            if (!showSubmitErrorModal(message, { title: "Submission Failed" })) {
-                setStatus("Submission failed: " + message, "alert-danger");
-            } else {
-                setStatus("", "");
-            }
+            console.error("Applicant submission failed:", message);
+            setStatus(message, "alert-danger");
         } finally {
             isSubmitting = false;
             setActionLoading("submit", false);
@@ -3452,6 +3556,7 @@
             }
 
             const query = parseQuery();
+            forceEditMode = query.forceEdit === true;
             if (query.applicationId) {
                 const existing = await loadApplication(context, query.applicationId);
                 if (!existing) {
@@ -3463,24 +3568,22 @@
                     applyActionLabels();
                     const intakePolicy = await loadIntakePolicy(context);
 
-                    if (!isEditable(existing)) {
+                    if (!forceEditMode && !isEditable(existing)) {
                         setFormEditableState(false);
-                        const detailLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
-                        setStatus(
-                            "This application is no longer editable. Use tracking page instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
-                            "alert-warning",
-                            true
-                        );
+                        setStatus(editBlockedMessage(existing), "alert-warning", true);
                         return;
                     }
 
-                    if (existing.status === "submitted") {
+                    if (forceEditMode) {
+                        setFormEditableState(true);
+                        setStatus("Edit mode unlocked for this application.", "alert-info");
+                    } else if (existing.status === "submitted") {
                         setStatus(
                             "This submitted application is still editable until the scholarship office locks it. Save your corrections, then update the same record.",
                             "alert-info"
                         );
                     } else if (!intakePolicy.isOpen) {
-                        setStatus(describeIntakeClosedReason(intakePolicy) + " Draft changes may still be saved, but submission is blocked after the cutoff.", "alert-warning");
+                        setStatus(describeIntakeClosedReason(intakePolicy) + " Existing application edits can still be saved and submitted.", "alert-warning");
                     }
 
                     maybeShowCorrectionPrompt(query, existing);
@@ -3496,40 +3599,66 @@
                         await hydrateAuxMeta(context, context.user.id, existing.id);
                         applyActionLabels();
 
-                        if (!isEditable(existing)) {
+                        if (!forceEditMode && !isEditable(existing)) {
                             setFormEditableState(false);
-                            const detailLink = "application-detail.html?id=" + encodeURIComponent(existing.id);
-                            setStatus(
-                                "Only 1 application attempt is allowed per school year. Your current record is not editable. Use tracking instead: <a href=\"" + detailLink + "\">Open Tracking</a>.",
-                                "alert-warning",
-                                true
-                            );
+                            setStatus(editBlockedMessage(existing, null, "attempt_limit"), "alert-warning", true);
                             return;
                         }
 
-                        const editLink = "applicant-application-form.html?application_id=" + encodeURIComponent(existing.id);
-                        setStatus(
-                            "Only 1 application attempt is allowed per school year. Update your existing application instead: <a href=\"" + editLink + "\">Open Current Application</a>.",
-                            "alert-warning",
-                            true
-                        );
+                        if (forceEditMode) {
+                            setFormEditableState(true);
+                            setStatus("Edit mode unlocked for this application.", "alert-info");
+                        } else {
+                            const editLink = applicationFormUrl(existing.id);
+                            setStatus(
+                                "Only 1 application attempt is allowed per school year. Update your existing application instead: <a href=\"" + editLink + "\">Open Current Application</a>.",
+                                "alert-warning",
+                                true
+                            );
+                        }
                     }
                 } else {
                     const latestDraft = await findLatestEditableDraft(context, activeSchoolYear);
                     if (latestDraft) {
                         const continueLink = "applicant-application-form.html?application_id=" + encodeURIComponent(latestDraft.id);
+                        const loadedDraft = await loadApplication(context, latestDraft.id);
                         const intakePolicy = await loadIntakePolicy(context);
                         const draftMessage = !intakePolicy.isOpen
-                            ? describeIntakeClosedReason(intakePolicy) + ' You may review your existing draft (' + latestDraft.application_no + '), but submission is blocked after the cutoff. <a href="' + continueLink + '">Open Draft</a>.'
+                            ? describeIntakeClosedReason(intakePolicy) + ' You may review and submit your existing draft (' + latestDraft.application_no + '). <a href="' + continueLink + '">Open Draft</a>.'
                             : 'You have an existing draft (' + latestDraft.application_no + '). <a href="' + continueLink + '">Continue Draft</a> or start a new one below.';
                         setStatus(
                             draftMessage,
                             !intakePolicy.isOpen ? "alert-warning" : "alert-info",
                             true
                         );
+                        if (loadedDraft) {
+                            currentApplication = loadedDraft;
+                            applyApplicationToForm(loadedDraft);
+                            await hydrateAuxMeta(context, context.user.id, loadedDraft.id);
+                            applyActionLabels();
+                            setFormEditableState(true);
+                        }
                     } else {
                         const intakePolicy = await loadIntakePolicy(context);
                         if (!intakePolicy.isOpen) {
+                            const fallbackApplication = await findLatestOwnedApplication(context);
+                            if (fallbackApplication) {
+                                const loadedFallback = await loadApplication(context, fallbackApplication.id);
+                                if (loadedFallback) {
+                                    currentApplication = loadedFallback;
+                                    applyApplicationToForm(loadedFallback);
+                                    await hydrateAuxMeta(context, context.user.id, loadedFallback.id);
+                                    applyActionLabels();
+                                    setFormEditableState(true);
+                                    setStatus(
+                                        describeIntakeClosedReason(intakePolicy) + " Your latest application has been loaded for editing.",
+                                        "alert-warning"
+                                    );
+                                    maybeShowCorrectionPrompt(query, loadedFallback);
+                                    queueInitialPrivacyNoticeModal(currentApplication);
+                                    return;
+                                }
+                            }
                             setFormEditableState(false);
                             setStatus(describeIntakeClosedReason(intakePolicy), "alert-warning");
                         }

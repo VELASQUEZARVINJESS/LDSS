@@ -11,6 +11,7 @@
     const WALK_IN_API_PATH = "/api/secretary/walk-in-intake";
     const NO_BARANGAY_FILTER_VALUE = "__no_barangay__";
     const NO_BARANGAY_FILTER_LABEL = "No Barangay";
+    const SUBMITTED_REQUIREMENTS_VIEW = "submitted_requirements";
     const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
     const DEFAULT_WORKFLOW_CONTROLS = {
         allow_secretary_draft_completion: false,
@@ -68,6 +69,20 @@
 
     function byId(id) {
         return document.getElementById(id);
+    }
+
+    function currentView() {
+        try {
+            const params = new URLSearchParams(window.location.search || "");
+            return (params.get("view") || "").toString().trim().toLowerCase();
+        } catch (_error) {
+            return "";
+        }
+    }
+
+    function isSubmittedRequirementsView() {
+        const view = currentView();
+        return view === SUBMITTED_REQUIREMENTS_VIEW || view === "submitted_applications";
     }
 
     function upperText(value) {
@@ -166,6 +181,44 @@
         }
         alert.className = "alert " + (type || "alert-info");
         alert.textContent = message;
+    }
+
+    function applyViewMeta() {
+        if (!isSubmittedRequirementsView()) {
+            return;
+        }
+
+        const pageTitle = byId("secretaryApplicationsPageTitle");
+        const pageSubtitle = byId("secretaryApplicationsPageSubtitle");
+        const breadcrumbCurrent = byId("secretaryApplicationsBreadcrumbCurrent");
+        const queueTitle = byId("secretaryApplicationsQueueTitle");
+        const bulkButton = byId("secretaryBulkForExamBtn");
+        const bulkMeta = byId("secretaryBulkForExamMeta");
+
+        document.title = "LDSP | Submitted Requirements";
+
+        if (pageTitle) {
+            pageTitle.innerHTML = '<div class="page-header-icon"><i data-feather="layers"></i></div>Submitted Requirements';
+        }
+        if (pageSubtitle) {
+            pageSubtitle.textContent = "Search applicants who already submitted hard-copy requirements to the scholarship office.";
+        }
+        if (breadcrumbCurrent) {
+            breadcrumbCurrent.textContent = "Submitted Requirements";
+        }
+        if (queueTitle) {
+            queueTitle.textContent = "Submitted Requirements List";
+        }
+        if (bulkButton) {
+            bulkButton.classList.add("d-none");
+        }
+        if (bulkMeta) {
+            bulkMeta.textContent = "Applicants listed here already completed hard-copy requirement submission to the office.";
+        }
+
+        if (window.feather && typeof window.feather.replace === "function") {
+            window.feather.replace();
+        }
     }
 
     function delay(ms) {
@@ -655,9 +708,11 @@
     async function fetchAllApplications(context) {
         const rows = [];
         const includeDrafts = workflowControls.allow_secretary_draft_completion === true;
-        const queueStatuses = includeDrafts
-            ? ["draft", "submitted", "returned_for_correction"]
-            : ["submitted", "returned_for_correction"];
+        const queueStatuses = isSubmittedRequirementsView()
+            ? ["hard_copy_verified"]
+            : (includeDrafts
+                ? ["draft", "submitted", "returned_for_correction"]
+                : ["submitted", "returned_for_correction"]);
 
         for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
             const query = context.client
@@ -730,7 +785,9 @@
                 ? NO_BARANGAY_FILTER_VALUE
                 : (normalizeBarangay(selectedBarangayRaw) || "all"));
         const selectedSector = sectorFilter.value || "all";
-        const selectedStatus = statusFilter.value || "submitted";
+        const selectedStatus = isSubmittedRequirementsView()
+            ? "hard_copy_verified"
+            : (statusFilter.value || "submitted");
         const selectedYear = yearFilter.value || "all";
 
         const observedBarangays = new Set(
@@ -814,14 +871,19 @@
         });
         sectorFilter.value = sectors.includes(selectedSector) ? selectedSector : "all";
 
-        statusFilter.innerHTML = '<option value="all">STATUS ALL</option>';
-        statuses.forEach(function (status) {
-            const option = document.createElement("option");
-            option.value = status;
-            option.textContent = statusMeta(status).label;
-            statusFilter.appendChild(option);
-        });
-        statusFilter.value = statuses.includes(selectedStatus) ? selectedStatus : "all";
+        if (isSubmittedRequirementsView()) {
+            statusFilter.innerHTML = '<option value="hard_copy_verified">Hard Copy Verified</option>';
+            statusFilter.value = "hard_copy_verified";
+        } else {
+            statusFilter.innerHTML = '<option value="all">STATUS ALL</option>';
+            statuses.forEach(function (status) {
+                const option = document.createElement("option");
+                option.value = status;
+                option.textContent = statusMeta(status).label;
+                statusFilter.appendChild(option);
+            });
+            statusFilter.value = statuses.includes(selectedStatus) ? selectedStatus : "all";
+        }
 
         yearFilter.innerHTML = '<option value="all">YEAR ALL</option>';
         years.forEach(function (year) {
@@ -877,7 +939,9 @@
     function applyFilterRows() {
         const barangay = byId("secretaryApplicationsBarangayFilter") ? byId("secretaryApplicationsBarangayFilter").value : "all";
         const sector = byId("secretaryApplicationsSectorFilter") ? byId("secretaryApplicationsSectorFilter").value : "all";
-        const status = byId("secretaryApplicationsStatusFilter") ? byId("secretaryApplicationsStatusFilter").value : "all";
+        const status = isSubmittedRequirementsView()
+            ? "hard_copy_verified"
+            : (byId("secretaryApplicationsStatusFilter") ? byId("secretaryApplicationsStatusFilter").value : "all");
         const schoolYear = byId("secretaryApplicationsYearFilter") ? byId("secretaryApplicationsYearFilter").value : "all";
         const searchQuery = byId("secretaryApplicationsSearchInput")
             ? byId("secretaryApplicationsSearchInput").value.toLowerCase().trim()
@@ -1040,6 +1104,16 @@
         const button = byId("secretaryBulkForExamBtn");
         const meta = byId("secretaryBulkForExamMeta");
         const rows = bulkPendingExamRows();
+
+        if (isSubmittedRequirementsView()) {
+            if (button) {
+                button.classList.add("d-none");
+            }
+            if (meta) {
+                meta.textContent = "Applicants listed here already completed hard-copy requirement submission to the office.";
+            }
+            return;
+        }
 
         if (button) {
             button.disabled = bulkForExamSubmitting || rows.length === 0;
@@ -1466,6 +1540,7 @@
         }
 
         authContext = context;
+        applyViewMeta();
         try {
             await loadWorkflowControls(context);
         } catch (error) {

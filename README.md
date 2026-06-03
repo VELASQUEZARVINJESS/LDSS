@@ -4,6 +4,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 
 ## Main URLs
 - `https://daet-scholarship.gt.tc/` -> Login
+- `https://daet-scholarship.gt.tc/exam-room-lookup.html` -> Public exam room lookup
 - `https://daet-scholarship.gt.tc/APPLICANT/` -> Applicant portal
 - `https://daet-scholarship.gt.tc/SECRETARY/` -> Secretary portal
 - `https://daet-scholarship.gt.tc/ADMIN/` -> Admin portal
@@ -54,6 +55,8 @@ This project is deployable as a static frontend. Application data stays in Supab
   - `js/supabase-secretary-exam-results.js`
   - `js/supabase-secretary-verification.js`
   - `js/supabase-secretary-interview.js`
+- Secretary ranking print now supports a score-range mode, so office staff can print only a slice like `69` to `66` instead of the full ranked list; the next natural follow-up would be preset buttons for common ranges if staff starts reusing them often.
+- Secretary Scholar Selection now supports a matching score-range filter in the final list view, names-only PDF, and masterlist print, so office staff can print only the score band they need.
 - Admin live integrations now in:
   - `js/supabase-admin-dashboard.js`
   - `js/supabase-admin-approval-queue.js`
@@ -64,6 +67,9 @@ This project is deployable as a static frontend. Application data stays in Supab
 - System Administrator User Management now includes a `Claim / Replace Login` action for applicant accounts so office-created walk-in accounts can later be transferred to the student's final email and a new password without desynchronizing Supabase Auth from `profiles.email`.
 - System Administrator `Claim / Replace Login` now also shows an `Office Temporary Password` section for unclaimed walk-in accounts, where staff can generate a fresh temporary password on demand without storing a readable password in the database; once the walk-in account is claimed, that office temporary access section closes automatically.
 - Scholarship Settings now includes a `Require applicant 1x1 photo before submission` toggle so the System Administrator can temporarily allow applicant form submission without the photo while identity is checked later during examination/interview.
+- Scholarship Settings still exposes an `Allow applicants to edit saved applications` toggle in the UI, and the matching Supabase hotfix now lets applicants edit any owned application record in `supabase/submitted_application_edit_hotfix_2026_03_12.sql` so forced edit mode can save successfully.
+- Applicant intake closure now only blocks brand-new application creation; existing application drafts and submitted records can still be edited and resubmitted from the same form.
+- Secretary Checking now includes a dedicated `Unlock for Editing` action for locked submitted or returned records, so staff can reopen an application without using the correction flow when they only need to clear the lock.
 - System Administrator User Directory now shows each account's email address directly under the user's name for faster support and account lookup, and the directory now follows the same hoverable responsive queue-table pattern used by the secretary application list.
 - System Administrator User Management now includes live email verification status chips, filtering, resend verification support, and audited access actions for account activation, suspension, deletion, and manual verification support; the verification status lookup uses the protected Node server route so staff can read Supabase Auth confirmation state safely.
 - System Administrator User Management now hides the secretary-account creation block, uses a compact secretary-style filter bar, fetches the full user directory in batches beyond the old 1000-row limit, paginates at 10 rows by default for lighter page loads, and groups filters plus directory into one cleaner workspace card.
@@ -75,18 +81,32 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Applicant dashboard now keeps a simpler top summary layout without the `Recent Activity`, `Requirement Summary`, and `Application Timeline` section row.
 - Applicant dashboard quick actions now show only the `New Application` button in the overview bar.
 - Applicant `My Applications` now removes the extra `Continue Draft` header button to keep the page less confusing.
-- Applicant record-table `View` buttons now open the applicant application form directly instead of routing users into the separate tracking/details page first.
+- Applicant record-table actions now show `View`, `Edit`, and `Download PDF`, with `Edit` opening the form in forced edit mode so applicants can jump straight into the editable application form from the table.
+- Applicant edit flows now refuse to fall back into a brand-new draft when an edit URL cannot load the existing record, and successful saves on existing records now say `Your changes were saved successfully`.
+- Applicant dashboard and form now auto-load the latest owned application into the editable form when no `application_id` is present and intake is closed, so Save no longer falls back into a new closed filing.
+- Applicant submission failures now stay inline for now instead of opening the blocking `Submission Failed` modal.
+- Applicant save and submit failures now stay visible in the form banner instead of failing silently, with clearer duplicate email/mobile and live Supabase policy hints for applicant-side edits.
+- Applicant and secretary family-income sections now display `Annual Gross Income` wording instead of `Monthly Gross Income` for the parents income field.
 - Applicant/application workflow chips now show `Submitted` in blue for clearer visual status distinction.
 - Applicant submitted status guidance now says to wait for secretary checking for correction, screening, and exam scheduling.
+- Applicant printable form now shows `Edit Application` beside `Back to Applications` and opens the same record in forced edit mode.
+- Applicant save errors now point to the live Supabase edit policy when the hotfix has not been deployed yet.
 - Applicant profile address display now deduplicates repeated `Barangay` segments so messy saved address text renders as one clean Daet address.
 - Applicant `My Profile` now uses a more mobile-first summary layout with a stronger profile hero, scholarship summary, document status chips, a simplified applicant account menu, the summary row hidden on phones for later redesign, and the detailed personal/contact/education/family cards removed from the main view to reduce applicant confusion.
+- Applicant `My Profile` now exposes all four live edit modals from the hero `Edit Profile` menu, keeps login email read-only so profile edits do not desync Supabase Auth, auto-syncs the displayed profile email from the real signed-in account, and redirects the old standalone `applicant-profile-edit.html` shell back to the active profile page.
 - Secretary Checking now keeps the simpler summary-first workspace, while secretary-side applicant corrections keep the applicant email read-only so profile edits do not desync the user's Supabase Auth login.
 - Secretary Interview Verification now also includes a dedicated `Fix Login Email` office action for applicant accounts, so staff can replace a wrong applicant login email, keep `profiles.email` in sync with Supabase Auth, and immediately send a password-reset handoff email to the corrected inbox through the protected Node route.
 - Secretary Checking applicant detail editing now keeps `Place of Birth` populated from the same fallback source used by the summary sheet, so opening the correction modal no longer shows that field blank when the value is stored in shared application data.
+- Secretary-side `Upload / Replace Photo` now saves the applicant photo path through the same secure staff-profile RPC used for applicant detail corrections, so secretary uploads persist to the applicant profile once the updated `supabase/secretary_applicant_profile_edit_hotfix_2026_04_07.sql` is re-run in Supabase.
 - Secretary Checking now asks for staff confirmation before `Set for Examination` changes an application to `Pending Exam`, using the same in-page modal pattern instead of firing the action immediately on click.
 - Secretary Checking no longer exposes the old `Internal Review` selector to secretary users; the hidden failed-exam exception path is now managed only from the System Administrator side.
 - Secretary Checking now places that discreet `Special Consideration` chip inline beside `Applicant Summary`, without the extra `Category` label or a separate header row.
 - Secretary Checking now styles `Priority Review` with the default soft chip background and green text, while `For Approval` uses the yellow accent style for quicker office scanning.
+- Secretary Applications now includes a dedicated `Submitted Requirements` sidebar shortcut that opens the same queue page in a hard-copy-verified-only view, with the compact search/filter bar focused on applicant name, barangay, sector, status, and school year.
+- Printed applicant names across the active application form, secretary print form, certification, scholar-selection exports, exam ranking prints, special-consideration exports, and exam room/attendance printouts now show `Last Name, First Name Middle Name` instead of first-name-first.
+- Secretary Ranking now includes an `Open Details` button after the score column, opening the full applicant checking record in a separate browser tab so staff can review the record without leaving the ranking view.
+- Secretary Ranking now also includes a header-only slide switch for the `Special Consideration` badge, so staff can hide or show that tag in the ranking view and print preview without losing the highlighted record itself.
+- Secretary Ranking now shows the applicant profile picture before the examinee name in both the desktop table and the mobile ranking cards, using a circular avatar with a cleaner ring style; both the avatar and the applicant name block open the full applicant details in a new tab, the layout falls back to initials when no applicant photo is available, and photos hydrate in small batches so the ranking list appears first without waiting on every image.
 - System Administrator Special Consideration now keeps tagged applicants visible in its allow-list even when those tagged records are outside the first active-year application fetch, so secretary-saved `For Approval` and other special-consideration tags no longer disappear from that page.
 - System Administrator Special Consideration now shows live counter boxes for tagged applicants, `Priority Review`, `For Approval`, and remaining available applicants, and it also includes a `Print All Tagged` action with a cleaner numbered allow-list table for office reporting.
 - System Administrator Special Consideration now includes score and overall rank in the allowed-students list, browser printout, and PDF export, and the print/export layout now uses a larger LGU-logo header on long-bond `8.5 x 13` portrait paper with readable table text.
@@ -102,6 +122,8 @@ This project is deployable as a static frontend. Application data stays in Supab
 - System Administrator Special Consideration now uses a more compact responsive layout, with the tall panel stretch removed and the saved-entry rows tightened so the page reads cleaner on narrower screens.
 - System Administrator Special Consideration now uses the shared popup toast pattern for save/update/remove notices, with a page-level fallback so cached old markup does not reopen the long inline status bars after actions.
 - System Administrator Special Consideration now shows the allowed-students area as its own responsive table section below the main workspace row, keeping the old table-style scanability with a cleaner user-management-style shell.
+- System Administrator Special Consideration now also includes a separate `Final List Inclusion` manager with its own search/results table, so the office can add applicants into the Secretary Scholar Selection final total without changing the applicant-side score or rank display.
+- Final List Inclusion now records a `Care Of / Person In Charge / Endorsed By` note per applicant through its own modal, keeps that detail editable from the Included Applicants table, and preserves the note in the same `application_staff_flags` record as the inclusion flag.
 - Admin Approval Queue now shows only neutral `final review` wording for those special consideration exceptions instead of exposing the old internal label in the staff queue.
 - Admin Approval Queue now includes an admin-only `Print Form` link per applicant row that opens the printable application form preview for that record.
 - System Administrator sidebar now restores the direct `Special Consideration` shortcut to the dedicated allow-list page instead of jumping inside Scholarship Settings.
@@ -177,6 +199,8 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Checking now includes a `Not Qualified` action beside `Set for Examination`, allowing the scholarship office to stop an applicant from proceeding to exam and move the record directly to `Rejected`.
 - Secretary Checking `Save Checking` now clears `Returned for Correction` back to `Submitted` once the applicant has actually updated the returned record, so corrected applications do not stay stuck in correction status after secretary re-check.
 - Secretary and applicant printable application forms now share the same official print-sheet layout, and the secretary print output no longer includes the requirement section so both versions match more closely.
+- Secretary Checking `Print Form` now opens the secretary printable sheet in print-ready mode, and the secretary print page now allows submitted and later application records so office staff can print during checking instead of waiting until after exam/interview.
+- Secretary printable-form loading now renders the text fields before file-preview URLs are fetched, so an older hosted upload preview or temporary `/api/uploads` issue no longer leaves the whole secretary print sheet blank on `Loading application record...`.
 - Secretary dashboard chart row now replaces the old Return / Resubmission graph with a reminder follow-up chart for draft/no-form users, while Sector Classification was moved into the earlier chart slot.
 - Secretary Reports is now a cleared reconstruction shell; the old report cards, filters, and summary details were removed from the page so the secretary printing/reporting flow can be rebuilt cleanly.
 - Secretary reminder campaigns now support queued background sending in timed batches through the Node server so large filtered reminder groups do not need to be sent all at once.
@@ -225,13 +249,16 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Ranking `All sector classifications` now shows all sector-tagged applicants together while preserving their original overall rank numbers, with tied scores sharing the same counted rank.
 - Secretary Room Score Encoding now includes a `Mark Blank as Failed to Take Exam` action for the selected room, labeling blank/no-show examinees as failed without changing scored rows.
 - Secretary Scholar Selection now excludes blank/no-show records from the Sector Classification failed-score pool, so sector slots come only from applicants with an encoded raw score.
-- Applicant navigation is now simplified for end users: the sidebar keeps only Dashboard, notification links are hidden for now, and the Dashboard now opens directly into the applicant's Application Records view instead of making them jump to a separate tracking-first screen.
-- Applicant Dashboard now uses the same Application Records table view as `My Applications`, and the applicant-facing columns are now trimmed into a smaller responsive list with `No.`, `School Year`, `Applicant ID`, `Submitted On`, `Examination Status`, `Exam Result`, and an `Option` column with a simple `View` button.
+- Applicant navigation is now simplified for end users: the sidebar keeps Dashboard and My Applications, notification links are hidden for now, and the Dashboard now opens directly into the applicant's Application Records view instead of making them jump to a separate tracking-first screen.
+- Applicant Dashboard now uses the same Application Records table view as `My Applications`, and the applicant-facing columns are now trimmed into a smaller responsive list with `No.`, `School Year`, `Applicant ID`, `Submitted On`, `Examination Status`, `Exam Result`, and an `Option` column with `View`, `Edit`, and `Download PDF`.
 - Applicant application tables now show a small `SCORE | STATUS | RANK` helper line under the `Exam Result` header so the column meaning is easier to read at a glance.
-- Special consideration applicant rows now display the rounded active passing score with `PASSED` and a recomputed rank when score visibility is enabled, while the stored raw score remains unchanged.
+- Special consideration and regular pass applicant rows now display `score | PASSED` with a recomputed rank when score visibility is enabled, while the stored raw score remains unchanged and special consideration still uses the rounded active passing score for the display score.
 - Sector-classification applicant rows now resolve the final 76 selected sector applicants from the batch itself, and those rows display `SCORE | SELECTED` with a small gray detail line such as `Sector Classification: Person with Disability (PWD)` on the applicant table and detail/dashboard views when score visibility is enabled, with the selected label green and the sector classification detail kept muted on the applicant side.
 - Applicant application tables now show `score | FAIL | Rank ####` for failed rows when score visibility is enabled and the applicant has a computed batch score rank available, with the rank label kept in a muted gray tone on the applicant side.
 - Applicant application rows now resolve `Not Qualified` from the exam result itself, so a failed exam no longer falls through to `Unknown` while the workflow status is still catching up.
+- Applicant `My Applications` now shows direct `View`, `Edit`, and `Download PDF` actions for submitted records, so the printable form and editable form are one click away from the record table.
+- Applicant form and tracking pages now expose direct `Download PDF` actions that open the dedicated printable application sheet, so applicants can reach the browser print dialog from the form, detail view, or submit confirmation modal.
+- Applicant printable application flow now uses clearer `Download PDF` labels and a mobile-friendly print-page button so phone users can reach the Save as PDF sheet more easily.
 - Applicant Dashboard and `My Applications` now show the `New Application` page action again, and the applicant-side lock now checks only the active school year so previous-cycle records no longer hide fresh filing for the new cycle.
 - Applicant tracking labels now treat draft or unsubmitted records as `Not Submitted` in the requirements column, and the final decision stays `Unknown` until the application reaches the actual final-review stage, where it can then move to `Pending`, `Approved`, or `Not Qualified`.
 - Applicant application records now keep the `Exam Result` column simple for regular tracking: applicants see `Passed`, `Failed`, `Score Consolidation`, or `Not Taken`, while special-consideration rows can show the active passing score and rank when score visibility is enabled.
@@ -246,7 +273,9 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary navigation now includes `Scholar Selection`, a final-list builder that combines Regular score passers, Sector Classification slot picks from below-passing-score applicants, and Special Consideration tags into one printable list.
 - Secretary Scholar Selection now shows Special Consideration rows at the rounded active passing score and recomputes their displayed rank against that score, while keeping the stored raw score intact for audit history.
 - Secretary Scholar Selection now labels the 76-slot sector pool rows as `Selected` with a soft amber/yellow badge, while keeping the sector explanation in the basis text.
-- Secretary Scholar Selection now brings back the Likhang Daeteño Performing Arts manual input block, adds a visible Likhang Daeteño Performing Arts count card, and treats the Likhang slot count as reserved audition space in the displayed total while keeping the masterlist print on a responsive 8.5 x 13 bond-paper table with row-break protection and a compact LGU logo header.
+- Secretary Scholar Selection now keeps the Likhang Daeteño Performing Arts section as actual manual entries only, shows the real Likhang entry count in the summary, and removes the old dummy-slot reservation behavior while keeping the masterlist print on a responsive 8.5 x 13 bond-paper table with row-break protection and a compact LGU logo header.
+- Secretary Scholar Selection now reads the separate `Final List Inclusion` System Administrator flag as its own final-list category, counts those applicants in the final total, and keeps their real score/rank untouched on the applicant side.
+- Final List Inclusion rows in Secretary Scholar Selection now carry the System Administrator `Care Of / Endorsed By` note into the Basis / Remarks text, so the endorsement follows the final list and print output without altering exam scores or ranks.
 - Secretary Scholar Selection masterlist print now makes the applicant name larger and left-aligns the smaller category badge underneath it so each row reads cleaner in the print preview.
 - Secretary Scholar Selection masterlist print now uses alternating row shading so the bond-paper table is easier to scan than the previous plain-white rows.
 - Secretary Scholar Selection masterlist print now paginates at 25 applicants per bond-paper page, hiding the count cards in print to maximize space.
@@ -270,10 +299,14 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Ranking print now uses one continuous long-bond table again, removing manual page chunks so blank reserved space is avoided while table rows stay protected from splitting at the page bottom.
 - Secretary Ranking print now hides the on-screen ranking card title/summary so only the dedicated print header and table appear in the printout.
 - Secretary Ranking PDF output now builds dedicated print pages with the Daet logo, a whole-number `No.` counter before `Rank`, the application number under each applicant name, and fixed 30-row chunks per page so bond-paper exports stay readable without page-break collisions.
+- Secretary Scholar Selection now includes a separate `Download Names PDF` action that exports the current final-list view as an alphabetically sorted names-only PDF with the simplified public-posting header, while keeping the full `Print Masterlist` worksheet unchanged.
+- System Administrator passing score entry is now whole-number only, and the shared applicant/workflow policy readers now round any older decimal passing score values back to a whole-number threshold before pass/fail display logic runs.
 - Secretary room assignment saving requires the SQL hotfix `supabase/exam_room_assignment_hotfix_2026_03_28.sql`.
 - Reminder emails for applicants without a submitted form now use the active scholarship settings cutoff deadline instead of a fixed hardcoded date.
 - Applicant Dashboard and My Applications now disable the `New Application` entry point when receiving is manually disabled or when the configured filing window is closed.
 - Applicant dashboard sidebar is now trimmed for end users and keeps only `Dashboard` plus `My Applications` in the main applicant navigation.
+- Applicant sidebar now labels the main application link as `Manage Application` while keeping the same applicant applications page and flow.
+- Applicant Dashboard is now cleared into a simple shell page so the next applicant-side dashboard details can be rebuilt cleanly.
 - Applicant submission form now includes the missing intake-date formatter used by the filing-window guard, fixing the `formatDate is not defined` submission error when the system shows intake open/close schedule messaging.
 - Applicant form now lets users update already-submitted or returned-for-correction applications after the intake deadline, while still blocking first-time draft submission once filing is closed.
 - Login and applicant registration pages now show a public filing-status modal when online scholarship application is not yet open, already closed, or manually closed by the scholarship office, while clarifying that existing applicants may still sign in even though new submission is unavailable.
@@ -360,7 +393,7 @@ Required Supabase Auth settings:
 5. Custom SMTP is strongly recommended for production so OTP emails arrive reliably.
 
 ## Developer Checks
-- Run `npm run check:syntax` after low-risk JS changes to catch parse errors before uploading files to hosting.
+- Run `npm run check:syntax` after low-risk JS changes to parse-check `server.js` plus every file under `js/` before uploading files to hosting.
 - `npm test` is still a placeholder and does not run application tests yet.
 
 ## Placeholder Shells
@@ -370,6 +403,7 @@ Required Supabase Auth settings:
 ## Security Headers
 - Apache/static hosting baseline headers are defined in `.htaccess`.
 - Node hosting applies the same baseline headers in `server.js`.
+- Public exam room lookup now rate-limits repeated attempts and returns a generic maintenance message instead of raw backend/database errors.
 - Current CSP allows the existing CDN scripts (`cdn.jsdelivr.net`, `cdnjs.cloudflare.com`), Supabase API/realtime connections, signed Supabase asset URLs, and the app's current inline script snippets.
 - Remaining hardening work, if you want a stricter CSP later:
   - remove inline `<script>` blocks such as `window.LDSS_REQUIRED_ROLE = ...`

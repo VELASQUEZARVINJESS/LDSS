@@ -9,7 +9,6 @@
         exam_total_items: 100
     };
     const MASTERLIST_SECTOR_LIMIT = 76;
-    const MASTERLIST_LIKHANG_LIMIT = 50;
     const MASTERLIST_PRINT_ROWS_PER_PAGE = 25;
     const MASTERLIST_PRINT_SCORE_RED_THRESHOLD = 70;
     const CATEGORY_META = {
@@ -24,6 +23,10 @@
         special: {
             label: "Special Consideration",
             className: "ldss-scholar-category-special"
+        },
+        final_inclusion: {
+            label: "Final List Inclusion",
+            className: "ldss-scholar-category-inclusion"
         },
         likhang: {
             label: "Likhang Daeteño Performing Arts",
@@ -45,6 +48,7 @@
     let policy = Object.assign({}, DEFAULT_POLICY);
     let staffFlagsAvailable = true;
     let isLoading = false;
+    let scholarPrintLogoDataUrlPromise = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -85,6 +89,13 @@
         return (value || "").toString().trim().toUpperCase();
     }
 
+    function normalizeFinalListEndorsedBy(value) {
+        return (value || "")
+            .toString()
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
     function buildApplicantName(profile) {
         if (!profile) {
             return "UNKNOWN APPLICANT";
@@ -94,6 +105,23 @@
             .map(function (value) { return upperText(value); })
             .filter(Boolean);
         return parts.length ? parts.join(" ") : upperText(profile.email || "Unknown Applicant");
+    }
+
+    function buildApplicantPrintName(profile) {
+        if (!profile) {
+            return "UNKNOWN APPLICANT";
+        }
+
+        const firstName = upperText(profile.first_name || "");
+        const middleName = upperText(profile.middle_name || "");
+        const lastName = upperText(profile.last_name || "");
+        const trailingNames = [firstName, middleName].filter(Boolean).join(" ");
+
+        if (lastName && trailingNames) {
+            return lastName + ", " + trailingNames;
+        }
+
+        return lastName || trailingNames || upperText(profile.email || "Unknown Applicant");
     }
 
     function normalizeNumber(value, fallbackValue) {
@@ -292,11 +320,181 @@
         return {
             regularSlots: readWholeNumber("scholarSelectionRegularSlots", 0),
             sectorSlots: normalizeSectorSlots(readWholeNumber("scholarSelectionSectorSlots", MASTERLIST_SECTOR_LIMIT)),
-            likhangSlots: readWholeNumber("scholarSelectionLikhangSlots", MASTERLIST_LIKHANG_LIMIT),
             includeSpecial: isChecked("scholarSelectionIncludeSpecial"),
             printFilter: (byId("scholarSelectionPrintFilter") ? byId("scholarSelectionPrintFilter").value : "all") || "all",
+            scoreRangeFrom: byId("scholarSelectionScoreFrom") ? byId("scholarSelectionScoreFrom").value : "",
+            scoreRangeTo: byId("scholarSelectionScoreTo") ? byId("scholarSelectionScoreTo").value : "",
             likhangInput: byId("scholarSelectionLikhangInput") ? byId("scholarSelectionLikhangInput").value : ""
         };
+    }
+
+    function currentPrintFilterLabel() {
+        const select = byId("scholarSelectionPrintFilter");
+        if (!select) {
+            return "All Categories";
+        }
+        const current = (select.value || "all").toString().trim();
+        if (current === "score-range") {
+            const range = currentPrintScoreRange();
+            if (range.hasRange) {
+                return "Score Range " + String(range.high) + " to " + String(range.low);
+            }
+            if (range.incomplete) {
+                return "Score Range (set From and To)";
+            }
+            return "Score Range";
+        }
+        const option = select.options[select.selectedIndex];
+        return option && option.text ? option.text : "All Categories";
+    }
+
+    function currentPrintScoreRange() {
+        const settings = currentSettings();
+        const maxScore = Math.max(1, Math.round(normalizeNumber(policy.exam_total_items, DEFAULT_POLICY.exam_total_items)));
+
+        function normalizeScoreInput(value) {
+            const raw = (value || "").toString().trim();
+            if (!raw) {
+                return null;
+            }
+
+            const numeric = Number(raw);
+            if (!Number.isFinite(numeric)) {
+                return null;
+            }
+
+            return Math.max(1, Math.min(maxScore, Math.trunc(numeric)));
+        }
+
+        const from = normalizeScoreInput(settings.scoreRangeFrom);
+        const to = normalizeScoreInput(settings.scoreRangeTo);
+        const activeFilter = (settings.printFilter || "all").toString().trim();
+
+        if (activeFilter !== "score-range") {
+            return {
+                from: from,
+                to: to,
+                low: null,
+                high: null,
+                hasRange: false,
+                incomplete: false
+            };
+        }
+
+        if (from === null || to === null) {
+            return {
+                from: from,
+                to: to,
+                low: null,
+                high: null,
+                hasRange: false,
+                incomplete: true
+            };
+        }
+
+        return {
+            from: from,
+            to: to,
+            low: Math.min(from, to),
+            high: Math.max(from, to),
+            hasRange: true,
+            incomplete: false
+        };
+    }
+
+    function selectionRowMatchesScoreRange(row, range) {
+        if (!row || !row.sourceRow || !hasSavedRawScore(row.sourceRow.raw_score)) {
+            return false;
+        }
+
+        const score = Number(row.sourceRow.raw_score);
+        return Number.isFinite(score) && score >= range.low && score <= range.high;
+    }
+
+    function selectionRowsForView(sourceRows) {
+        const rowsForView = Array.isArray(sourceRows) ? sourceRows.slice() : [];
+        const filter = currentSettings().printFilter;
+
+        if (filter === "score-range") {
+            const range = currentPrintScoreRange();
+            if (!range.hasRange) {
+                return [];
+            }
+            return rowsForView.filter(function (row) {
+                return selectionRowMatchesScoreRange(row, range);
+            });
+        }
+
+        if (filter === "all") {
+            return rowsForView;
+        }
+
+        return rowsForView.filter(function (row) {
+            return row.categoryKey === filter;
+        });
+    }
+
+    function syncPrintFilterVisibility() {
+        const wrap = byId("scholarSelectionScoreRangeWrap");
+        if (!wrap) {
+            return;
+        }
+
+        wrap.classList.toggle("d-none", (currentSettings().printFilter || "all") !== "score-range");
+    }
+
+    function scholarSelectionLogoUrl() {
+        return new URL("../img/daet-lgu.png", window.location.href).href;
+    }
+
+    function loadScholarSelectionLogoDataUrl() {
+        if (scholarPrintLogoDataUrlPromise) {
+            return scholarPrintLogoDataUrlPromise;
+        }
+
+        scholarPrintLogoDataUrlPromise = new Promise(function (resolve) {
+            const image = new Image();
+            image.onload = function () {
+                try {
+                    const canvas = document.createElement("canvas");
+                    canvas.width = image.naturalWidth || image.width || 1;
+                    canvas.height = image.naturalHeight || image.height || 1;
+                    const context2d = canvas.getContext("2d");
+                    if (!context2d) {
+                        resolve("");
+                        return;
+                    }
+                    context2d.drawImage(image, 0, 0);
+                    resolve(canvas.toDataURL("image/png"));
+                } catch (_error) {
+                    resolve("");
+                }
+            };
+            image.onerror = function () {
+                resolve("");
+            };
+            image.src = scholarSelectionLogoUrl();
+        });
+
+        return scholarPrintLogoDataUrlPromise;
+    }
+
+    function pdfFileSlug(value, fallback) {
+        const slug = (value || "")
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "");
+        return slug || fallback;
+    }
+
+    function getPdfGenerator() {
+        const jsPdfNamespace = window.jspdf || null;
+        if (!jsPdfNamespace || typeof jsPdfNamespace.jsPDF !== "function") {
+            return null;
+        }
+        return jsPdfNamespace.jsPDF;
     }
 
     function saveSettings() {
@@ -321,13 +519,12 @@
 
             writeInput("scholarSelectionRegularSlots", Math.max(0, Math.floor(Number(parsed.regularSlots || 0))));
             writeInput("scholarSelectionSectorSlots", normalizeSectorSlots(parsed.sectorSlots));
-            if (Object.prototype.hasOwnProperty.call(parsed, "likhangSlots")) {
-                writeInput("scholarSelectionLikhangSlots", Math.max(0, Math.floor(Number(parsed.likhangSlots))));
-            }
             writeCheckbox("scholarSelectionIncludeSpecial", parsed.includeSpecial !== false);
             if (byId("scholarSelectionPrintFilter") && parsed.printFilter) {
                 byId("scholarSelectionPrintFilter").value = parsed.printFilter;
             }
+            writeInput("scholarSelectionScoreFrom", parsed.scoreRangeFrom);
+            writeInput("scholarSelectionScoreTo", parsed.scoreRangeTo);
             if (byId("scholarSelectionLikhangInput") && typeof parsed.likhangInput === "string") {
                 byId("scholarSelectionLikhangInput").value = parsed.likhangInput;
             }
@@ -429,6 +626,7 @@
                     categoryKey: "likhang",
                     rank: "-",
                     applicantName: parts[0] || "Manual Dummy Record",
+                    applicantPrintName: parts[0] || "Manual Dummy Record",
                     applicationNo: "-",
                     barangay: parts[1] || "-",
                     school: parts[2] || "-",
@@ -446,6 +644,7 @@
             categoryKey: categoryKey,
             rank: row.display_rank ? String(row.display_rank) : "-",
             applicantName: row.applicant_name || "UNKNOWN APPLICANT",
+            applicantPrintName: row.applicant_print_name || row.applicant_name || "UNKNOWN APPLICANT",
             applicationNo: row.application_no || "-",
             barangay: row.barangay || "-",
             school: row.school_name || "-",
@@ -454,6 +653,15 @@
             basis: basis,
             sourceRow: row
         };
+    }
+
+    function finalInclusionBasis(row) {
+        const endorsedBy = normalizeFinalListEndorsedBy(row && row.final_list_inclusion_endorsed_by ? row.final_list_inclusion_endorsed_by : "");
+        const parts = ["Included from the System Administrator final list inclusion table."];
+        if (endorsedBy) {
+            parts.push("Care Of / Endorsed By: " + endorsedBy + ".");
+        }
+        return parts.join(" ");
     }
 
     function buildSelection() {
@@ -492,11 +700,18 @@
                     return toSelectionRow(row, "special", specialTagDisplay(row.special_consideration_tag));
                 })
             : [];
+        const finalInclusion = rankedRows
+            .filter(function (row) {
+                return row.final_list_inclusion === true && !selectedApplicationIds.has(row.application_id);
+            })
+            .map(function (row) {
+                selectedApplicationIds.add(row.application_id);
+                return toSelectionRow(row, "final_inclusion", finalInclusionBasis(row));
+            });
 
-        const likhangReservedCount = Math.max(0, Math.floor(Number(settings.likhangSlots || 0)));
-        const likhang = limitRows(parseLikhangRows(), likhangReservedCount);
-        const combined = regular.concat(special, sector);
-        const grandTotalCount = combined.length + likhangReservedCount;
+        const likhang = parseLikhangRows();
+        const combined = regular.concat(special, sector, finalInclusion);
+        const grandTotalCount = combined.length + likhang.length;
 
         const masterlistSelectedApplicationIds = new Set();
         const masterRegular = rankedRows
@@ -527,13 +742,22 @@
                 masterlistSelectedApplicationIds.add(row.application_id);
                 return toSelectionRow(row, "sector", "Selected from the 76-slot sector classification pool.");
             });
-        const masterlistCore = masterRegular.concat(masterSpecial, masterSector);
+        const masterFinalInclusion = rankedRows
+            .filter(function (row) {
+                return row.final_list_inclusion === true && !masterlistSelectedApplicationIds.has(row.application_id);
+            })
+            .map(function (row) {
+                masterlistSelectedApplicationIds.add(row.application_id);
+                return toSelectionRow(row, "final_inclusion", finalInclusionBasis(row));
+            });
+        const masterlistCore = masterRegular.concat(masterSpecial, masterSector, masterFinalInclusion);
         const masterlist = masterlistCore;
 
         return {
             regular: regular,
             sector: sector,
             special: special,
+            finalInclusion: finalInclusion,
             likhang: likhang,
             combined: combined,
             masterlist: masterlist,
@@ -544,8 +768,9 @@
             masterlistRegularCount: masterRegular.length,
             masterlistSectorCount: masterSector.length,
             masterlistSpecialCount: masterSpecial.length,
+            masterlistFinalInclusionCount: masterFinalInclusion.length,
             rankedCount: rankedRows.length,
-            likhangCount: likhangReservedCount,
+            likhangCount: likhang.length,
             likhangActualCount: likhang.length,
             sectorSlots: sectorSlots,
             grandTotalCount: grandTotalCount
@@ -594,13 +819,11 @@
     }
 
     function finalRowsForView(selection) {
-        const filter = currentSettings().printFilter;
-        if (filter === "all") {
-            return selection.combined;
-        }
-        return selection.combined.filter(function (row) {
-            return row.categoryKey === filter;
-        });
+        return selectionRowsForView(selection.combined);
+    }
+
+    function masterlistRowsForView(selection) {
+        return selectionRowsForView(selection.masterlistCore);
     }
 
     function renderFinalTable(selection) {
@@ -616,7 +839,9 @@
 
         const finalRows = finalRowsForView(selection);
         if (!finalRows.length) {
-            tbody.innerHTML = '<tr><td colspan="9" class="ldss-scholar-empty">No selected scholars match the current category view.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="ldss-scholar-empty">' + escapeHtml(currentSettings().printFilter === "score-range" && currentPrintScoreRange().incomplete
+                ? "Enter both score values to preview the selected score range."
+                : "No selected scholars match the current view.") + '</td></tr>';
             return;
         }
 
@@ -627,7 +852,7 @@
                 "<td>" + categoryPill(row.categoryKey) + "</td>" +
                 '<td class="text-center fw-700">' + escapeHtml(row.rank || "-") + "</td>" +
                 "<td>" +
-                '<div class="fw-700">' + escapeHtml(row.applicantName || "-") + "</div>" +
+                '<div class="fw-700">' + escapeHtml(row.applicantPrintName || row.applicantName || "-") + "</div>" +
                 '<div class="small text-muted">' + escapeHtml(row.school || "-") + "</div>" +
                 "</td>" +
                 '<td class="fw-700">' + escapeHtml(row.applicationNo || "-") + "</td>" +
@@ -646,14 +871,16 @@
             return;
         }
 
-        const masterlistRows = selection.masterlistCore || [];
+        const masterlistRows = masterlistRowsForView(selection);
         if (!currentBatchId && masterlistRows.length === 0) {
             container.innerHTML = '<div class="ldss-scholar-empty">No exam batch with assigned examinees is ready yet.</div>';
             return;
         }
 
         if (!masterlistRows.length) {
-            container.innerHTML = '<div class="ldss-scholar-empty">No score passers or Special Consideration applicants are ready for masterlist printing.</div>';
+            container.innerHTML = '<div class="ldss-scholar-empty">' + escapeHtml(currentSettings().printFilter === "score-range" && currentPrintScoreRange().incomplete
+                ? "Enter both score values to print the selected score range."
+                : "No final-list rows match the current view.") + '</div>';
             return;
         }
 
@@ -667,7 +894,7 @@
                     '<td class="text-center fw-700">' + escapeHtml(String(displayNo)) + "</td>" +
                     '<td class="text-center fw-700">' + escapeHtml(row.rank || "-") + "</td>" +
                     "<td class=\"ldss-scholar-masterlist-applicant\">" +
-                    '<div class="fw-700">' + escapeHtml(row.applicantName || "-") + "</div>" +
+                    '<div class="fw-700">' + escapeHtml(row.applicantPrintName || row.applicantName || "-") + "</div>" +
                     '<div class="ldss-scholar-masterlist-category">' + categoryPill(row.categoryKey) + "</div>" +
                     "</td>" +
                     '<td class="text-center fw-700">' + escapeHtml(row.applicationNo || "-") + "</td>" +
@@ -706,6 +933,19 @@
         }).join("");
     }
 
+    function renderActionState(selection) {
+        const namesPdfButton = byId("scholarSelectionNamesPdfBtn");
+        const printButton = byId("scholarSelectionPrintBtn");
+        const finalRows = finalRowsForView(selection);
+        const masterlistRows = masterlistRowsForView(selection);
+        if (namesPdfButton) {
+            namesPdfButton.disabled = finalRows.length === 0;
+        }
+        if (printButton) {
+            printButton.disabled = masterlistRows.length === 0;
+        }
+    }
+
     function renderCompactCategoryTable(targetId, categoryRows, emptyMessage) {
         const tbody = byId(targetId);
         if (!tbody) {
@@ -740,6 +980,7 @@
         setText("scholarSelectionRegularCount", selection.regular.length);
         setText("scholarSelectionSectorCount", selection.sector.length);
         setText("scholarSelectionSpecialCount", selection.special.length);
+        setText("scholarSelectionFinalInclusionCount", selection.finalInclusion.length);
         setText("scholarSelectionLikhangCount", selection.likhangCount || 0);
         setText("scholarSelectionFinalCount", selection.grandTotalCount || selection.combined.length);
 
@@ -750,14 +991,15 @@
         const batchLabel = batch
             ? ((batch.batch_label || "Selected batch") + " | " + formatDate(batch.exam_datetime) + " | " + (batch.venue || "-"))
             : "No exam batch selected";
+        const viewLabel = currentPrintFilterLabel();
 
         setText(
             "scholarSelectionFinalMeta",
-            batchLabel + ". Policy: " + policyLabel() + ". Regular Applicant: " + regularSlotLabel + ". Sector Classification: " + sectorSlotLabel + ". Special Consideration follows the regular passers. Likhang Daeteño Performing Arts reserved: " + String(selection.likhangCount || 0) + " slot(s). Showing " + String(filteredRows.length) + " row(s)."
+            batchLabel + ". View: " + viewLabel + ". Policy: " + policyLabel() + ". Regular Applicant: " + regularSlotLabel + ". Sector Classification: " + sectorSlotLabel + ". Special Consideration follows the regular passers. Final List Inclusion adds the System Administrator override list without changing applicant-side score or rank. Likhang Daeteño Performing Arts manual entries: " + String(selection.likhangCount || 0) + ". Showing " + String(filteredRows.length) + " row(s)."
         );
         setText(
             "scholarSelectionPrintMeta",
-            batchLabel + "\nPass " + String(passingScore).replace(/\.00$/, "") + "+"
+            batchLabel + "\nView: " + viewLabel + "\nPass " + String(passingScore).replace(/\.00$/, "") + "+"
         );
     }
 
@@ -784,20 +1026,152 @@
                 : "Special Consideration flag table is not available yet."
         );
         renderCompactCategoryTable(
+            "scholarSelectionFinalInclusionBody",
+            selection.finalInclusion,
+            staffFlagsAvailable
+                ? "No final list inclusion applicants are selected."
+                : "Final list inclusion flag table is not available yet."
+        );
+        renderCompactCategoryTable(
             "scholarSelectionLikhangBody",
             selection.likhang,
-            "No manual dummy records yet."
+            "No manual entries yet."
         );
     }
 
     function renderAll() {
         renderPolicy();
         fillBatchFilter();
+        syncPrintFilterVisibility();
         const selection = buildSelection();
         renderSummary(selection);
         renderFinalTable(selection);
         renderMasterlistCorePrintTable(selection);
         renderCategorySections(selection);
+        renderActionState(selection);
+    }
+
+    function namesOnlySelectionRows(selection) {
+        return finalRowsForView(selection)
+            .filter(function (row) {
+                return Boolean(row && (row.applicantPrintName || row.applicantName));
+            })
+            .slice()
+            .sort(function (left, right) {
+                return String(left.applicantPrintName || left.applicantName || "").localeCompare(String(right.applicantPrintName || right.applicantName || ""), undefined, {
+                    sensitivity: "base",
+                    numeric: true
+                });
+            });
+    }
+
+    async function downloadNamesOnlyPdf() {
+        const selection = buildSelection();
+        const selectionRows = namesOnlySelectionRows(selection);
+        const batch = batchById(currentBatchId);
+        const filterLabel = currentPrintFilterLabel();
+        const printedAt = new Date().toLocaleString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+        });
+
+        if (!selectionRows.length) {
+            showStatus("No selected scholars are available for the current view yet.", "alert-warning");
+            return;
+        }
+
+        const JsPdf = getPdfGenerator();
+        if (!JsPdf) {
+            showStatus("The PDF library is not available right now.", "alert-warning");
+            return;
+        }
+
+        try {
+            const doc = new JsPdf({
+                orientation: "portrait",
+                unit: "pt",
+                format: [612, 936]
+            });
+
+            if (typeof doc.autoTable !== "function") {
+                showStatus("The PDF table helper is not available right now.", "alert-warning");
+                return;
+            }
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const left = 24;
+            const logoDataUrl = await loadScholarSelectionLogoDataUrl();
+            const batchLabel = batch ? (batch.batch_label || "Selected Batch") : "Selected Batch";
+            const batchYear = batch && batch.exam_datetime && !Number.isNaN(new Date(batch.exam_datetime).getTime())
+                ? String(new Date(batch.exam_datetime).getFullYear())
+                : "2026";
+            const title = "DAET LGU EXPANDED SCHOLARSHIP PROGRAM";
+            const subtitle = batchYear + " QUALIFYING EXAMINATION PASSERS" + (filterLabel === "All Categories" ? "" : " | " + filterLabel);
+            const titleLines = doc.splitTextToSize(title, pageWidth - (left * 2) - 52);
+            const titleStartY = 28;
+            const titleLineHeight = 18;
+            const subtitleY = titleStartY + (titleLines.length * titleLineHeight) + 2;
+
+            if (logoDataUrl) {
+                doc.addImage(logoDataUrl, "PNG", left, 16, 42, 42);
+            }
+
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(16);
+            doc.setTextColor(15, 23, 42);
+            doc.text(titleLines, left + 52, titleStartY);
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            doc.setTextColor(107, 114, 128);
+            doc.text(subtitle, left + 52, subtitleY);
+
+            doc.autoTable({
+                startY: Math.max(82, subtitleY + 14),
+                body: selectionRows.map(function (row) {
+                    return [row.applicantPrintName || row.applicantName || "-"];
+                }),
+                showHead: "never",
+                margin: { left: left, right: left, bottom: 28 },
+                styles: {
+                    font: "helvetica",
+                    fontSize: 11,
+                    cellPadding: 6,
+                    lineColor: [203, 213, 225],
+                    lineWidth: 0.45,
+                    textColor: [15, 23, 42],
+                    overflow: "linebreak",
+                    valign: "middle"
+                },
+                alternateRowStyles: {
+                    fillColor: [248, 250, 252]
+                },
+                columnStyles: {
+                    0: { cellWidth: pageWidth - (left * 2), fontStyle: "bold" }
+                },
+                didDrawPage: function () {
+                    const pageNumber = doc.internal.getNumberOfPages();
+                    doc.setFont("helvetica", "normal");
+                    doc.setFontSize(8.5);
+                    doc.setTextColor(100, 116, 139);
+                    doc.text("Printed: " + printedAt, left, pageHeight - 12);
+                    doc.text("Page " + String(pageNumber), pageWidth - left, pageHeight - 12, { align: "right" });
+                }
+            });
+
+            doc.save(
+                "ldss-scholar-selection-names-" +
+                pdfFileSlug(filterLabel, "all-categories") + "-" +
+                pdfFileSlug(batchLabel, "selected-batch") + ".pdf"
+            );
+            showStatus("Names-only PDF downloaded successfully.", "alert-success");
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to build the names-only PDF.", "alert-danger");
+        }
     }
 
     async function loadWorkflowPolicy() {
@@ -953,10 +1327,42 @@
                 continue;
             }
 
-            const result = await context.client
+            let result = await context.client
                 .from("application_staff_flags")
-                .select("application_id, special_consideration_tag")
+                .select("application_id, special_consideration_tag, final_list_inclusion, final_list_inclusion_updated_at, final_list_inclusion_endorsed_by")
                 .in("application_id", chunk);
+
+            if (result.error && /final_list_inclusion_endorsed_by/i.test(result.error.message || "")) {
+                result = await context.client
+                    .from("application_staff_flags")
+                    .select("application_id, special_consideration_tag, final_list_inclusion, final_list_inclusion_updated_at")
+                    .in("application_id", chunk);
+
+                if (!result.error) {
+                    result.data = (result.data || []).map(function (row) {
+                        return Object.assign({}, row, {
+                            final_list_inclusion_endorsed_by: ""
+                        });
+                    });
+                }
+            }
+
+            if (result.error && /final_list_inclusion/i.test(result.error.message || "")) {
+                result = await context.client
+                    .from("application_staff_flags")
+                    .select("application_id, special_consideration_tag")
+                    .in("application_id", chunk);
+
+                if (!result.error) {
+                    result.data = (result.data || []).map(function (row) {
+                        return Object.assign({}, row, {
+                            final_list_inclusion: false,
+                            final_list_inclusion_updated_at: null,
+                            final_list_inclusion_endorsed_by: ""
+                        });
+                    });
+                }
+            }
 
             if (result.error) {
                 if (/does not exist|relation|schema cache/i.test(result.error.message || "")) {
@@ -1016,6 +1422,7 @@
                     scholarship_type: application ? application.scholarship_type : "",
                     school_year: application ? application.school_year : "",
                     applicant_name: buildApplicantName(profile),
+                    applicant_print_name: buildApplicantPrintName(profile),
                     applicant_email: profile ? (profile.email || "") : "",
                     school_name: profile ? (profile.school_name || "") : "",
                     barangay: profile ? (profile.barangay || "") : "",
@@ -1024,6 +1431,10 @@
                     special_consideration_tag: flagMap[row.application_id] && flagMap[row.application_id].special_consideration_tag
                         ? normalizeSpecialTag(flagMap[row.application_id].special_consideration_tag)
                         : "",
+                    final_list_inclusion: Boolean(flagMap[row.application_id] && flagMap[row.application_id].final_list_inclusion === true),
+                    final_list_inclusion_endorsed_by: normalizeFinalListEndorsedBy(flagMap[row.application_id] && flagMap[row.application_id].final_list_inclusion_endorsed_by
+                        ? flagMap[row.application_id].final_list_inclusion_endorsed_by
+                        : ""),
                     batch_id: row.batch_id || "",
                     exam_control_no: row.exam_control_no || "",
                     scheduled_at: row.scheduled_at || "",
@@ -1056,9 +1467,12 @@
         const sectorInput = byId("scholarSelectionSectorSlots");
         const includeSpecial = byId("scholarSelectionIncludeSpecial");
         const printFilter = byId("scholarSelectionPrintFilter");
+        const scoreFromInput = byId("scholarSelectionScoreFrom");
+        const scoreToInput = byId("scholarSelectionScoreTo");
         const likhangInput = byId("scholarSelectionLikhangInput");
         const refreshButton = byId("scholarSelectionRefreshBtn");
         const printButton = byId("scholarSelectionPrintBtn");
+        const namesPdfButton = byId("scholarSelectionNamesPdfBtn");
 
         if (batchFilter) {
             batchFilter.addEventListener("change", function () {
@@ -1067,7 +1481,7 @@
             });
         }
 
-        [regularInput, sectorInput, includeSpecial, printFilter, likhangInput].forEach(function (control) {
+        [regularInput, sectorInput, includeSpecial, printFilter, scoreFromInput, scoreToInput, likhangInput].forEach(function (control) {
             if (!control) {
                 return;
             }
@@ -1089,6 +1503,12 @@
         if (printButton) {
             printButton.addEventListener("click", function () {
                 window.print();
+            });
+        }
+
+        if (namesPdfButton) {
+            namesPdfButton.addEventListener("click", function () {
+                downloadNamesOnlyPdf();
             });
         }
     }

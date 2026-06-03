@@ -3,6 +3,7 @@
 
     const STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const DEFAULT_CONTROLS = {
+        allow_applicant_application_edits: true,
         exam_checking_in_progress: false,
         show_applicant_exam_scores: true
     };

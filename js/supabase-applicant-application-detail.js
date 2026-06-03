@@ -63,6 +63,10 @@
         return window.LDSS_ACTIVE_WORKFLOW_CONTROLS || {};
     }
 
+    function applicantApplicationEditsEnabled() {
+        return workflowControls().allow_applicant_application_edits !== false;
+    }
+
     function applicantExamScoresVisible() {
         return workflowControls().show_applicant_exam_scores !== false;
     }
@@ -390,7 +394,20 @@
     }
 
     function canEditApplication(application) {
-        return !!(application && !application.is_locked && EDITABLE_STATUSES.includes((application.status || "").toString()));
+        return !!(application && applicantApplicationEditsEnabled() && !application.is_locked && EDITABLE_STATUSES.includes((application.status || "").toString()));
+    }
+
+    function editLockedMessage(application) {
+        if (!application) {
+            return "";
+        }
+        if (!applicantApplicationEditsEnabled()) {
+            return "Application editing is currently disabled by the System Administrator. You can still review this record and print it.";
+        }
+        if (application.is_locked) {
+            return "This application is locked for editing. You can still review this record and print it.";
+        }
+        return "This application is no longer editable. You can still review this record and print it.";
     }
 
     function hasMissingExamAssignmentColumns(error) {
@@ -577,6 +594,12 @@
     function renderHeader(application) {
         setText("detailApplicationIdDisplay", "Application ID: " + application.application_no);
 
+        const printBtn = byId("detailPrintApplicationBtn");
+        if (printBtn) {
+            printBtn.href = "applicant-print-form.html?id=" + encodeURIComponent(application.id) + "&download=1";
+            printBtn.classList.remove("d-none");
+        }
+
         const editBtn = byId("detailEditApplicationBtn");
         if (!editBtn) {
             return;
@@ -585,10 +608,14 @@
         if (!canEditApplication(application)) {
             editBtn.classList.add("d-none");
             editBtn.removeAttribute("href");
+            const message = editLockedMessage(application);
+            if (message) {
+                showStatus(message, "alert-warning");
+            }
             return;
         }
 
-        editBtn.href = "applicant-application-form.html?application_id=" + encodeURIComponent(application.id);
+        editBtn.href = "applicant-application-form.html?application_id=" + encodeURIComponent(application.id) + "&force_edit=1";
         editBtn.textContent = application.status === "submitted" ? "Edit Submitted Application" : "Edit Application";
         editBtn.classList.remove("d-none");
     }
@@ -684,7 +711,7 @@
                     ? "-"
                     : (
                         (postedResult.result === "passed" || postedResult.result === "failed")
-                            ? (postedResult.displayText + ((specialConsideration && postedResult.result === "passed" && postedResult.hasScore && rankLabel) ? (" | " + rankLabel) : ""))
+                            ? (postedResult.displayText + ((postedResult.result === "passed" && postedResult.hasScore && rankLabel) ? (" | " + rankLabel) : ""))
                             : (!examScoresVisible ? (postedResult.displayText || "Scores are being consolidated") : (hasNumericExam ? (examSummary.scoreText || "-") : "-"))
                     )
             );
@@ -792,9 +819,10 @@
             const summary = workflow().examSummaryFromRecord(examRecord);
             const postedResult = postedExamResultMeta(summary, specialConsideration, sectorSelected, application && application.sector_classification);
             const scoresVisible = applicantExamScoresVisible();
+            const rankLabel = examRank !== null && typeof examRank !== "undefined" ? ("RANK " + String(examRank)) : "";
             events.push({
                 label: (postedResult.result === "passed" || postedResult.result === "failed")
-                    ? ("Exam result: " + postedResult.displayText)
+                    ? ("Exam result: " + postedResult.displayText + ((postedResult.result === "passed" && postedResult.hasScore && rankLabel) ? (" | " + rankLabel) : ""))
                     : (postedResult.result === "selected")
                         ? ("Exam result: " + postedResult.displayText)
                     : (!scoresVisible ? ("Exam result: " + (postedResult.displayText || "Scores are being consolidated")) : ("Exam result: " + summary.resultLabel)),

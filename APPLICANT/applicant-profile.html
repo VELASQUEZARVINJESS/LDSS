@@ -42,6 +42,10 @@
                                 <div class="nav-link-icon"><i data-feather="home"></i></div>
                                 Dashboard
                             </a>
+                            <a class="nav-link" href="applicant-applications.html">
+                                <div class="nav-link-icon"><i data-feather="folder"></i></div>
+                                Manage Application
+                            </a>
                         </div>
                     </div>
                 </nav>
@@ -87,7 +91,18 @@
                                                 <div class="ldss-profile-name ldss-profile-hero-name" id="profileNameDisplay">Juan Dela Cruz</div>
                                                 <div class="ldss-profile-hero-contact" id="profileHeroEmailDisplay">juan.delacruz@example.com</div>
                                             </div>
-                                            <button class="btn btn-outline-dark btn-sm ldss-card-action" type="button" data-bs-toggle="modal" data-bs-target="#modalEditPersonal">Edit Profile</button>
+                                            <div class="dropdown">
+                                                <button class="btn btn-outline-dark btn-sm d-inline-flex align-items-center gap-2 dropdown-toggle ldss-card-action" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    <i data-feather="edit-3"></i>
+                                                    Edit Profile
+                                                </button>
+                                                <div class="dropdown-menu dropdown-menu-end border-0 shadow-sm">
+                                                    <button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#modalEditPersonal">Personal Information</button>
+                                                    <button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#modalEditContact">Contact Information</button>
+                                                    <button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#modalEditEducation">Educational Information</button>
+                                                    <button class="dropdown-item" type="button" data-bs-toggle="modal" data-bs-target="#modalEditFamily">Family Background</button>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div class="ldss-profile-hero-chip-row">
                                             <span class="ldss-chip ldss-chip-neutral" id="profileCompletionChip">Profile 0% complete</span>
@@ -259,7 +274,8 @@
                         <form class="row g-3">
                             <div class="col-12">
                                 <label class="small mb-1" for="modalEmail">Email</label>
-                                <input class="form-control" id="modalEmail" type="email" value="juan.delacruz@example.com" />
+                                <input class="form-control" id="modalEmail" type="email" value="juan.delacruz@example.com" readonly />
+                                <div class="form-text">Login email is shown here for reference and stays synced with your sign-in account.</div>
                             </div>
                             <div class="col-12">
                                 <label class="small mb-1" for="modalMobile">Mobile Number</label>
@@ -354,7 +370,7 @@
         <script src="../js/supabase-config.js"></script>
         <script src="../js/supabase-applicant-guard.js"></script>
         <script src="../js/ldss-upload-api.js"></script>
-        <script src="../js/ldss-workflow.js?v=20260505-sector-selected-2"></script>
+        <script src="../js/ldss-workflow.js?v=20260506-pass-score-1"></script>
         <script src="../js/supabase-applicant-profile.js?v=20260505-sector-selected-5"></script>
         <script src="../js/scripts.js"></script>
     </body>

@@ -110,6 +110,7 @@
         spouse_information: "Married / Spouse Section"
     };
     const CORRECTION_TARGET_KEYS = Object.keys(CORRECTION_TARGET_LABELS);
+    const UNLOCKABLE_STATUSES = ["submitted", "returned_for_correction"];
 
     let authContext = null;
     let currentApplication = null;
@@ -654,8 +655,24 @@
         return isDraftApplication(currentApplication);
     }
 
+    function canUnlockApplication() {
+        return Boolean(
+            currentApplication &&
+            currentApplication.is_locked === true &&
+            UNLOCKABLE_STATUSES.includes(normalizedApplicationStatus())
+        );
+    }
+
     function buildVerificationUrl(applicationId) {
         return "secretary-interview-verification.html?id=" + encodeURIComponent(applicationId || "");
+    }
+
+    function buildPrintFormUrl(applicationId, autoPrint) {
+        let url = "secretary-print-form.html?id=" + encodeURIComponent(applicationId || "");
+        if (autoPrint) {
+            url += "&download=1";
+        }
+        return url;
     }
 
     function correctionTargetLabel(targetKey) {
@@ -665,14 +682,6 @@
     function normalizeCorrectionTargetKey(targetKey) {
         const normalized = (targetKey || "").toString().trim().toLowerCase();
         return CORRECTION_TARGET_LABELS[normalized] ? normalized : "";
-    }
-
-    function buildPrintFormUrl(applicationId, autoPrint) {
-        let url = "secretary-print-form.html?id=" + encodeURIComponent(applicationId || "");
-        if (autoPrint) {
-            url += "&download=1";
-        }
-        return url;
     }
 
     function normalizeCorrectionTargetKeys(rawValue) {
@@ -1072,9 +1081,11 @@
         const nextBtn = byId("verificationNextBtn");
         const forExamBtn = byId("verificationForExamBtn");
         const backToCheckingBtn = byId("verificationBackToCheckingBtn");
+        const unlockBtn = byId("verificationUnlockBtn");
         const hasPrevious = currentNavigationIndex > 0;
         const hasNext = currentNavigationIndex > -1 && currentNavigationIndex < applicationNavigationIds.length - 1;
         const canMoveBackToChecking = normalizeStatus(currentApplication && currentApplication.status) === "returned_for_correction";
+        const canUnlock = canUnlockApplication();
 
         if (prevBtn) {
             prevBtn.disabled = isProcessing || !hasPrevious;
@@ -1095,6 +1106,17 @@
                 backToCheckingBtn.title = "Available only for applications currently marked Returned for Correction.";
             } else {
                 backToCheckingBtn.removeAttribute("title");
+            }
+        }
+        if (unlockBtn) {
+            unlockBtn.classList.toggle("d-none", !canUnlock);
+            unlockBtn.disabled = isProcessing || !canUnlock;
+            if (!currentApplication) {
+                unlockBtn.title = "Load an application first.";
+            } else if (!canUnlock) {
+                unlockBtn.title = "Available only for locked submitted or returned applications.";
+            } else {
+                unlockBtn.removeAttribute("title");
             }
         }
         syncDraftReadOnlyState();
@@ -2004,6 +2026,10 @@
         return "Secretary applicant profile saving needs the Supabase hotfix `supabase/secretary_applicant_profile_edit_hotfix_2026_04_07.sql`. Apply it in Supabase SQL Editor, then refresh this page and try again.";
     }
 
+    function hotfixPhotoSyncErrorMessage() {
+        return "Secretary photo-path saving needs the latest version of `supabase/secretary_applicant_profile_edit_hotfix_2026_04_07.sql`. Re-run it in Supabase SQL Editor, then refresh this page and try again.";
+    }
+
     async function saveApplicantProfilePatch(profilePatch) {
         const payload = Object.assign({}, profilePatch || {});
 
@@ -2597,9 +2623,12 @@
         const applicantName = buildApplicantName(currentProfile);
         const meta = byId("secretaryVerificationHeaderMeta");
         const isDraft = isDraftReadOnlyMode();
+        const isLocked = Boolean(currentApplication && currentApplication.is_locked === true);
 
         if (meta) {
-            meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName + (isDraft ? " | Draft Preview" : "");
+            meta.textContent = "Application ID: " + appNo + " | Applicant: " + applicantName
+                + (isDraft ? " | Draft Preview" : "")
+                + (isLocked ? " | Locked for Editing" : "");
         }
 
         renderApplicantDetailSheet();
@@ -3173,6 +3202,7 @@
         const saveBtn = byId("verificationSaveBtn");
         const complianceBtn = byId("verificationComplianceBtn");
         const backToCheckingBtn = byId("verificationBackToCheckingBtn");
+        const unlockBtn = byId("verificationUnlockBtn");
         const returnBtn = byId("verificationReturnBtn");
         const returnConfirmBtn = byId("verificationReturnConfirmBtn");
         const forExamBtn = byId("verificationForExamBtn");
@@ -3198,6 +3228,7 @@
         setState(saveBtn, "Save Checking");
         setState(complianceBtn, "Send Compliance Notice");
         setState(backToCheckingBtn, "Back to Checking");
+        setState(unlockBtn, "Unlock for Editing");
         setState(returnBtn, "Return for Correction");
         setState(returnConfirmBtn, "Return and Redirect");
         setState(forExamBtn, "Set for Examination");
@@ -3259,36 +3290,21 @@
             return currentProfile;
         }
 
-        let result = await authContext.client
-            .from("profiles")
-            .update({ applicant_photo_path: storagePath })
-            .eq("id", currentApplication.applicant_id)
-            .select(profileSelectFields())
-            .maybeSingle();
-
-        if (profilesSupportsPlaceOfBirth && isMissingProfilesColumnError(result.error, "place_of_birth")) {
-            profilesSupportsPlaceOfBirth = false;
-            result = await authContext.client
-                .from("profiles")
-                .update({ applicant_photo_path: storagePath })
-                .eq("id", currentApplication.applicant_id)
-                .select(profileSelectFields())
-                .maybeSingle();
+        let savedProfile = null;
+        try {
+            savedProfile = await saveApplicantProfilePatch({
+                applicant_photo_path: storagePath
+            });
+        } catch (error) {
+            throw new Error("Applicant photo uploaded but profile photo sync failed: " + error.message);
         }
 
-        if (result.error) {
-            throw new Error("Applicant photo uploaded but profile photo sync failed: " + result.error.message);
+        if (!savedProfile || savedProfile.applicant_photo_path !== storagePath) {
+            throw new Error("Applicant photo uploaded but profile photo sync failed. " + hotfixPhotoSyncErrorMessage());
         }
 
-        if (result.data) {
-            currentProfile = result.data;
-            return result.data;
-        }
-
-        currentProfile = Object.assign({}, currentProfile || {}, {
-            applicant_photo_path: storagePath
-        });
-        return currentProfile;
+        currentProfile = savedProfile;
+        return savedProfile;
     }
 
     async function upsertApplicantPhotoDocument(storagePath, file) {
@@ -3489,17 +3505,20 @@
         }
 
         if (verifiedPhotoPath) {
-            const profileResult = await authContext.client
-                .from("profiles")
-                .update({ verified_interview_photo_path: verifiedPhotoPath })
-                .eq("id", currentApplication.applicant_id);
+            let savedProfile = null;
+            try {
+                savedProfile = await saveApplicantProfilePatch({
+                    verified_interview_photo_path: verifiedPhotoPath
+                });
+            } catch (error) {
+                throw new Error("Interview saved but profile verified photo update failed: " + error.message);
+            }
 
-            if (profileResult.error) {
-                throw new Error("Interview saved but profile verified photo update failed: " + profileResult.error.message);
+            if (!savedProfile || savedProfile.verified_interview_photo_path !== verifiedPhotoPath) {
+                throw new Error("Interview saved but profile verified photo update failed. " + hotfixPhotoSyncErrorMessage());
             }
-            if (currentProfile) {
-                currentProfile.verified_interview_photo_path = verifiedPhotoPath;
-            }
+
+            currentProfile = savedProfile;
             if (
                 previousVerifiedPath &&
                 previousVerifiedPath !== verifiedPhotoPath &&
@@ -3772,6 +3791,32 @@
         return "Application moved back to For Checking.";
     }
 
+    async function handleUnlockApplication() {
+        if (!currentApplication || !currentApplication.id) {
+            showStatus("No application is loaded yet.", "alert-warning");
+            return;
+        }
+        if (!canUnlockApplication()) {
+            showStatus("Unlock is available only for locked submitted or returned applications.", "alert-warning");
+            return;
+        }
+
+        const result = await authContext.client
+            .from("applications")
+            .update({ is_locked: false })
+            .eq("id", currentApplication.id);
+
+        if (result.error) {
+            throw new Error("Failed to unlock application: " + result.error.message);
+        }
+
+        currentApplication.is_locked = false;
+        renderHeaderAndSummary();
+        updateVerificationNavigationButtons();
+        showStatus("Application unlocked. The applicant can edit this record again.", "alert-success");
+        return "Application unlocked successfully.";
+    }
+
     async function handleSetForExamination() {
         const formValues = readFormValues();
         if (formValues.error) {
@@ -4017,6 +4062,7 @@
         const saveBtn = byId("verificationSaveBtn");
         const complianceBtn = byId("verificationComplianceBtn");
         const backToCheckingBtn = byId("verificationBackToCheckingBtn");
+        const unlockBtn = byId("verificationUnlockBtn");
         const returnBtn = byId("verificationReturnBtn");
         const forExamConfirmModalEl = byId("verificationForExamConfirmModal");
         const forExamConfirmCancelBtn = byId("verificationForExamConfirmCancelBtn");
@@ -4074,6 +4120,12 @@
         if (backToCheckingBtn) {
             backToCheckingBtn.addEventListener("click", function () {
                 runAction("verificationBackToCheckingBtn", "Moving...", handleBackToChecking);
+            });
+        }
+
+        if (unlockBtn) {
+            unlockBtn.addEventListener("click", function () {
+                runAction("verificationUnlockBtn", "Unlocking...", handleUnlockApplication);
             });
         }
 

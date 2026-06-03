@@ -625,7 +625,7 @@
                                                 <div class="row g-3">
                                                 <div class="col-12">
                                                     <label class="small mb-1" for="superSettingsPassingScore">Passing Score (%)</label>
-                                                    <input class="form-control" id="superSettingsPassingScore" type="number" min="0" max="100" step="0.01" placeholder="75" />
+                                                    <input class="form-control" id="superSettingsPassingScore" type="number" min="0" max="100" step="1" placeholder="75" />
                                                 </div>
                                                 <div class="col-12 col-md-6">
                                                     <label class="small mb-1" for="superSettingsWeightExam">Exam Weight (%)</label>
@@ -708,6 +708,15 @@
                                                         </label>
                                                         <div class="form-check form-switch ldss-settings-switch-control">
                                                             <input class="form-check-input" id="superSettingsAllowSpecialEndorsement" type="checkbox" role="switch" />
+                                                        </div>
+                                                    </div>
+                                                    <div class="ldss-settings-switch-card">
+                                                        <label class="ldss-settings-switch-copy small" for="superSettingsAllowApplicantApplicationEdits">
+                                                            <span class="ldss-settings-switch-title">Allow applicants to edit saved applications</span>
+                                                            <span class="ldss-settings-switch-help ldss-settings-flag-help">Turns applicant-side form editing on or off for saved records while keeping the tracking page available.</span>
+                                                        </label>
+                                                        <div class="form-check form-switch ldss-settings-switch-control">
+                                                            <input class="form-check-input" id="superSettingsAllowApplicantApplicationEdits" type="checkbox" role="switch" />
                                                         </div>
                                                     </div>
                                                     <div class="ldss-settings-switch-card">

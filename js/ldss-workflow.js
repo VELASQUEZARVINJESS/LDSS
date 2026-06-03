@@ -171,17 +171,17 @@
                 settings.exam_total_items,
                 DEFAULT_RANKING_SETTINGS.exam_total_items
             ))),
-            passing_score: Math.min(100, Math.max(0, normalizeNumber(
+            passing_score: Math.min(100, Math.max(0, Math.round(normalizeNumber(
                 settings.passing_score,
                 DEFAULT_RANKING_SETTINGS.passing_score
-            )))
+            ))))
         };
     }
 
     function specialConsiderationDisplayScore() {
         const settings = activeRankingSettings();
         if (settings && typeof settings.passing_score === "number" && !Number.isNaN(settings.passing_score)) {
-            return String(Math.max(0, Math.min(100, Math.ceil(settings.passing_score))));
+            return String(Math.max(0, Math.min(100, settings.passing_score)));
         }
         return "70";
     }
@@ -470,11 +470,14 @@
         }
 
         if (normalizedResult === "passed") {
+            const displayText = showFailedScore && hasScore
+                ? (scoreText + " | PASSED")
+                : "PASSED";
             return {
                 result: "passed",
-                scoreText: "-",
-                hasScore: false,
-                displayText: "PASSED",
+                scoreText: showFailedScore && hasScore ? scoreText : "-",
+                hasScore: showFailedScore && hasScore,
+                displayText: displayText,
                 displayLabel: "PASSED",
                 chipLabel: "PASSED",
                 chipClass: EXAM_RESULT_META.passed.chipClass,

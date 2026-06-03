@@ -250,20 +250,24 @@
         showStatus(message, "alert-warning");
     }
 
-    function canEditApplication(application) {
-        if (!application || application.is_locked) {
-            return false;
-        }
-        return EDITABLE_STATUSES.includes((application.status || "").toString());
-    }
-
     function canDownloadApplication(status) {
         return (status || "").toString() !== "draft";
     }
 
     function viewButtonMarkup(row) {
         const encodedId = encodeURIComponent(row.id);
-        return '<a class="btn btn-outline-dark btn-sm" href="applicant-application-form.html?application_id=' + encodedId + '">View</a>';
+        const viewHref = "applicant-application-form.html?application_id=" + encodedId;
+        const editHref = viewHref + "&force_edit=1";
+        const printButton = canDownloadApplication(row.status)
+            ? '<a class="btn btn-dark btn-sm ldss-applications-action-btn" href="applicant-print-form.html?id=' + encodedId + '&download=1">Download PDF</a>'
+            : "";
+        return (
+            '<div class="ldss-row-actions">' +
+            '<a class="btn btn-outline-dark btn-sm ldss-applications-action-btn" href="' + viewHref + '">View</a>' +
+            '<a class="btn btn-outline-dark btn-sm ldss-applications-action-btn" href="' + editHref + '">Edit</a>' +
+            printButton +
+            '</div>'
+        );
     }
 
     function hasSectorClassification(value) {
@@ -316,7 +320,7 @@
             ? ("RANK " + String(row.exam_rank))
             : "";
         if (postedResult.result === "passed") {
-            if (specialConsideration && postedResult.hasScore) {
+            if (postedResult.hasScore) {
                 return '<div class="fw-700 d-inline-flex align-items-center flex-wrap gap-1 text-success lh-1">'
                     + '<span>' + escapeHtml(postedResult.displayText) + '</span>'
                     + (rankLabel ? '<span class="text-muted">|</span><span class="text-uppercase text-muted fw-semibold">' + escapeHtml(rankLabel) + '</span>' : "")

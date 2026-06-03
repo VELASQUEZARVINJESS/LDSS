@@ -32,6 +32,7 @@
                 require_admin_remarks: true,
                 lock_ranking_after_decision: true,
                 allow_special_endorsement: true,
+                allow_applicant_application_edits: true,
                 allow_secretary_applicant_edits: false,
                 allow_secretary_draft_completion: false,
                 allow_secretary_walk_in_intake: false,
@@ -998,6 +999,7 @@
                     ? "Manual Enable"
                     : (overrideMode === RECEIVE_OVERRIDE_FORCE_CLOSED ? "Manual Disable" : "Follow Schedule")
             ),
+            "Applicant Application Editing: " + (controls.allow_applicant_application_edits !== false ? "Enabled" : "Disabled"),
             "Secretary Applicant Detail Edit: " + (controls.allow_secretary_applicant_edits ? "Enabled" : "Disabled"),
             "Secretary Draft Completion: " + (controls.allow_secretary_draft_completion ? "Enabled" : "Disabled"),
             "Secretary Walk-In Intake: " + (controls.allow_secretary_walk_in_intake ? "Enabled" : "Disabled"),
@@ -1043,6 +1045,7 @@
         writeCheckbox("superSettingsRequireRemarks", controls.require_admin_remarks);
         writeCheckbox("superSettingsLockRankingAfterDecision", controls.lock_ranking_after_decision);
         writeCheckbox("superSettingsAllowSpecialEndorsement", controls.allow_special_endorsement);
+        writeCheckbox("superSettingsAllowApplicantApplicationEdits", controls.allow_applicant_application_edits !== false);
         writeCheckbox("superSettingsAllowSecretaryApplicantEdits", controls.allow_secretary_applicant_edits);
         writeCheckbox("superSettingsAllowSecretaryDraftCompletion", controls.allow_secretary_draft_completion);
         writeCheckbox("superSettingsAllowSecretaryWalkInIntake", controls.allow_secretary_walk_in_intake);
@@ -1124,6 +1127,7 @@
                     require_admin_remarks: Boolean(byId("superSettingsRequireRemarks") && byId("superSettingsRequireRemarks").checked),
                     lock_ranking_after_decision: Boolean(byId("superSettingsLockRankingAfterDecision") && byId("superSettingsLockRankingAfterDecision").checked),
                     allow_special_endorsement: Boolean(byId("superSettingsAllowSpecialEndorsement") && byId("superSettingsAllowSpecialEndorsement").checked),
+                    allow_applicant_application_edits: Boolean(byId("superSettingsAllowApplicantApplicationEdits") && byId("superSettingsAllowApplicantApplicationEdits").checked),
                     allow_secretary_applicant_edits: Boolean(byId("superSettingsAllowSecretaryApplicantEdits") && byId("superSettingsAllowSecretaryApplicantEdits").checked),
                     allow_secretary_draft_completion: Boolean(byId("superSettingsAllowSecretaryDraftCompletion") && byId("superSettingsAllowSecretaryDraftCompletion").checked),
                     allow_secretary_walk_in_intake: Boolean(byId("superSettingsAllowSecretaryWalkInIntake") && byId("superSettingsAllowSecretaryWalkInIntake").checked),
