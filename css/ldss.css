@@ -1835,6 +1835,284 @@ body {
     border-radius: 0.55rem;
 }
 
+.ldss-secretary-applications-page .page-header-content {
+    padding-bottom: 0.2rem;
+}
+
+.ldss-secretary-page-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.45rem;
+    margin-left: auto;
+}
+
+.ldss-secretary-page-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.55rem;
+}
+
+.ldss-secretary-page-action-buttons .btn {
+    min-height: 2.4rem;
+    padding: 0.46rem 0.9rem;
+    border-radius: 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    box-shadow: 0 0.32rem 0.95rem rgba(15, 23, 42, 0.06);
+}
+
+.ldss-secretary-page-action-note {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    max-width: 24rem;
+    padding: 0.05rem 0;
+    color: #7b8798 !important;
+    line-height: 1.4;
+    text-align: right;
+}
+
+.ldss-secretary-page-action-note svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    margin-top: 0.14rem;
+    flex: 0 0 0.9rem;
+    color: #94a3b8;
+}
+
+.ldss-secretary-page-action-note span {
+    display: inline-block;
+}
+
+.ldss-requirements-summary-shell {
+    padding-top: 0.1rem;
+}
+
+.ldss-requirements-summary-card {
+    min-height: 100%;
+    padding: 0.9rem 0.95rem 0.85rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.82rem;
+    background: #ffffff;
+    box-shadow: none;
+}
+
+.ldss-requirements-summary-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    margin-bottom: 0.7rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.65rem;
+    background: #f8fafc;
+    color: #64748b;
+}
+
+.ldss-requirements-summary-icon svg {
+    width: 0.82rem;
+    height: 0.82rem;
+}
+
+.ldss-requirements-summary-label {
+    color: #6b7280;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ldss-requirements-summary-copy {
+    margin-top: 0.2rem;
+    color: #9ca3af;
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-filter-shell {
+    padding: 0;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-filter-row {
+    --bs-gutter-x: 0.8rem;
+    --bs-gutter-y: 0.55rem;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-filter-shell .form-control,
+.ldss-secretary-applications-page .ldss-secretary-filter-shell .form-select {
+    min-height: 2.7rem;
+    padding: 0.48rem 0.85rem;
+    border: 1px solid #d7dee8;
+    border-radius: 0.82rem;
+    background: rgba(255, 255, 255, 0.92);
+    font-size: 0.84rem;
+    box-shadow: none;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-filter-shell .form-control::placeholder {
+    color: #94a3b8;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-filter-shell .form-control:focus,
+.ldss-secretary-applications-page .ldss-secretary-filter-shell .form-select:focus {
+    border-color: #b8c4d6;
+    box-shadow: 0 0 0 0.2rem rgba(148, 163, 184, 0.14);
+    background: #fff;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-filter-shell .btn {
+    min-height: 2.7rem;
+    padding: 0.48rem 1rem;
+    border-radius: 0.82rem;
+    font-weight: 600;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-shell {
+    padding-top: 0.2rem;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-header {
+    padding: 0 0 0.9rem;
+}
+
+.ldss-secretary-queue-heading {
+    min-width: 0;
+}
+
+.ldss-secretary-queue-heading #secretaryApplicationsQueueTitle {
+    display: block;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #111827;
+}
+
+.ldss-secretary-queue-heading #secretaryBulkForExamMeta {
+    max-width: 42rem;
+    margin-top: 0.3rem !important;
+    color: #64748b !important;
+    line-height: 1.45;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-body {
+    border-top: 1px solid #dbe2ea;
+    background: transparent;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-applications-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-applications-table {
+    background: rgba(255, 255, 255, 0.86);
+}
+
+.ldss-secretary-applications-page .ldss-secretary-applications-table thead th {
+    padding: 0.82rem 1rem;
+    border-bottom: 1px solid #dbe4f0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.73rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-applications-table tbody td {
+    padding: 1rem;
+    vertical-align: middle;
+}
+
+.ldss-secretary-applications-page .ldss-table-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-height: 7.5rem;
+    padding: 1.35rem 1rem;
+    text-align: center;
+}
+
+.ldss-secretary-applications-page .ldss-table-empty-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #475569;
+}
+
+.ldss-secretary-applications-page .ldss-table-empty-copy {
+    max-width: 30rem;
+    color: #94a3b8;
+    line-height: 1.45;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-applications-table tbody tr:hover {
+    background: #fafcff;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-footer {
+    padding: 1rem 0;
+    border-top: 1px solid #e2e8f0;
+    background: transparent;
+}
+
+.ldss-secretary-applications-page #secretaryApplicationsPaginationInfo,
+.ldss-secretary-applications-page .ldss-secretary-queue-footer label.small {
+    color: #64748b !important;
+}
+
+.ldss-secretary-applications-page #secretaryApplicationsPageSize {
+    min-height: 2.15rem;
+    border-radius: 0.68rem;
+    border-color: #d6deea;
+}
+
+@media (max-width: 1199.98px) {
+    .ldss-secretary-page-actions {
+        align-items: flex-start;
+        margin-left: 0;
+    }
+
+    .ldss-secretary-page-action-buttons {
+        justify-content: flex-start;
+    }
+
+    .ldss-secretary-page-action-note {
+        text-align: left;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .ldss-requirements-summary-card {
+        padding: 0.82rem 0.85rem 0.8rem;
+    }
+
+    .ldss-secretary-page-action-buttons {
+        width: 100%;
+    }
+
+    .ldss-secretary-page-action-buttons .btn {
+        flex: 1 1 100%;
+        justify-content: center;
+    }
+
+    .ldss-secretary-page-action-note {
+        max-width: none;
+        width: 100%;
+    }
+
+    .ldss-secretary-applications-page .ldss-secretary-queue-header {
+        padding-right: 0;
+    }
+
+    .ldss-secretary-applications-page .ldss-secretary-filter-shell .btn {
+        width: 100%;
+    }
+}
+
 .ldss-row-actions {
     display: flex;
     flex-wrap: wrap;

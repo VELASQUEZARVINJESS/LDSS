@@ -11,7 +11,8 @@
     const WALK_IN_API_PATH = "/api/secretary/walk-in-intake";
     const NO_BARANGAY_FILTER_VALUE = "__no_barangay__";
     const NO_BARANGAY_FILTER_LABEL = "No Barangay";
-    const SUBMITTED_REQUIREMENTS_VIEW = "submitted_requirements";
+    const REQUIREMENTS_VIEW = "requirements";
+    const LEGACY_SUBMITTED_REQUIREMENTS_VIEW = "submitted_requirements";
     const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
     const DEFAULT_WORKFLOW_CONTROLS = {
         allow_secretary_draft_completion: false,
@@ -82,7 +83,9 @@
 
     function isSubmittedRequirementsView() {
         const view = currentView();
-        return view === SUBMITTED_REQUIREMENTS_VIEW || view === "submitted_applications";
+        return view === REQUIREMENTS_VIEW
+            || view === LEGACY_SUBMITTED_REQUIREMENTS_VIEW
+            || view === "submitted_applications";
     }
 
     function upperText(value) {
@@ -183,6 +186,14 @@
         alert.textContent = message;
     }
 
+    function setTextValue(id, value) {
+        const element = byId(id);
+        if (!element) {
+            return;
+        }
+        element.textContent = String(value);
+    }
+
     function applyViewMeta() {
         if (!isSubmittedRequirementsView()) {
             return;
@@ -194,20 +205,24 @@
         const queueTitle = byId("secretaryApplicationsQueueTitle");
         const bulkButton = byId("secretaryBulkForExamBtn");
         const bulkMeta = byId("secretaryBulkForExamMeta");
+        const summaryShell = byId("secretaryRequirementsSummaryShell");
+        const actionShell = byId("secretaryApplicationsActionShell");
+        const filterShell = byId("secretaryApplicationsFilterShell");
+        const queueShell = byId("secretaryApplicationsQueueShell");
 
-        document.title = "LDSP | Submitted Requirements";
+        document.title = "LDSP | Requirements";
 
         if (pageTitle) {
-            pageTitle.innerHTML = '<div class="page-header-icon"><i data-feather="layers"></i></div>Submitted Requirements';
+            pageTitle.innerHTML = '<div class="page-header-icon"><i data-feather="layers"></i></div>Requirements';
         }
         if (pageSubtitle) {
-            pageSubtitle.textContent = "Search applicants who already submitted hard-copy requirements to the scholarship office.";
+            pageSubtitle.textContent = "Track hard-copy requirement progress at a glance.";
         }
         if (breadcrumbCurrent) {
-            breadcrumbCurrent.textContent = "Submitted Requirements";
+            breadcrumbCurrent.textContent = "Requirements";
         }
         if (queueTitle) {
-            queueTitle.textContent = "Submitted Requirements List";
+            queueTitle.textContent = "Requirements List";
         }
         if (bulkButton) {
             bulkButton.classList.add("d-none");
@@ -215,10 +230,30 @@
         if (bulkMeta) {
             bulkMeta.textContent = "Applicants listed here already completed hard-copy requirement submission to the office.";
         }
+        if (summaryShell) {
+            summaryShell.classList.remove("d-none");
+        }
+        if (actionShell) {
+            actionShell.classList.add("d-none");
+        }
+        if (filterShell) {
+            filterShell.classList.add("d-none");
+        }
+        if (queueShell) {
+            queueShell.classList.add("d-none");
+        }
 
         if (window.feather && typeof window.feather.replace === "function") {
             window.feather.replace();
         }
+    }
+
+    function renderRequirementsSummary(counts) {
+        const safeCounts = counts || {};
+        setTextValue("secretaryRequirementsCompletedCount", Math.max(0, Number(safeCounts.completed) || 0));
+        setTextValue("secretaryRequirementsFollowUpCount", Math.max(0, Number(safeCounts.followUp) || 0));
+        setTextValue("secretaryRequirementsNotSubmittedCount", Math.max(0, Number(safeCounts.notSubmitted) || 0));
+        setTextValue("secretaryRequirementsSubmittedCount", Math.max(0, Number(safeCounts.submitted) || 0));
     }
 
     function delay(ms) {
@@ -705,6 +740,144 @@
         };
     }
 
+    async function fetchApplicantProfileCount(context) {
+        const result = await context.client
+            .from("profiles")
+            .select("id", { count: "exact", head: true })
+            .eq("role", "applicant");
+
+        if (result.error) {
+            return {
+                count: 0,
+                error: result.error
+            };
+        }
+
+        return {
+            count: Number(result.count || 0),
+            error: null
+        };
+    }
+
+    async function fetchApplicationSummaryRows(context, mode) {
+        const rows = [];
+
+        for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
+            let query = context.client
+                .from("applications")
+                .select("applicant_id, status")
+                .order("updated_at", { ascending: false })
+                .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (mode === "draft") {
+                query = query.eq("status", "draft");
+            } else {
+                query = query.neq("status", "draft");
+            }
+
+            const result = await query;
+            if (result.error) {
+                return {
+                    data: rows,
+                    error: result.error
+                };
+            }
+
+            const batch = result.data || [];
+            rows.push.apply(rows, batch);
+            if (batch.length < SUPABASE_FETCH_LIMIT) {
+                break;
+            }
+        }
+
+        return {
+            data: rows,
+            error: null
+        };
+    }
+
+    async function loadRequirementsSummary(context, loadToken) {
+        renderRequirementsSummary({
+            completed: 0,
+            followUp: 0,
+            notSubmitted: 0,
+            submitted: 0
+        });
+
+        const summaryResults = await Promise.all([
+            fetchApplicantProfileCount(context),
+            fetchApplicationSummaryRows(context, "non_draft"),
+            fetchApplicationSummaryRows(context, "draft")
+        ]);
+
+        if (loadToken !== applicationsLoadToken) {
+            return;
+        }
+
+        const profileCountResult = summaryResults[0];
+        const submittedRowsResult = summaryResults[1];
+        const draftRowsResult = summaryResults[2];
+
+        if (submittedRowsResult.error) {
+            showStatus("Failed to load requirements summary: " + submittedRowsResult.error.message, "alert-danger");
+            return;
+        }
+
+        const submittedRows = submittedRowsResult.data || [];
+        const draftRows = draftRowsResult.error ? [] : (draftRowsResult.data || []);
+        const submittedApplicantIds = new Set();
+        const completedApplicantIds = new Set();
+        const followUpApplicantIds = new Set();
+
+        submittedRows.forEach(function (row) {
+            const applicantId = row && row.applicant_id ? row.applicant_id : "";
+            if (!applicantId) {
+                return;
+            }
+
+            submittedApplicantIds.add(applicantId);
+            if (normalizeStatus(row.status) === "hard_copy_verified") {
+                completedApplicantIds.add(applicantId);
+                return;
+            }
+            followUpApplicantIds.add(applicantId);
+        });
+
+        const draftApplicantIds = new Set();
+        draftRows.forEach(function (row) {
+            const applicantId = row && row.applicant_id ? row.applicant_id : "";
+            if (!applicantId || submittedApplicantIds.has(applicantId)) {
+                return;
+            }
+            draftApplicantIds.add(applicantId);
+        });
+
+        const registeredApplicantCount = profileCountResult.error
+            ? 0
+            : Math.max(0, Number(profileCountResult.count || 0));
+        const submittedApplicantCount = submittedApplicantIds.size;
+        const notSubmittedCount = profileCountResult.error
+            ? 0
+            : Math.max(0, registeredApplicantCount - submittedApplicantCount - draftApplicantIds.size);
+
+        renderRequirementsSummary({
+            completed: completedApplicantIds.size,
+            followUp: followUpApplicantIds.size,
+            notSubmitted: notSubmittedCount,
+            submitted: submittedApplicantCount
+        });
+
+        if (profileCountResult.error || draftRowsResult.error) {
+            showStatus(
+                "Requirements summary loaded, but some counts are partial right now. Refresh again if you need the latest totals.",
+                "alert-warning"
+            );
+            return;
+        }
+
+        showStatus("");
+    }
+
     async function fetchAllApplications(context) {
         const rows = [];
         const includeDrafts = workflowControls.allow_secretary_draft_completion === true;
@@ -1058,7 +1231,9 @@
             return;
         }
         if (!rows.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No application records found.</td></tr>';
+            tbody.innerHTML = isSubmittedRequirementsView()
+                ? '<tr><td colspan="6"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No requirement records yet</div><div class="ldss-table-empty-copy">Applicants who already completed hard-copy requirement submission will appear here.</div></div></td></tr>'
+                : '<tr><td colspan="6"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No application records found</div><div class="ldss-table-empty-copy">Try adjusting the current search or filters to see more records.</div></div></td></tr>';
             return;
         }
         tbody.innerHTML = rows.map(function (row) {
@@ -1332,6 +1507,11 @@
         const loadToken = applicationsLoadToken + 1;
         applicationsLoadToken = loadToken;
         showStatus("");
+
+        if (isSubmittedRequirementsView()) {
+            await loadRequirementsSummary(context, loadToken);
+            return;
+        }
 
         const appResult = await fetchAllApplications(context);
 

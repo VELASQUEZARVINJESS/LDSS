@@ -206,7 +206,10 @@ window.addEventListener('DOMContentLoaded', event => {
         if (!secretaryAccountTrigger || !sidenav) {
             return;
         }
-        if (sidenav.querySelector('a.nav-link[href="secretary-applications.html?view=submitted_requirements"]')) {
+        if (
+            sidenav.querySelector('a.nav-link[href="secretary-applications.html?view=requirements"]')
+            || sidenav.querySelector('a.nav-link[href="secretary-applications.html?view=submitted_requirements"]')
+        ) {
             return;
         }
 
@@ -222,8 +225,8 @@ window.addEventListener('DOMContentLoaded', event => {
         const submittedApplicationsLink = scholarSelectionLink.cloneNode(true);
         submittedApplicationsLink.classList.remove('active');
         submittedApplicationsLink.removeAttribute('aria-current');
-        submittedApplicationsLink.setAttribute('href', 'secretary-applications.html?view=submitted_requirements');
-        submittedApplicationsLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>\n                                Submitted Requirements\n                            ';
+        submittedApplicationsLink.setAttribute('href', 'secretary-applications.html?view=requirements');
+        submittedApplicationsLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>\n                                Requirements\n                            ';
 
         scholarSelectionLink.insertAdjacentElement('afterend', submittedApplicationsLink);
     }
@@ -378,7 +381,19 @@ window.addEventListener('DOMContentLoaded', event => {
         activatedPath = 'index.html';
     }
 
-    const targetAnchors = document.body.querySelectorAll('[href="' + activatedPath + '"].nav-link');
+    const viewParam = new URLSearchParams(window.location.search || '').get('view');
+    let targetAnchorSelector = '[href="' + activatedPath + '"].nav-link';
+
+    if (activatedPath === 'secretary-applications.html' && (viewParam === 'requirements' || viewParam === 'submitted_requirements')) {
+        targetAnchorSelector = [
+            '[href="secretary-applications.html?view=requirements"].nav-link',
+            '[href="secretary-applications.html?view=submitted_requirements"].nav-link'
+        ].join(', ');
+    } else if (activatedPath === 'admin-approval-queue.html' && viewParam === 'special_consideration') {
+        targetAnchorSelector = '[href="admin-approval-queue.html?view=special_consideration"].nav-link';
+    }
+
+    const targetAnchors = document.body.querySelectorAll(targetAnchorSelector);
 
     targetAnchors.forEach(targetAnchor => {
         let parentNode = targetAnchor.parentNode;
