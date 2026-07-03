@@ -28,6 +28,18 @@
     };
     const RANKING_SPECIAL_TAGS_STORAGE_KEY = "ldss:ranking-show-special-tags:v1";
     const RANKING_PHOTO_HYDRATION_BATCH_SIZE = 6;
+    const SELECTION_STORAGE_HOTFIX = "supabase/selection_pool_hotfix_2026_06_30.sql";
+    const SELECTION_CATEGORY_META = {
+        passed_exam: {
+            label: "Passed Exam"
+        },
+        sector_classification: {
+            label: "Sector Classification"
+        },
+        manual_office_selection: {
+            label: "Manual Office Selection"
+        }
+    };
     const PROTECTED_APPLICATION_STATUSES = new Set([
         "special_endorsement_review",
         "for_interview",
@@ -57,7 +69,12 @@
     let currentRankingSearchQuery = "";
     let rankingResultDrafts = {};
     let rankingPhotoHydrationToken = 0;
+    let rankingSelectionColumnsAvailable = true;
+    let isRankingSelectionSaving = false;
+    let currentRankingSelectionAction = "include";
+    let rankingSelectionModal = null;
     const applicantPhotoUrlCache = new Map();
+    const selectedRankingApplicationIds = new Set();
 
     function byId(id) {
         return document.getElementById(id);
@@ -113,6 +130,53 @@
         }
         box.className = "alert ldss-print-hide " + (type || "alert-info");
         box.textContent = message;
+    }
+
+    function normalizeSelectionCategory(value) {
+        const raw = (value || "").toString().trim().toLowerCase();
+        if (Object.prototype.hasOwnProperty.call(SELECTION_CATEGORY_META, raw)) {
+            return raw;
+        }
+        return "";
+    }
+
+    function selectionCategoryLabel(value) {
+        const normalized = normalizeSelectionCategory(value);
+        return normalized ? SELECTION_CATEGORY_META[normalized].label : "Manual Office Selection";
+    }
+
+    function defaultSelectionCategoryForRow(row) {
+        if (row && row.passed_by_score === true) {
+            return "passed_exam";
+        }
+        if (row && hasSectorClassification(row.sector_classification || "")) {
+            return "sector_classification";
+        }
+        return "manual_office_selection";
+    }
+
+    function normalizeSelectionNotes(value) {
+        return (value || "").toString().replace(/\s+/g, " ").trim();
+    }
+
+    function defaultSelectionNotes(category) {
+        const normalized = normalizeSelectionCategory(category);
+        if (normalized === "passed_exam") {
+            return "Included in Selection from the ranking passers.";
+        }
+        if (normalized === "sector_classification") {
+            return "Included in Selection for sector classification review.";
+        }
+        return "Included in Selection through manual office selection.";
+    }
+
+    function selectionStorageWarning() {
+        return "Selection storage is not installed yet. Apply " + SELECTION_STORAGE_HOTFIX + " first.";
+    }
+
+    function isMissingSelectionColumnError(error) {
+        const message = error && error.message ? error.message : "";
+        return /selection_included|selection_category|selection_notes|selection_updated_at/i.test(message);
     }
 
     function formatDate(value) {
@@ -607,23 +671,49 @@
                 continue;
             }
 
-            const flagsResult = await context.client
+            let flagsResult = await context.client
                 .from("application_staff_flags")
-                .select("application_id, special_consideration_tag")
+                .select("application_id, special_consideration_tag, selection_included, selection_category, selection_notes, selection_updated_at")
                 .in("application_id", chunk);
+
+            if (flagsResult.error && isMissingSelectionColumnError(flagsResult.error)) {
+                rankingSelectionColumnsAvailable = false;
+                flagsResult = await context.client
+                    .from("application_staff_flags")
+                    .select("application_id, special_consideration_tag")
+                    .in("application_id", chunk);
+
+                if (!flagsResult.error) {
+                    flagsResult.data = (flagsResult.data || []).map(function (row) {
+                        return Object.assign({}, row, {
+                            selection_included: false,
+                            selection_category: "",
+                            selection_notes: "",
+                            selection_updated_at: null
+                        });
+                    });
+                }
+            }
 
             if (flagsResult.error) {
                 if (!isMissingTableError(flagsResult.error, "application_staff_flags")) {
                     throw new Error("Failed to load special consideration flags: " + flagsResult.error.message);
                 }
+                rankingSelectionColumnsAvailable = false;
             } else {
                 (flagsResult.data || []).forEach(function (row) {
                     const applicationId = row && row.application_id ? row.application_id : "";
-                    const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
-                    if (!applicationId || !tag) {
+                    if (!applicationId) {
                         return;
                     }
-                    map[applicationId] = true;
+                    const tag = (row && row.special_consideration_tag ? row.special_consideration_tag : "").toString().trim();
+                    map[applicationId] = {
+                        has_special_consideration: Boolean(tag),
+                        selection_included: Boolean(row && row.selection_included === true),
+                        selection_category: normalizeSelectionCategory(row && row.selection_category ? row.selection_category : ""),
+                        selection_notes: normalizeSelectionNotes(row && row.selection_notes ? row.selection_notes : ""),
+                        selection_updated_at: row && row.selection_updated_at ? row.selection_updated_at : ""
+                    };
                 });
             }
 
@@ -642,7 +732,14 @@
                     if (!applicationId || !row || !row.special_endorsement) {
                         return;
                     }
-                    map[applicationId] = true;
+                    map[applicationId] = Object.assign({}, map[applicationId] || {
+                        selection_included: false,
+                        selection_category: "",
+                        selection_notes: "",
+                        selection_updated_at: ""
+                    }, {
+                        has_special_consideration: true
+                    });
                 });
             }
         }
@@ -662,7 +759,7 @@
 
             const result = await context.client
                 .from("profiles")
-                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number, barangay, applicant_photo_path")
+                .select("id, first_name, middle_name, last_name, email, school_name, mobile_number, barangay")
                 .in("id", chunk);
 
             if (result.error) {
@@ -670,11 +767,6 @@
             }
 
             (result.data || []).forEach(function (profile) {
-                const photoPath = profile && profile.applicant_photo_path ? profile.applicant_photo_path : "";
-                const cachedPhotoUrl = photoPath && applicantPhotoUrlCache.has(photoPath)
-                    ? (applicantPhotoUrlCache.get(photoPath) || "")
-                    : "";
-                profile.applicant_photo_url = cachedPhotoUrl;
                 map[profile.id] = profile;
             });
         }
@@ -1425,7 +1517,7 @@
         if (!tbody) {
             return;
         }
-        tbody.innerHTML = '<tr><td colspan="9" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
+        tbody.innerHTML = '<tr><td colspan="10" class="ldss-room-score-empty">' + escapeHtml(message) + "</td></tr>";
     }
 
     function renderEmptyRankingCards(message) {
@@ -1488,6 +1580,281 @@
             rows: searchedRows,
             message: ""
         };
+    }
+
+    function checkedRankingRows() {
+        if (!selectedRankingApplicationIds.size) {
+            return [];
+        }
+        return rows.filter(function (row) {
+            return row.batch_id === currentBatchId && selectedRankingApplicationIds.has(row.application_id);
+        });
+    }
+
+    function toggleRankingApplicationChecked(applicationId, checked) {
+        if (!applicationId) {
+            return;
+        }
+        if (checked) {
+            selectedRankingApplicationIds.add(applicationId);
+        } else {
+            selectedRankingApplicationIds.delete(applicationId);
+        }
+    }
+
+    function toggleAllVisibleRankingRows(checked) {
+        rankingDatasetForRender().rows.forEach(function (row) {
+            if (row && row.application_id) {
+                toggleRankingApplicationChecked(row.application_id, checked);
+            }
+        });
+    }
+
+    function selectionStatusBadgeMarkup(row) {
+        if (!row || row.selection_included !== true) {
+            return "";
+        }
+        return '<span class="ldss-ranking-selection-badge">In Selection: ' + escapeHtml(selectionCategoryLabel(row.selection_category || defaultSelectionCategoryForRow(row))) + "</span>";
+    }
+
+    function preferredSelectionCategoryForRows(sourceRows) {
+        const safeRows = Array.isArray(sourceRows) ? sourceRows.filter(Boolean) : [];
+        if (!safeRows.length) {
+            return "passed_exam";
+        }
+        const firstCategory = defaultSelectionCategoryForRow(safeRows[0]);
+        const isSameCategory = safeRows.every(function (row) {
+            return defaultSelectionCategoryForRow(row) === firstCategory;
+        });
+        return isSameCategory ? firstCategory : "manual_office_selection";
+    }
+
+    function ensureRankingSelectionModal() {
+        const modalElement = byId("roomScoreRankingSelectionModal");
+        if (!modalElement || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!rankingSelectionModal) {
+            rankingSelectionModal = new window.bootstrap.Modal(modalElement);
+        }
+        return rankingSelectionModal;
+    }
+
+    function syncRankingSelectionSummary() {
+        const target = byId("roomScoreRankingSelectionCount");
+        const selectAll = byId("roomScoreRankingSelectAll");
+        const visibleRows = rankingDatasetForRender().rows;
+        const checkedVisibleCount = visibleRows.filter(function (row) {
+            return row && selectedRankingApplicationIds.has(row.application_id);
+        }).length;
+        const savedCount = currentBatchRankingRows().filter(function (row) {
+            return row.selection_included === true;
+        }).length;
+        const totalCheckedCount = checkedRankingRows().length;
+
+        if (target) {
+            if (!currentBatchId) {
+                target.textContent = rankingSelectionColumnsAvailable
+                    ? "Check one or more ranked applicants, then use Include to Selection."
+                    : selectionStorageWarning();
+            } else if (!rankingSelectionColumnsAvailable) {
+                target.textContent = selectionStorageWarning();
+            } else if (totalCheckedCount > 0) {
+                target.textContent = String(totalCheckedCount) + " ranked applicant(s) checked. " + String(savedCount) + " already saved in Selection for this batch.";
+            } else {
+                target.textContent = String(savedCount) + " applicant(s) already saved in Selection for this batch.";
+            }
+        }
+
+        if (selectAll) {
+            if (!visibleRows.length) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+                selectAll.disabled = true;
+                return;
+            }
+            selectAll.disabled = false;
+            selectAll.checked = checkedVisibleCount > 0 && checkedVisibleCount === visibleRows.length;
+            selectAll.indeterminate = checkedVisibleCount > 0 && checkedVisibleCount < visibleRows.length;
+        }
+    }
+
+    function openRankingSelectionModal() {
+        if (!rankingSelectionColumnsAvailable) {
+            showStatus(selectionStorageWarning(), "alert-warning");
+            return;
+        }
+
+        const selectedRows = checkedRankingRows();
+        if (!selectedRows.length) {
+            showStatus("Check one or more ranked applicants first.", "alert-info");
+            return;
+        }
+
+        const selectionTypeInput = byId("roomScoreRankingSelectionType");
+        const selectionNotesInput = byId("roomScoreRankingSelectionNotes");
+        const modalMeta = byId("roomScoreRankingSelectionModalMeta");
+        const category = preferredSelectionCategoryForRows(selectedRows);
+
+        currentRankingSelectionAction = "include";
+        if (selectionTypeInput) {
+            selectionTypeInput.value = category;
+        }
+        if (selectionNotesInput) {
+            selectionNotesInput.value = defaultSelectionNotes(category);
+        }
+        if (modalMeta) {
+            modalMeta.textContent = String(selectedRows.length) + " ranked applicant(s) will be added to Selection.";
+        }
+
+        const modal = ensureRankingSelectionModal();
+        if (!modal) {
+            showStatus("The selection modal is not available right now.", "alert-warning");
+            return;
+        }
+        modal.show();
+    }
+
+    async function saveCheckedRankingSelection() {
+        if (!rankingSelectionColumnsAvailable) {
+            showStatus(selectionStorageWarning(), "alert-warning");
+            return;
+        }
+
+        const selectedRows = checkedRankingRows();
+        if (!selectedRows.length) {
+            showStatus("Check one or more ranked applicants first.", "alert-info");
+            return;
+        }
+
+        const selectionTypeInput = byId("roomScoreRankingSelectionType");
+        const selectionNotesInput = byId("roomScoreRankingSelectionNotes");
+        const category = normalizeSelectionCategory(selectionTypeInput && selectionTypeInput.value ? selectionTypeInput.value : "")
+            || "manual_office_selection";
+        const notes = normalizeSelectionNotes(selectionNotesInput && selectionNotesInput.value ? selectionNotesInput.value : "")
+            || defaultSelectionNotes(category);
+        const updatedAt = new Date().toISOString();
+        const payload = selectedRows.map(function (row) {
+            return {
+                application_id: row.application_id,
+                selection_included: true,
+                selection_category: category,
+                selection_notes: notes,
+                selection_marked_by: context && context.user ? context.user.id : null,
+                selection_updated_at: updatedAt
+            };
+        });
+
+        currentRankingSelectionAction = "include";
+        isRankingSelectionSaving = true;
+        syncActionButtons();
+        showStatus("");
+
+        try {
+            const result = await context.client
+                .from("application_staff_flags")
+                .upsert(payload, { onConflict: "application_id" });
+
+            if (result.error) {
+                if (isMissingSelectionColumnError(result.error) || isMissingTableError(result.error, "application_staff_flags")) {
+                    rankingSelectionColumnsAvailable = false;
+                    renderAll();
+                    showStatus(selectionStorageWarning(), "alert-warning");
+                    return;
+                }
+                throw new Error("Failed to save Selection records: " + result.error.message);
+            }
+
+            selectedRows.forEach(function (row) {
+                row.selection_included = true;
+                row.selection_category = category;
+                row.selection_notes = notes;
+                row.selection_updated_at = updatedAt;
+                selectedRankingApplicationIds.delete(row.application_id);
+            });
+
+            const modal = ensureRankingSelectionModal();
+            if (modal) {
+                modal.hide();
+            }
+            renderAll();
+            showStatus(String(selectedRows.length) + " ranked applicant(s) added to Selection.", "alert-success");
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to save Selection records.", "alert-danger");
+        } finally {
+            isRankingSelectionSaving = false;
+            syncActionButtons();
+        }
+    }
+
+    async function removeCheckedRankingSelection() {
+        if (!rankingSelectionColumnsAvailable) {
+            showStatus(selectionStorageWarning(), "alert-warning");
+            return;
+        }
+
+        const selectedRows = checkedRankingRows().filter(function (row) {
+            return row.selection_included === true;
+        });
+        if (!selectedRows.length) {
+            showStatus("Check one or more applicants that are already in Selection first.", "alert-info");
+            return;
+        }
+
+        const confirmed = window.confirm(
+            "Remove " + String(selectedRows.length) + " checked applicant(s) from Selection?"
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        const payload = selectedRows.map(function (row) {
+            return {
+                application_id: row.application_id,
+                selection_included: false,
+                selection_category: null,
+                selection_notes: null,
+                selection_marked_by: null,
+                selection_updated_at: null
+            };
+        });
+
+        currentRankingSelectionAction = "remove";
+        isRankingSelectionSaving = true;
+        syncActionButtons();
+        showStatus("");
+
+        try {
+            const result = await context.client
+                .from("application_staff_flags")
+                .upsert(payload, { onConflict: "application_id" });
+
+            if (result.error) {
+                if (isMissingSelectionColumnError(result.error) || isMissingTableError(result.error, "application_staff_flags")) {
+                    rankingSelectionColumnsAvailable = false;
+                    renderAll();
+                    showStatus(selectionStorageWarning(), "alert-warning");
+                    return;
+                }
+                throw new Error("Failed to remove Selection records: " + result.error.message);
+            }
+
+            selectedRows.forEach(function (row) {
+                row.selection_included = false;
+                row.selection_category = "";
+                row.selection_notes = "";
+                row.selection_updated_at = "";
+                selectedRankingApplicationIds.delete(row.application_id);
+            });
+
+            renderAll();
+            showStatus(String(selectedRows.length) + " applicant(s) removed from Selection.", "alert-success");
+        } catch (error) {
+            showStatus(error && error.message ? error.message : "Failed to remove Selection records.", "alert-danger");
+        } finally {
+            isRankingSelectionSaving = false;
+            syncActionButtons();
+        }
     }
 
     function rankingTableHeadMarkup() {
@@ -1563,32 +1930,8 @@
         return '<a class="btn btn-outline-dark btn-sm ' + escapeHtml(extraClassName || "") + '" href="' + escapeHtml(href) + '" target="_blank" rel="noopener">Open Details</a>';
     }
 
-    function rankingApplicantAvatarMarkup(row, extraClassName) {
-        const applicantName = row && row.applicant_name ? row.applicant_name : "Unknown Applicant";
-        const photoUrl = row && row.applicant_photo_url ? row.applicant_photo_url : "";
-        const className = extraClassName ? " " + escapeHtml(extraClassName) : "";
-        const href = rankingDetailsUrl(row);
-        let avatarContent = "";
-
-        if (photoUrl) {
-            avatarContent = (
-                '<span class="ldss-ranking-avatar' + className + '">' +
-                '<img src="' + escapeHtml(photoUrl) + '" alt="' + escapeHtml(applicantName + " profile picture") + '" loading="lazy" decoding="async" referrerpolicy="no-referrer" />' +
-                "</span>"
-            );
-        } else {
-            avatarContent = '<span class="ldss-ranking-avatar' + className + '" aria-hidden="true">' + escapeHtml(buildApplicantInitials(applicantName)) + "</span>";
-        }
-
-        if (!href) {
-            return avatarContent;
-        }
-
-        return (
-            '<a class="ldss-ranking-avatar-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" aria-label="' + escapeHtml("Open details for " + applicantName) + '" title="' + escapeHtml("Open details for " + applicantName) + '">' +
-            avatarContent +
-            "</a>"
-        );
+    function rankingApplicantAvatarMarkup() {
+        return "";
     }
 
     function rankingApplicantCopyMarkup(row, options) {
@@ -1614,86 +1957,30 @@
     }
 
     function rankingPhotoRowsForCurrentView() {
-        const seenPaths = new Set();
-        return rankingDatasetForRender().rows.filter(function (row) {
-            const photoPath = row && row.applicant_photo_path ? row.applicant_photo_path : "";
-            if (!photoPath || seenPaths.has(photoPath)) {
-                return false;
-            }
-            seenPaths.add(photoPath);
-            return !row.applicant_photo_url;
-        });
+        return [];
     }
 
-    function applyApplicantPhotoUrl(row, photoUrl) {
-        const applicantId = row && row.applicant_id ? row.applicant_id : "";
-        const photoPath = row && row.applicant_photo_path ? row.applicant_photo_path : "";
-        if (!applicantId || !photoPath) {
-            return false;
-        }
-
-        let changed = false;
-        rows.forEach(function (entry) {
-            if (entry && entry.applicant_id === applicantId && entry.applicant_photo_path === photoPath && entry.applicant_photo_url !== photoUrl) {
-                entry.applicant_photo_url = photoUrl;
-                changed = true;
-            }
-        });
-        return changed;
+    function applyApplicantPhotoUrl() {
+        return false;
     }
 
     async function hydrateRankingPhotosForCurrentView() {
-        if (!isRankingPage()) {
-            return;
-        }
-
-        const token = ++rankingPhotoHydrationToken;
-        const pendingRows = rankingPhotoRowsForCurrentView();
-        if (!pendingRows.length) {
-            return;
-        }
-
-        for (let start = 0; start < pendingRows.length; start += RANKING_PHOTO_HYDRATION_BATCH_SIZE) {
-            if (token !== rankingPhotoHydrationToken) {
-                return;
-            }
-
-            const batch = pendingRows.slice(start, start + RANKING_PHOTO_HYDRATION_BATCH_SIZE);
-            const results = await Promise.all(batch.map(async function (row) {
-                return {
-                    row: row,
-                    photoUrl: await createApplicantPhotoUrl(row.applicant_photo_path || "")
-                };
-            }));
-
-            if (token !== rankingPhotoHydrationToken) {
-                return;
-            }
-
-            const changed = results.some(function (entry) {
-                return applyApplicantPhotoUrl(entry.row, entry.photoUrl || "");
-            });
-
-            if (changed) {
-                renderRankingTable();
-                renderRankingCards();
-            }
-        }
+        return;
     }
 
     function rankingTableRowMarkup(row, index) {
         const counter = index + 1;
+        const checked = row && row.application_id && selectedRankingApplicationIds.has(row.application_id) ? " checked" : "";
         return (
             '<tr' + (hasSpecialConsideration(row) ? ' class="ldss-exam-special-row"' : "") + ">" +
+            '<td class="text-center"><input class="form-check-input ldss-ranking-selection-check" data-ranking-selection-check="' + escapeHtml(row.application_id || "") + '" type="checkbox" aria-label="' + escapeHtml("Select " + (row.applicant_name || "applicant")) + '"' + checked + " /></td>" +
             '<td class="text-center fw-700">' + escapeHtml(String(counter)) + "</td>" +
             '<td class="text-center fw-700">' + escapeHtml(String(row.display_rank || "-")) + "</td>" +
             "<td>" +
-            '<div class="ldss-ranking-applicant-cell">' +
-            rankingApplicantAvatarMarkup(row) +
             '<div class="ldss-ranking-applicant-copy">' +
             rankingApplicantCopyMarkup(row) +
             specialConsiderationBadgeMarkup(row) +
-            "</div>" +
+            selectionStatusBadgeMarkup(row) +
             "</div>" +
             "</td>" +
             "<td>" + escapeHtml(row.applicant_barangay || "No barangay") + "</td>" +
@@ -1963,6 +2250,8 @@
         }
 
         container.innerHTML = rankingState.rows.map(function (row, index) {
+            const checked = row && row.application_id && selectedRankingApplicationIds.has(row.application_id) ? " checked" : "";
+            const checkboxId = "roomScoreRankingCardCheck-" + escapeHtml(row.application_id || String(index));
             return (
                 '<article class="ldss-ranking-card' + (hasSpecialConsideration(row) ? ' ldss-exam-special-card' : '') + '">' +
                 '<div class="ldss-ranking-card-header">' +
@@ -1983,6 +2272,7 @@
                     metaClassName: "ldss-ranking-card-school"
                 }) +
                 specialConsiderationBadgeMarkup(row) +
+                selectionStatusBadgeMarkup(row) +
                 "</div>" +
                 "</div>" +
                 '<div class="ldss-ranking-card-grid mt-3">' +
@@ -1990,6 +2280,10 @@
                 '<div><div class="ldss-ranking-card-label">Room</div><div class="ldss-ranking-card-value">' + escapeHtml((row.room_label || "-").toString().toUpperCase()) + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Seat</div><div class="ldss-ranking-card-value">' + escapeHtml(row.room_seat_no == null ? "-" : String(row.room_seat_no)) + "</div></div>" +
                 '<div><div class="ldss-ranking-card-label">Sector</div><div class="ldss-ranking-card-value">' + sectorClassificationMarkup(row.sector_classification || "") + "</div></div>" +
+                "</div>" +
+                '<div class="ldss-ranking-selection-card-check">' +
+                '<input class="form-check-input ldss-ranking-selection-check" id="' + checkboxId + '" data-ranking-selection-check="' + escapeHtml(row.application_id || "") + '" type="checkbox" aria-label="' + escapeHtml("Select " + (row.applicant_name || "applicant")) + '"' + checked + " />" +
+                '<label for="' + checkboxId + '">Select for Scholar Selection</label>' +
                 "</div>" +
                 '<div class="mt-3">' + rankingDetailsActionMarkup(row, "w-100") + "</div>" +
                 "</article>"
@@ -2103,11 +2397,15 @@
     function syncActionButtons() {
         const roomRows = currentRoomRows();
         const rankingState = rankingDatasetForRender();
-        const busy = isSaving || isMarkingNoShows || isRankingResultSaving;
+        const checkedRows = checkedRankingRows();
+        const busy = isSaving || isMarkingNoShows || isRankingResultSaving || isRankingSelectionSaving;
         const saveBtn = byId("roomScoreSaveBtn");
         const saveNextBtn = byId("roomScoreSaveNextBtn");
         const noShowBtn = byId("roomScoreNoShowBtn");
         const rankingSortBtn = byId("roomScoreRankingSortBtn");
+        const rankingIncludeBtn = byId("roomScoreRankingIncludeBtn");
+        const rankingRemoveBtn = byId("roomScoreRankingRemoveBtn");
+        const rankingSelectionSaveBtn = byId("roomScoreRankingSelectionSaveBtn");
         const prevBtn = byId("roomScorePrevRoomBtn");
         const nextBtn = byId("roomScoreNextRoomBtn");
         const printBtn = byId("roomScorePrintBtn");
@@ -2131,6 +2429,25 @@
         }
         if (rankingSortBtn) {
             rankingSortBtn.disabled = busy || !currentBatchRankingRows().length;
+        }
+        if (rankingIncludeBtn) {
+            rankingIncludeBtn.disabled = busy || !checkedRows.length || !rankingSelectionColumnsAvailable;
+            rankingIncludeBtn.textContent = isRankingSelectionSaving && currentRankingSelectionAction === "include"
+                ? "Saving..."
+                : "Include to Selection";
+        }
+        if (rankingRemoveBtn) {
+            const removableRows = checkedRows.filter(function (row) {
+                return row.selection_included === true;
+            });
+            rankingRemoveBtn.disabled = busy || !removableRows.length || !rankingSelectionColumnsAvailable;
+            rankingRemoveBtn.textContent = isRankingSelectionSaving && currentRankingSelectionAction === "remove"
+                ? "Removing..."
+                : "Remove from Selection";
+        }
+        if (rankingSelectionSaveBtn) {
+            rankingSelectionSaveBtn.disabled = busy || !checkedRows.length || !rankingSelectionColumnsAvailable;
+            rankingSelectionSaveBtn.textContent = isRankingSelectionSaving ? "Saving..." : "Save Selection";
         }
         if (prevBtn) {
             prevBtn.disabled = busy || !previousSelection();
@@ -2163,6 +2480,7 @@
         renderRankingTable();
         renderRankingCards();
         renderRankingPrintPages();
+        syncRankingSelectionSummary();
         syncActionButtons();
         hydrateRankingPhotosForCurrentView();
     }
@@ -2184,9 +2502,9 @@
             const application = appMap[applicationId];
             return application ? application.applicant_id : "";
         }).filter(Boolean)));
-        const specialConsiderationMapPromise = applicationIds.length ? loadSpecialConsiderationFlagsByIds(applicationIds) : Promise.resolve({});
+        const staffFlagMapPromise = applicationIds.length ? loadSpecialConsiderationFlagsByIds(applicationIds) : Promise.resolve({});
         const profileMapPromise = applicantIds.length ? loadProfilesByIds(applicantIds) : Promise.resolve({});
-        const specialConsiderationMap = await specialConsiderationMapPromise;
+        const staffFlagMap = await staffFlagMapPromise;
         const profileMap = await profileMapPromise;
 
         batches = loadedBatches;
@@ -2203,8 +2521,6 @@
                 sector_classification: application ? normalizeSectorClassification(application.sector_classification || "") : "Unspecified",
                 applicant_name: buildApplicantName(profile),
                 applicant_print_name: buildApplicantPrintName(profile),
-                applicant_photo_path: profile && profile.applicant_photo_path ? profile.applicant_photo_path : "",
-                applicant_photo_url: profile && profile.applicant_photo_url ? profile.applicant_photo_url : "",
                 applicant_barangay: formatBarangayLabel(profile && profile.barangay ? profile.barangay : ""),
                 applicant_contact: profile ? (profile.mobile_number || profile.email || "-") : "-",
                 school_name: profile && profile.school_name ? profile.school_name : "",
@@ -2217,13 +2533,28 @@
                 percentage_score: row.percentage_score,
                 result: row.result || "pending",
                 record_status: row.status || "scheduled",
+                selection_included: Boolean(staffFlagMap[row.application_id] && staffFlagMap[row.application_id].selection_included === true),
+                selection_category: normalizeSelectionCategory(staffFlagMap[row.application_id] && staffFlagMap[row.application_id].selection_category
+                    ? staffFlagMap[row.application_id].selection_category
+                    : ""),
+                selection_notes: normalizeSelectionNotes(staffFlagMap[row.application_id] && staffFlagMap[row.application_id].selection_notes
+                    ? staffFlagMap[row.application_id].selection_notes
+                    : ""),
+                selection_updated_at: staffFlagMap[row.application_id] && staffFlagMap[row.application_id].selection_updated_at
+                    ? staffFlagMap[row.application_id].selection_updated_at
+                    : "",
                 has_special_consideration: Boolean(
-                    specialConsiderationMap[row.application_id] ||
+                    (staffFlagMap[row.application_id] && staffFlagMap[row.application_id].has_special_consideration) ||
                     (application && normalizeStatus(application.status || "") === "special_endorsement_review")
                 )
             };
         });
         rankingResultDrafts = {};
+        Array.from(selectedRankingApplicationIds).forEach(function (applicationId) {
+            if (!rows.some(function (row) { return row.application_id === applicationId; })) {
+                selectedRankingApplicationIds.delete(applicationId);
+            }
+        });
 
         resolveSelection(preferredBatchId, preferredRoomLabel);
         renderAll();
@@ -2552,6 +2883,11 @@
         const rankingSpecialTagToggleInput = rankingSpecialTagToggle();
         const rankingSaveBtn = byId("roomScoreRankingSaveBtn");
         const rankingSortBtn = byId("roomScoreRankingSortBtn");
+        const rankingIncludeBtn = byId("roomScoreRankingIncludeBtn");
+        const rankingRemoveBtn = byId("roomScoreRankingRemoveBtn");
+        const rankingSelectAll = byId("roomScoreRankingSelectAll");
+        const rankingSelectionSaveBtn = byId("roomScoreRankingSelectionSaveBtn");
+        const rankingSelectionType = byId("roomScoreRankingSelectionType");
         const rankingTableBody = byId("roomScoreRankingBody");
         const rankingCards = byId("roomScoreRankingCards");
         const refreshBtn = byId("roomScoreRefreshBtn");
@@ -2568,6 +2904,7 @@
 
         if (batchFilter) {
             batchFilter.addEventListener("change", function () {
+                selectedRankingApplicationIds.clear();
                 currentBatchId = batchFilter.value || "";
                 currentRoomLabel = roomLabelsForBatch(currentBatchId)[0] || "";
                 renderAll();
@@ -2666,6 +3003,44 @@
         if (rankingSortBtn) {
             rankingSortBtn.addEventListener("click", function () {
                 sortAllRanking();
+            });
+        }
+
+        if (rankingIncludeBtn) {
+            rankingIncludeBtn.addEventListener("click", function () {
+                openRankingSelectionModal();
+            });
+        }
+
+        if (rankingRemoveBtn) {
+            rankingRemoveBtn.addEventListener("click", function () {
+                removeCheckedRankingSelection();
+            });
+        }
+
+        if (rankingSelectAll) {
+            rankingSelectAll.addEventListener("change", function () {
+                toggleAllVisibleRankingRows(rankingSelectAll.checked);
+                renderAll();
+            });
+        }
+
+        if (rankingSelectionType) {
+            rankingSelectionType.addEventListener("change", function () {
+                const notesInput = byId("roomScoreRankingSelectionNotes");
+                if (!notesInput) {
+                    return;
+                }
+                const currentNotes = normalizeSelectionNotes(notesInput.value);
+                if (!currentNotes || currentNotes === defaultSelectionNotes("passed_exam") || currentNotes === defaultSelectionNotes("sector_classification") || currentNotes === defaultSelectionNotes("manual_office_selection")) {
+                    notesInput.value = defaultSelectionNotes(rankingSelectionType.value);
+                }
+            });
+        }
+
+        if (rankingSelectionSaveBtn) {
+            rankingSelectionSaveBtn.addEventListener("click", function () {
+                saveCheckedRankingSelection();
             });
         }
 
@@ -2777,6 +3152,14 @@
             }
 
             container.addEventListener("change", function (event) {
+                const selectionCheckbox = event.target.closest("[data-ranking-selection-check]");
+                if (selectionCheckbox) {
+                    toggleRankingApplicationChecked(selectionCheckbox.getAttribute("data-ranking-selection-check") || "", selectionCheckbox.checked === true);
+                    syncRankingSelectionSummary();
+                    syncActionButtons();
+                    return;
+                }
+
                 const select = event.target.closest("[data-ranking-result]");
                 if (!select) {
                     return;

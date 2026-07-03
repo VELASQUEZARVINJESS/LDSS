@@ -24,6 +24,41 @@ body {
     background: var(--ldss-surface);
 }
 
+body.ldss-print-embed-mode .topnav,
+body.ldss-print-embed-mode #layoutSidenav_nav,
+body.ldss-print-embed-mode .page-header,
+body.ldss-print-embed-mode .footer-admin,
+body.ldss-print-embed-mode .ldss-print-hide {
+    display: none !important;
+}
+
+body.ldss-print-embed-mode #layoutSidenav,
+body.ldss-print-embed-mode #layoutSidenav_content,
+body.ldss-print-embed-mode main,
+body.ldss-print-embed-mode .container-xl,
+body.ldss-print-embed-mode .row,
+body.ldss-print-embed-mode [class*="col-lg-"],
+body.ldss-print-embed-mode .card,
+body.ldss-print-embed-mode .card-header,
+body.ldss-print-embed-mode .card-body {
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}
+
+body.ldss-print-embed-mode [class*="col-lg-"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex: 0 0 100% !important;
+}
+
+body.ldss-print-embed-mode .ldss-print-zone {
+    padding: 1.25rem;
+    background: #f8fafc;
+}
+
 .card,
 .dropdown-menu,
 .form-control,
@@ -192,6 +227,400 @@ body {
 
 .ldss-applicant-status-actions .ldss-quick-actions {
     width: 100%;
+}
+
+.min-w-0 {
+    min-width: 0;
+}
+
+.ldss-dashboard-hero-card,
+.ldss-dashboard-profile-card,
+.ldss-dashboard-stat-card {
+    border-radius: 0.85rem;
+}
+
+.ldss-dashboard-client-shell .card {
+    box-shadow: 0 0.22rem 0.85rem rgba(15, 23, 42, 0.05) !important;
+}
+
+.ldss-dashboard-client-shell .card-body {
+    padding: 0.88rem !important;
+}
+
+.ldss-dashboard-client-shell .h5,
+.ldss-dashboard-client-shell h2.h5 {
+    font-size: 0.92rem;
+}
+
+.ldss-dashboard-client-shell .small {
+    font-size: 0.74rem;
+}
+
+.ldss-dashboard-client-shell .ldss-chip {
+    padding: 0.18rem 0.46rem;
+    font-size: 0.66rem;
+}
+
+.ldss-dashboard-client-shell .btn.btn-sm {
+    padding: 0.32rem 0.62rem;
+    font-size: 0.72rem;
+}
+
+.ldss-dashboard-client-shell .ldss-status-label {
+    font-size: 0.66rem;
+}
+
+.ldss-dashboard-hero-card {
+    background: linear-gradient(135deg, #ffffff 0%, #f6f9fc 100%);
+}
+
+.ldss-dashboard-hero-card #dashboardStatus {
+    border-radius: 0.85rem;
+    border-width: 1px;
+    margin-top: 0.85rem !important;
+    padding: 0.72rem 0.9rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+.ldss-dashboard-hero-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.ldss-dashboard-hero-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
+    gap: 0.55rem 0.85rem;
+    align-items: end;
+}
+
+.ldss-dashboard-hero-select {
+    min-width: 0;
+}
+
+.ldss-dashboard-hero-select .form-select {
+    min-height: 2rem;
+    border-radius: 0.72rem;
+    border-color: #d6deea;
+    font-size: 0.74rem;
+    padding-top: 0.36rem;
+    padding-bottom: 0.36rem;
+}
+
+.ldss-dashboard-hero-select .form-select:focus {
+    border-color: #9bb8ff;
+    box-shadow: 0 0 0 0.12rem rgba(37, 99, 235, 0.12);
+}
+
+.ldss-dashboard-hero-meta {
+    min-width: 0;
+    line-height: 1.35;
+}
+
+.ldss-dashboard-hero-title {
+    margin: 0;
+    max-width: 28ch;
+    font-size: 1.24rem;
+    line-height: 1.12;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ldss-dashboard-hero-copy {
+    margin-top: 0.4rem;
+    max-width: 54rem;
+    font-size: 0.8rem;
+    line-height: 1.42;
+    color: var(--ldss-muted);
+}
+
+.ldss-dashboard-profile-card {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+}
+
+.ldss-dashboard-profile-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.68rem;
+    min-width: 0;
+}
+
+.ldss-dashboard-profile-avatar {
+    width: 3.2rem;
+    height: 3.2rem;
+    flex: 0 0 3.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.8rem;
+    border: 1px solid #dbe7ff;
+    background: #eef4ff;
+    color: #2563eb;
+    font-size: 1rem;
+    font-weight: 800;
+    box-shadow: 0 0.3rem 0.9rem rgba(37, 99, 235, 0.08);
+}
+
+.ldss-dashboard-profile-name {
+    margin: 0;
+    font-size: 0.98rem;
+    line-height: 1.2;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ldss-dashboard-profile-card .small {
+    font-size: 0.76rem;
+    line-height: 1.35;
+}
+
+.ldss-dashboard-stat-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.62rem;
+}
+
+.ldss-dashboard-stat-icon {
+    width: 2.15rem;
+    height: 2.15rem;
+    flex: 0 0 2.15rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.72rem;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    color: #4b5563;
+}
+
+.ldss-dashboard-stat-icon svg {
+    width: 0.86rem;
+    height: 0.86rem;
+}
+
+.ldss-dashboard-stat-icon.is-info {
+    background: #eef4ff;
+    border-color: #dbe7ff;
+    color: #2563eb;
+}
+
+.ldss-dashboard-stat-icon.is-success {
+    background: #e8f6f4;
+    border-color: #cfeae4;
+    color: var(--ldss-success);
+}
+
+.ldss-dashboard-stat-icon.is-warning {
+    background: #fff5e8;
+    border-color: #fde2ba;
+    color: #d97706;
+}
+
+.ldss-dashboard-stat-icon.is-neutral {
+    background: #f5f7fa;
+    border-color: #e2e8f0;
+    color: #6b7280;
+}
+
+.ldss-dashboard-stat-value {
+    margin-top: 0.15rem;
+    min-height: 1.45rem;
+    font-size: 0.92rem;
+    line-height: 1.22;
+    font-weight: 700;
+    color: #111827;
+}
+
+.ldss-dashboard-stat-help {
+    margin-top: 0.5rem;
+    min-height: 1.4rem;
+    font-size: 0.74rem;
+    line-height: 1.45;
+    color: var(--ldss-muted);
+}
+
+.ldss-dashboard-progress-list {
+    min-width: 0;
+}
+
+.ldss-dashboard-progress-track {
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+    scrollbar-width: thin;
+}
+
+.ldss-dashboard-progress-step {
+    position: relative;
+    min-width: 6.85rem;
+    flex: 1 1 0;
+    padding-right: 0.45rem;
+}
+
+.ldss-dashboard-progress-step:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    top: 0.66rem;
+    left: 1.6rem;
+    width: calc(100% - 1.85rem);
+    height: 1px;
+    background: #dbe3ec;
+}
+
+.ldss-dashboard-progress-step.is-complete:not(:last-child)::after {
+    background: #22c55e;
+}
+
+.ldss-dashboard-progress-step.is-active:not(:last-child)::after {
+    background: linear-gradient(90deg, #2563eb 0%, #dbe3ec 100%);
+}
+
+.ldss-dashboard-progress-node {
+    width: 1.34rem;
+    height: 1.34rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.42rem;
+    border-radius: 999px;
+    border: 1.5px solid #cbd5e1;
+    background: #ffffff;
+    color: #64748b;
+    font-size: 0.64rem;
+    font-weight: 700;
+    box-shadow: 0 0.2rem 0.55rem rgba(15, 23, 42, 0.05);
+}
+
+.ldss-dashboard-progress-step.is-complete .ldss-dashboard-progress-node {
+    border-color: #22c55e;
+    background: #22c55e;
+    color: #ffffff;
+}
+
+.ldss-dashboard-progress-step.is-active .ldss-dashboard-progress-node {
+    border-color: #2563eb;
+    background: #eef4ff;
+    color: #2563eb;
+}
+
+.ldss-dashboard-progress-title {
+    font-size: 0.68rem;
+    line-height: 1.28;
+    font-weight: 700;
+    color: #111827;
+}
+
+.ldss-dashboard-progress-meta {
+    margin-top: 0.16rem;
+    font-size: 0.62rem;
+    line-height: 1.32;
+    color: #94a3b8;
+}
+
+.ldss-dashboard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+.ldss-dashboard-list-item {
+    display: block;
+    padding: 0.58rem 0.68rem;
+    border: 1px solid #e8eef5;
+    border-radius: 0.72rem;
+    background: #ffffff;
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.18s var(--ldss-ease), box-shadow 0.18s var(--ldss-ease), border-color 0.18s var(--ldss-ease);
+}
+
+.ldss-dashboard-list-item:hover,
+.ldss-dashboard-list-item:focus {
+    transform: translateY(-1px);
+    border-color: #d6e1ec;
+    box-shadow: 0 0.45rem 1rem rgba(15, 23, 42, 0.06);
+    color: inherit;
+    text-decoration: none;
+}
+
+.ldss-dashboard-list-title {
+    font-size: 0.78rem;
+    line-height: 1.28;
+    font-weight: 700;
+    color: #111827;
+}
+
+.ldss-dashboard-list-copy {
+    margin-top: 0.18rem;
+    font-size: 0.74rem;
+    line-height: 1.38;
+    color: #4b5563;
+}
+
+.ldss-dashboard-list-meta {
+    margin-top: 0.16rem;
+    font-size: 0.65rem;
+    color: #94a3b8;
+}
+
+.ldss-dashboard-empty {
+    padding: 0.62rem;
+    border: 1px dashed #cfd8e3;
+    border-radius: 0.72rem;
+    background: #fbfcfe;
+    color: var(--ldss-muted);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.ldss-dashboard-schedule-hero {
+    padding: 0.62rem;
+    border: 1px solid #e7edf5;
+    border-radius: 0.72rem;
+    background: #f8fafc;
+}
+
+.ldss-dashboard-schedule-title {
+    font-size: 0.86rem;
+    line-height: 1.18;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.ldss-dashboard-schedule-copy {
+    margin-top: 0.16rem;
+    font-size: 0.74rem;
+    line-height: 1.36;
+    color: var(--ldss-muted);
+}
+
+.ldss-dashboard-schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.58rem 0.65rem;
+}
+
+.ldss-dashboard-schedule-cell {
+    min-width: 0;
+}
+
+.ldss-dashboard-schedule-value {
+    margin-top: 0.14rem;
+    font-size: 0.8rem;
+    line-height: 1.28;
+    font-weight: 700;
+    color: #111827;
+}
+
+.ldss-dashboard-help-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.55rem 0.85rem;
 }
 
 .ldss-dashboard-section-card .card-header {
@@ -1779,6 +2208,12 @@ body {
     gap: 0.12rem;
 }
 
+.ldss-secretary-applications-table .ldss-queue-applicant-submeta {
+    font-size: 0.72rem;
+    line-height: 1.25;
+    color: #64748b;
+}
+
 .ldss-secretary-applications-table .ldss-queue-applicant-meta {
     display: flex;
     flex-wrap: wrap;
@@ -1886,52 +2321,6 @@ body {
     display: inline-block;
 }
 
-.ldss-requirements-summary-shell {
-    padding-top: 0.1rem;
-}
-
-.ldss-requirements-summary-card {
-    min-height: 100%;
-    padding: 0.9rem 0.95rem 0.85rem;
-    border: 1px solid #e2e8f0;
-    border-radius: 0.82rem;
-    background: #ffffff;
-    box-shadow: none;
-}
-
-.ldss-requirements-summary-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    margin-bottom: 0.7rem;
-    border: 1px solid #e2e8f0;
-    border-radius: 0.65rem;
-    background: #f8fafc;
-    color: #64748b;
-}
-
-.ldss-requirements-summary-icon svg {
-    width: 0.82rem;
-    height: 0.82rem;
-}
-
-.ldss-requirements-summary-label {
-    color: #6b7280;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.ldss-requirements-summary-copy {
-    margin-top: 0.2rem;
-    color: #9ca3af;
-    font-size: 0.76rem;
-    line-height: 1.35;
-}
-
 .ldss-secretary-applications-page .ldss-secretary-filter-shell {
     padding: 0;
 }
@@ -1975,7 +2364,7 @@ body {
 }
 
 .ldss-secretary-applications-page .ldss-secretary-queue-header {
-    padding: 0 0 0.9rem;
+    padding: 0;
 }
 
 .ldss-secretary-queue-heading {
@@ -1997,9 +2386,375 @@ body {
     line-height: 1.45;
 }
 
+.ldss-secretary-requirements-header-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.7rem;
+    margin-top: 0;
+    margin-left: auto;
+}
+
+.ldss-secretary-requirements-filter-item {
+    min-width: 11.75rem;
+    flex: 0 0 auto;
+}
+
+.ldss-secretary-requirements-filter-item-search {
+    min-width: 14rem;
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-queue-card,
+.ldss-secretary-requirements-side-card {
+    border-radius: 1rem;
+    border: 1px solid #e2e8f0;
+    overflow: hidden;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-queue-card .card-header,
+.ldss-secretary-requirements-side-card .card-header {
+    padding: 0.9rem 1rem;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ldss-secretary-requirements-side-card .card-body {
+    padding: 1rem;
+    background: #ffffff;
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-queue-header {
+    justify-content: flex-end;
+    gap: 0.85rem;
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-requirements-header-filters {
+    width: 100%;
+}
+
+.ldss-secretary-requirements-header-filters .form-select,
+.ldss-secretary-requirements-header-filters .form-control {
+    min-height: 2.35rem;
+    min-width: 100%;
+    padding: 0.45rem 2.1rem 0.45rem 0.8rem;
+    border: 1px solid #d7dee8;
+    border-radius: 0.72rem;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.82rem;
+    font-weight: 500;
+    box-shadow: none;
+}
+
+.ldss-secretary-requirements-header-filters .form-control {
+    padding-right: 0.8rem;
+}
+
+.ldss-secretary-requirements-header-filters .form-select:focus,
+.ldss-secretary-requirements-header-filters .form-control:focus {
+    border-color: #b8c4d6;
+    box-shadow: 0 0 0 0.2rem rgba(148, 163, 184, 0.14);
+    background: #fff;
+}
+
+.ldss-secretary-requirements-summary-copy {
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ldss-secretary-requirements-summary-eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+
+.ldss-secretary-requirements-summary-count {
+    margin-top: 0.55rem;
+    font-size: 2.1rem;
+    font-weight: 800;
+    line-height: 1;
+    color: #111827;
+}
+
+.ldss-secretary-requirements-summary-title {
+    margin-top: 0.45rem;
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.ldss-secretary-requirements-summary-meta {
+    margin-top: 0.35rem;
+    color: #64748b;
+    line-height: 1.45;
+    font-size: 0.83rem;
+}
+
+.ldss-secretary-requirements-summary-list {
+    display: grid;
+    gap: 0.85rem;
+    padding-top: 1rem;
+}
+
+.ldss-secretary-requirements-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.22rem;
+}
+
+.ldss-secretary-requirements-summary-label {
+    font-size: 0.71rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+
+.ldss-secretary-requirements-summary-value {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #334155;
+    line-height: 1.4;
+}
+
+.ldss-secretary-requirements-inspector-copy {
+    padding-bottom: 0.95rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ldss-secretary-requirements-inspector-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+}
+
+.ldss-secretary-requirements-inspector-copy-main {
+    min-width: 0;
+}
+
+.ldss-secretary-requirements-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.15rem;
+    height: 3.15rem;
+    flex: 0 0 3.15rem;
+    border-radius: 999px;
+    overflow: hidden;
+    border: 2px solid rgba(255, 255, 255, 0.92);
+    background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+    box-shadow: 0 0 0 1px #d8e0ea, 0 6px 14px rgba(15, 23, 42, 0.08);
+    color: #334155;
+    font-size: 0.88rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ldss-secretary-requirements-avatar img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.ldss-secretary-requirements-inspector-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.3;
+}
+
+.ldss-secretary-requirements-inspector-meta {
+    margin-top: 0.35rem;
+    color: #64748b;
+    font-size: 0.8rem;
+    line-height: 1.45;
+}
+
+.ldss-secretary-requirements-inspector-list {
+    display: grid;
+    gap: 0.55rem;
+    padding-top: 0.9rem;
+}
+
+.ldss-secretary-requirements-inspector-item {
+    padding: 0.65rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.72rem;
+    background: #ffffff;
+}
+
+.ldss-secretary-requirements-inspector-item-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #1f2937;
+    line-height: 1.3;
+}
+
+.ldss-secretary-requirements-doc-trigger {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #2563eb;
+    text-decoration: none;
+}
+
+.ldss-secretary-requirements-doc-trigger:hover,
+.ldss-secretary-requirements-doc-trigger:focus {
+    color: #1d4ed8;
+    text-decoration: underline;
+}
+
+.ldss-secretary-requirements-inspector-item-meta {
+    margin-top: 0.2rem;
+    color: #64748b;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.ldss-secretary-requirements-inspector-empty {
+    padding: 1rem;
+    border: 1px dashed #cbd5e1;
+    border-radius: 0.8rem;
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 0.84rem;
+    line-height: 1.5;
+}
+
+.ldss-secretary-requirements-editor-item {
+    background: #ffffff;
+}
+
+.ldss-secretary-requirements-editor-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.ldss-secretary-requirements-editor-select {
+    flex: 0 0 10.5rem;
+    max-width: 10.5rem;
+}
+
+.ldss-secretary-requirements-editor-item .form-select {
+    border-radius: 0.65rem;
+    border: 1px solid #d7dee8;
+    min-height: 2rem;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+    font-size: 0.78rem;
+    color: #334155;
+    box-shadow: none;
+}
+
+.ldss-secretary-requirements-editor-item .form-select:focus {
+    border-color: #b8c4d6;
+    box-shadow: 0 0 0 0.2rem rgba(148, 163, 184, 0.14);
+}
+
+.ldss-secretary-requirements-inspector-actions {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.ldss-secretary-requirements-inspector-save-meta {
+    line-height: 1.45;
+}
+
+.ldss-requirements-print-modal-shell {
+    position: relative;
+    min-height: 72vh;
+    background: #f8fafc;
+}
+
+.ldss-requirements-print-modal-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 72vh;
+    padding: 1.5rem;
+    color: #64748b;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+.ldss-requirements-print-modal-frame {
+    display: block;
+    width: 100%;
+    min-height: 72vh;
+    border: 0;
+    background: #ffffff;
+}
+
+@media (max-width: 575.98px) {
+    .ldss-secretary-requirements-editor-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .ldss-secretary-requirements-editor-select {
+        flex: 1 1 auto;
+        max-width: none;
+        width: 100%;
+    }
+
+    .ldss-requirements-print-modal-shell,
+    .ldss-requirements-print-modal-loading,
+    .ldss-requirements-print-modal-frame {
+        min-height: 78vh;
+    }
+}
+
+.ldss-applicant-requirement-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.85rem;
+    padding: 0.78rem 0;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ldss-applicant-requirement-item:last-child {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+
+.ldss-applicant-requirement-label {
+    display: block;
+    font-size: 0.87rem;
+    color: #334155;
+    line-height: 1.45;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-card {
+    border-radius: 1rem;
+    overflow: hidden;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-card .card-header {
+    padding: 1rem 1.35rem;
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.ldss-secretary-applications-page .ldss-secretary-queue-card .card-body {
+    background: #ffffff;
+}
+
 .ldss-secretary-applications-page .ldss-secretary-queue-body {
-    border-top: 1px solid #dbe2ea;
+    border-top: 0;
     background: transparent;
+    padding: 1rem 1.35rem 0;
 }
 
 .ldss-secretary-applications-page .ldss-secretary-applications-table tbody tr:last-child td {
@@ -2012,7 +2767,7 @@ body {
 
 .ldss-secretary-applications-page .ldss-secretary-applications-table thead th {
     padding: 0.82rem 1rem;
-    border-bottom: 1px solid #dbe4f0;
+    border-bottom: 2px solid #cbd5e1;
     background: transparent;
     color: #64748b;
     font-size: 0.73rem;
@@ -2053,6 +2808,24 @@ body {
     background: #fafcff;
 }
 
+.ldss-secretary-applications-page .ldss-secretary-app-row-active {
+    background: #f8fafc;
+}
+
+.ldss-requirements-applicant-trigger {
+    color: #111827;
+    font-weight: 700;
+    text-decoration: none;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.ldss-requirements-applicant-trigger:hover,
+.ldss-requirements-applicant-trigger:focus {
+    color: #0d6efd;
+    text-decoration: none;
+}
+
 .ldss-secretary-applications-page .ldss-secretary-queue-footer {
     padding: 1rem 0;
     border-top: 1px solid #e2e8f0;
@@ -2086,8 +2859,27 @@ body {
 }
 
 @media (max-width: 767.98px) {
-    .ldss-requirements-summary-card {
-        padding: 0.82rem 0.85rem 0.8rem;
+    .ldss-secretary-requirements-side-card .card-body {
+        padding: 0.95rem;
+    }
+
+    .ldss-secretary-requirements-header-filters {
+        width: 100%;
+        justify-content: stretch;
+        margin-left: 0;
+    }
+
+    .ldss-secretary-requirements-filter-item {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .ldss-secretary-applications-page .ldss-secretary-queue-card .card-header {
+        padding: 0.95rem 1rem;
+    }
+
+    .ldss-secretary-applications-page .ldss-secretary-queue-body {
+        padding: 0.9rem 1rem 0;
     }
 
     .ldss-secretary-page-action-buttons {
@@ -2634,6 +3426,38 @@ body {
     letter-spacing: 0.03em;
 }
 
+.ldss-secretary-requirements-view .ldss-secretary-applications-table th:nth-child(1),
+.ldss-secretary-requirements-view .ldss-secretary-applications-table td:nth-child(1) {
+    width: 42%;
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-applications-table th:nth-child(2),
+.ldss-secretary-requirements-view .ldss-secretary-applications-table td:nth-child(2) {
+    width: 24%;
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-applications-table th:nth-child(3),
+.ldss-secretary-requirements-view .ldss-secretary-applications-table td:nth-child(3) {
+    width: 16%;
+}
+
+.ldss-secretary-requirements-view .ldss-secretary-applications-table th:nth-child(4),
+.ldss-secretary-requirements-view .ldss-secretary-applications-table td:nth-child(4) {
+    width: 18%;
+}
+
+@media (max-width: 1199.98px) {
+    .ldss-secretary-requirements-view .ldss-secretary-requirements-header-filters {
+        justify-content: stretch;
+    }
+
+    .ldss-secretary-requirements-view .ldss-secretary-requirements-filter-item,
+    .ldss-secretary-requirements-view .ldss-secretary-requirements-filter-item-search {
+        min-width: 100%;
+        width: 100%;
+    }
+}
+
 .ldss-print-form-label {
     margin-top: 0.24rem;
     font-size: 0.82rem;
@@ -2853,6 +3677,25 @@ body {
         border-top: 1px solid #e5edf6;
     }
 
+    .ldss-dashboard-hero-title {
+        font-size: 1.08rem;
+        max-width: none;
+    }
+
+    .ldss-dashboard-hero-toolbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+    }
+
+    .ldss-dashboard-stat-help {
+        min-height: 0;
+    }
+
+    .ldss-dashboard-help-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
     .ldss-secretary-summary-layout {
         row-gap: 1.5rem;
     }
@@ -2886,6 +3729,61 @@ body {
 
     .ldss-applicant-status-slot {
         padding-top: 0;
+    }
+
+    .ldss-dashboard-hero-title {
+        font-size: 1rem;
+    }
+
+    .ldss-dashboard-hero-copy {
+        font-size: 0.76rem;
+    }
+
+    .ldss-dashboard-hero-select .form-select {
+        min-height: 1.9rem;
+        font-size: 0.72rem;
+    }
+
+    .ldss-dashboard-profile-wrap {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .ldss-dashboard-profile-avatar {
+        width: 3rem;
+        height: 3rem;
+        flex-basis: 3rem;
+        font-size: 0.95rem;
+    }
+
+    .ldss-dashboard-profile-name {
+        font-size: 0.92rem;
+    }
+
+    .ldss-dashboard-stat-value {
+        min-height: 0;
+        font-size: 0.86rem;
+    }
+
+    .ldss-dashboard-progress-step {
+        min-width: 6.35rem;
+    }
+
+    .ldss-dashboard-progress-title {
+        font-size: 0.65rem;
+    }
+
+    .ldss-dashboard-progress-meta {
+        font-size: 0.6rem;
+    }
+
+    .ldss-dashboard-schedule-grid {
+        grid-template-columns: 1fr;
+        gap: 0.85rem;
+    }
+
+    .ldss-dashboard-help-row {
+        align-items: stretch;
     }
 
     .ldss-applicant-form-photo-stack {

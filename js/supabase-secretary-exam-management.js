@@ -851,23 +851,12 @@
     }
 
     function writeBatchLabelValue(value) {
-        const select = byId("examBatchLabel");
+        const input = byId("examBatchLabel");
         const normalized = (value || "").toString().trim();
-        if (!select) {
+        if (!input) {
             return;
         }
-        if (normalized) {
-            const hasOption = Array.from(select.options || []).some(function (option) {
-                return option.value === normalized;
-            });
-            if (!hasOption) {
-                const option = document.createElement("option");
-                option.value = normalized;
-                option.textContent = normalized;
-                select.appendChild(option);
-            }
-        }
-        select.value = normalized;
+        input.value = normalized;
     }
 
     function applyBatchForm(batchId) {

@@ -273,7 +273,8 @@
         return {
             id: params.get("id"),
             applicationNo: params.get("application_no"),
-            download: params.get("download") === "1"
+            download: params.get("download") === "1",
+            embed: params.get("embed") === "1"
         };
     }
 
@@ -694,14 +695,17 @@
     }
 
     async function init() {
+        const query = parseQuery();
+        if (query.embed) {
+            document.body.classList.add("ldss-print-embed-mode");
+        }
+
         const context = await window.ldssAuthReadyPromise;
         if (!context || !context.client) {
             return;
         }
 
         bindActions(context);
-
-        const query = parseQuery();
         const autoLookup = query.id
             ? { id: query.id, applicationNo: "" }
             : (query.applicationNo ? { id: "", applicationNo: query.applicationNo } : {});

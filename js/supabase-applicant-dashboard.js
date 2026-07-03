@@ -6,10 +6,13 @@
     const DISMISSED_NOTIFICATIONS_STORAGE_PREFIX = "ldss:dismissed-notifications:";
     const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const DOC_LABELS = {
-        income_certificate: "Tax Exemption Certificate (PDF)"
+        proof_of_enrollment: "Proof of Enrollment",
+        report_card: "Report Card",
+        barangay_certificate: "Barangay Certificate",
+        income_certificate: "Tax Exemption Certificate"
     };
 
-    const DOC_ORDER = ["income_certificate"];
+    const DOC_ORDER = ["proof_of_enrollment", "report_card", "barangay_certificate", "income_certificate"];
 
     const DOC_STATUS_META = {
         pending: { label: "For Review", chipClass: "ldss-chip-accent" },
@@ -77,6 +80,8 @@
     let notificationsSupportDismissedAt = true;
     let dashboardMobileSectionsBound = false;
     let dashboardMobileSectionMode = "";
+    let dashboardRuntime = null;
+    let dashboardSelectionRequestId = 0;
 
     function byId(id) {
         return document.getElementById(id);
@@ -673,15 +678,30 @@
         }
 
         const latest = latestDocByType(documents || []);
+        const hasUploadedDocument = DOC_ORDER.some(function (docType) {
+            return !!latest[docType];
+        });
+
+        if (!hasUploadedDocument) {
+            wrapper.innerHTML = '<div class="ldss-dashboard-empty">No requirement uploads yet for your current application.</div>';
+            return;
+        }
+
         wrapper.innerHTML = DOC_ORDER.map(function (docType, index) {
             const row = latest[docType];
             const status = row ? row.verification_status : "missing";
             const meta = DOC_STATUS_META[status] || DOC_STATUS_META.missing;
-            const marginClass = index === DOC_ORDER.length - 1 ? "" : " mb-2";
+            const dateText = row && row.created_at ? shortDateLabel(row.created_at) : "Not uploaded";
+            const itemClass = index === DOC_ORDER.length - 1 ? "ldss-dashboard-list-item mb-0" : "ldss-dashboard-list-item";
             return (
-                '<div class="d-flex justify-content-between' + marginClass + '">' +
-                '<span class="small">' + DOC_LABELS[docType] + "</span>" +
+                '<div class="' + itemClass + '">' +
+                '<div class="d-flex justify-content-between align-items-start gap-3">' +
+                '<div class="min-w-0">' +
+                '<div class="ldss-dashboard-list-title">' + escapeHtml(DOC_LABELS[docType] || docType) + "</div>" +
+                '<div class="ldss-dashboard-list-meta">' + escapeHtml(dateText) + "</div>" +
+                "</div>" +
                 '<span class="ldss-chip ' + meta.chipClass + '">' + meta.label + "</span>" +
+                "</div>" +
                 "</div>"
             );
         }).join("");
@@ -699,7 +719,7 @@
         });
     }
 
-    function buildDashboardEvents(application, examRecord, interviewRecord, approvalRecord, notifications) {
+    function buildDashboardEvents(application, examRecord, interviewRecord, approvalRecord, notifications, examRank, specialConsideration) {
         const events = [];
         const sectorSelected = isSectorSelectedApplication(application, approvalRecord);
         if (application) {
@@ -717,7 +737,7 @@
 
         if (examRecord && examRecord.updated_at) {
             const examSummary = workflow().examSummaryFromRecord(examRecord);
-            const postedResult = postedExamResultMeta(examSummary, approvalRecord && approvalRecord.special_endorsement, sectorSelected, application && application.sector_classification);
+            const postedResult = postedExamResultMeta(examSummary, specialConsideration === true, sectorSelected, application && application.sector_classification);
             const scoresVisible = applicantExamScoresVisible();
             const rankLabel = examRank !== null && typeof examRank !== "undefined" ? ("RANK " + String(examRank)) : "";
             events.push({
@@ -1016,14 +1036,14 @@
         setChip("dashboardNextStepChip", nextChipLabel, nextChipClass);
     }
 
-    function renderStatusOverview(application, approvalRecord, intakePolicy, examRecord, specialConsideration, examRank) {
+    function renderStatusOverview(application, approvalRecord, intakePolicy, examRecord, interviewRecord, specialConsideration, examRank) {
         const metaText = byId("dashboardStatusMetaText");
         const grantValue = byId("dashboardGrantValue");
         const submittedValue = byId("dashboardSubmittedOnValue");
         const submittedAt = application && application.submitted_at ? formatDateOnly(application.submitted_at) : "";
         const updatedAt = application ? formatDateOnly(application.updated_at || application.created_at || application.submitted_at) : "";
 
-        renderCards(application, examRecord || null, null, approvalRecord, intakePolicy, specialConsideration, examRank);
+        renderCards(application, examRecord || null, interviewRecord || null, approvalRecord, intakePolicy, specialConsideration, examRank);
 
         if (!application) {
             if (metaText) {
@@ -1117,27 +1137,614 @@
         }
     }
 
-    async function loadLatestApplication(context) {
+    function latestApplicationFromList(applications) {
+        return Array.isArray(applications) && applications.length ? applications[0] : null;
+    }
+
+    function applicationOptionLabel(application) {
+        if (!application) {
+            return "No application";
+        }
+
+        return (application.application_no || "").toString().trim() || "Application Record";
+    }
+
+    function renderApplicationSelector(applications, selectedId) {
+        const select = byId("dashboardApplicationSelect");
+        if (!select) {
+            return;
+        }
+
+        const rows = Array.isArray(applications) ? applications : [];
+        if (!rows.length) {
+            select.innerHTML = '<option value="">No applications yet</option>';
+            select.disabled = true;
+            return;
+        }
+
+        select.innerHTML = rows.map(function (application) {
+            const label = applicationOptionLabel(application);
+            return '<option value="' + escapeHtml(application.id) + '">' + escapeHtml(label) + "</option>";
+        }).join("");
+
+        const targetId = rows.some(function (application) { return application.id === selectedId; })
+            ? selectedId
+            : rows[0].id;
+
+        select.value = targetId;
+        select.disabled = false;
+    }
+
+    function renderApplicationSelectorMeta(application, applications) {
+        const help = byId("dashboardApplicationSelectHelp");
+        if (!help) {
+            return;
+        }
+
+        const total = Array.isArray(applications) ? applications.length : 0;
+        if (!application) {
+            help.textContent = total
+                ? "Choose one of your application records to load its dashboard details."
+                : "No application record yet. Start a new application to begin.";
+            return;
+        }
+
+        help.textContent = total > 1
+            ? ("Showing the selected application details. " + total + " records available.")
+            : "Showing the selected application details.";
+    }
+
+    function setApplicationSelectorBusy(isBusy) {
+        const select = byId("dashboardApplicationSelect");
+        if (!select) {
+            return;
+        }
+
+        const hasUsableOption = Array.from(select.options).some(function (option) {
+            return !!(option && option.value);
+        });
+
+        select.disabled = !!isBusy || !hasUsableOption;
+        if (isBusy) {
+            select.setAttribute("aria-busy", "true");
+        } else {
+            select.removeAttribute("aria-busy");
+        }
+    }
+
+    function shortDateLabel(value) {
+        if (!value) {
+            return "-";
+        }
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) {
+            return "-";
+        }
+        return parsed.toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "short",
+            day: "numeric"
+        });
+    }
+
+    function truncateText(value, maxLength) {
+        const text = (value || "").toString().trim();
+        const limit = Number(maxLength) > 0 ? Number(maxLength) : 120;
+        if (!text || text.length <= limit) {
+            return text;
+        }
+        return text.slice(0, limit - 3).trim() + "...";
+    }
+
+    function buildInitials(label) {
+        const words = (label || "")
+            .toString()
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+
+        if (!words.length) {
+            return "AP";
+        }
+
+        return words
+            .slice(0, 2)
+            .map(function (word) { return word.charAt(0).toUpperCase(); })
+            .join("");
+    }
+
+    function effectiveApplicantStatus(application, approvalRecord, specialConsideration) {
+        if (!application) {
+            return "";
+        }
+        const sectorSelected = isSectorSelectedApplication(application, approvalRecord);
+        return maskedApplicantStatusValue(application.status, specialConsideration, sectorSelected);
+    }
+
+    function reviewStarted(application, examRecord, interviewRecord, approvalRecord) {
+        if (!application) {
+            return false;
+        }
+        const normalized = workflow().normalizeStatus(application.status);
+        return (
+            [
+                "pending_exam",
+                "exam_scheduled",
+                "exam_completed",
+                "passed_exam",
+                "failed_exam",
+                "selected",
+                "for_interview",
+                "interview_scheduled",
+                "interview_completed",
+                "hard_copy_verified",
+                "for_approval",
+                "approved",
+                "waitlisted",
+                "rejected",
+                "for_release",
+                "released",
+                "special_endorsement_review"
+            ].indexOf(normalized) !== -1
+        ) || !!examRecord || !!interviewRecord || !!approvalRecord;
+    }
+
+    function latestDocumentTimestamp(documents) {
+        const rows = Array.isArray(documents) ? documents : [];
+        if (!rows.length) {
+            return "";
+        }
+
+        return rows.reduce(function (latest, row) {
+            const current = row && row.created_at ? row.created_at : "";
+            if (!latest) {
+                return current;
+            }
+            return new Date(current).getTime() > new Date(latest).getTime() ? current : latest;
+        }, "");
+    }
+
+    function requirementsSummaryMeta(documents) {
+        const latest = latestDocByType(documents || []);
+        const total = DOC_ORDER.length;
+        const uploadedCount = DOC_ORDER.filter(function (docType) {
+            return !!latest[docType];
+        }).length;
+        const verifiedCount = DOC_ORDER.filter(function (docType) {
+            return latest[docType] && latest[docType].verification_status === "verified";
+        }).length;
+
+        let label = "Pending";
+        let chipClass = "ldss-chip-neutral";
+        let value = "Not started";
+        let help = "Upload the required documents to complete your application.";
+
+        if (uploadedCount > 0 && uploadedCount < total) {
+            label = "Incomplete";
+            chipClass = "ldss-chip-accent";
+            value = uploadedCount + " of " + total + " uploaded";
+            help = uploadedCount + " requirement(s) uploaded so far.";
+        } else if (uploadedCount === total && total > 0) {
+            label = verifiedCount === total ? "Verified" : "Complete";
+            chipClass = verifiedCount === total ? "ldss-chip-success" : "ldss-chip-info";
+            value = "Complete";
+            help = verifiedCount === total
+                ? "All visible requirements are already verified."
+                : "All visible requirements are uploaded.";
+        }
+
+        return {
+            total: total,
+            uploadedCount: uploadedCount,
+            verifiedCount: verifiedCount,
+            label: label,
+            chipClass: chipClass,
+            value: value,
+            help: help
+        };
+    }
+
+    function renderDashboardHero(profile, fallbackEmail, application, approvalRecord, specialConsideration) {
+        const displayName = formatProfileName(profile) || (fallbackEmail || "").toString().trim() || "Applicant";
+        const effectiveStatus = effectiveApplicantStatus(application, approvalRecord, specialConsideration);
+        const appMeta = effectiveStatus ? statusMeta(effectiveStatus) : null;
+
+        setText("dashboardHeroWelcomeName", displayName);
+        setText("dashboardProfileInitials", buildInitials(displayName));
+        setText(
+            "dashboardHeroApplicationNo",
+            application && application.application_no
+                ? ("Application ID: " + application.application_no)
+                : "Application ID: -"
+        );
+
+        if (application && application.submitted_at) {
+            setText("dashboardHeroSubmittedText", "Submitted on " + formatDateTime(application.submitted_at));
+        } else if (application && application.updated_at) {
+            setText("dashboardHeroSubmittedText", "Draft updated on " + formatDateTime(application.updated_at));
+        } else {
+            setText("dashboardHeroSubmittedText", "No submitted record yet.");
+        }
+
+        setChip(
+            "dashboardHeroStatusChip",
+            appMeta ? appMeta.label : "No Application",
+            appMeta ? appMeta.chipClass : "ldss-chip-neutral"
+        );
+        setChip(
+            "dashboardHeroProgressChip",
+            application ? formatScholarshipType(application.scholarship_type) : "No Grant Yet",
+            application ? "ldss-chip-info" : "ldss-chip-neutral"
+        );
+    }
+
+    function renderDashboardOverviewCards(application, documents, notificationsData, examRecord, examBatch, approvalRecord, intakePolicy, specialConsideration, examRank) {
+        const effectiveStatus = effectiveApplicantStatus(application, approvalRecord, specialConsideration);
+        const appMeta = effectiveStatus ? statusMeta(effectiveStatus) : null;
+        const requirementsMeta = requirementsSummaryMeta(documents);
+        const unreadCount = notificationsData && typeof notificationsData.unreadCount === "number"
+            ? notificationsData.unreadCount
+            : 0;
+        const notificationRows = notificationsData && Array.isArray(notificationsData.rows)
+            ? notificationsData.rows
+            : [];
+        const nextStep = application
+            ? workflow().nextStepForApplicant(effectiveStatus)
+            : ((intakePolicy && !intakePolicy.isOpen)
+                ? intakeClosedMessage(intakePolicy)
+                : "Create your scholarship application to begin the process.");
+
+        setText("dashboardApplicationStatusValue", appMeta ? appMeta.label : "No Application");
+        setChip(
+            "dashboardApplicationStatusChip",
+            application ? formatScholarshipType(application.scholarship_type) : "Ready to Apply",
+            appMeta ? appMeta.chipClass : "ldss-chip-neutral"
+        );
+        setText("dashboardApplicationStatusHelp", nextStep);
+
+        if (!application) {
+            setText("dashboardRequirementsValue", "No application yet");
+            setChip("dashboardRequirementsChip", "Pending", "ldss-chip-neutral");
+            setText("dashboardRequirementsHelp", "Create an application first before uploading requirements.");
+        } else {
+            setText("dashboardRequirementsValue", requirementsMeta.value);
+            setChip("dashboardRequirementsChip", requirementsMeta.label, requirementsMeta.chipClass);
+            setText("dashboardRequirementsHelp", requirementsMeta.help);
+        }
+
+        const examSummary = workflow().examSummaryFromRecord(examRecord);
+        const postedResult = postedExamResultMeta(
+            examSummary,
+            specialConsideration === true,
+            isSectorSelectedApplication(application, approvalRecord),
+            application && application.sector_classification
+        );
+        const examScheduleAt = (examRecord && examRecord.scheduled_at) || (examBatch && examBatch.exam_datetime) || "";
+        const examScheduleValue = examScheduleAt ? shortDateLabel(examScheduleAt) : "Not yet available";
+        const examScheduleHelp = examBatch && examBatch.venue
+            ? examBatch.venue
+            : (application ? "Pending official schedule posting." : "Waiting for your application to be submitted.");
+        let examChipLabel = examScheduleAt ? "Scheduled" : "Pending";
+        let examChipClass = examScheduleAt ? "ldss-chip-accent" : "ldss-chip-neutral";
+
+        if (postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected") {
+            examChipLabel = postedResult.chipLabel;
+            examChipClass = postedResult.chipClass;
+        }
+
+        setText("dashboardExamScheduleValue", examScheduleValue);
+        setChip("dashboardExamScheduleChip", examChipLabel, examChipClass);
+        setText("dashboardExamScheduleHelp", examScheduleHelp);
+
+        setText("dashboardNotificationsValue", String(unreadCount));
+        setChip(
+            "dashboardNotificationsChip",
+            unreadCount > 0 ? "Unread" : "No New",
+            unreadCount > 0 ? "ldss-chip-accent" : "ldss-chip-neutral"
+        );
+        setText(
+            "dashboardNotificationsHelp",
+            notificationRows.length
+                ? truncateText(notificationRows[0].title || notificationRows[0].message || "Latest notification received.", 72)
+                : "No notifications yet from the scholarship office."
+        );
+    }
+
+    function buildDashboardProgressSteps(user, profile, application, auxMetaState, documents, examRecord, interviewRecord, approvalRecord) {
+        const payload = auxMetaState && auxMetaState.available && auxMetaState.payload
+            ? auxMetaState.payload
+            : {};
+        const requirementsMeta = requirementsSummaryMeta(documents);
+        const personalComplete = !!(
+            profile
+            && hasValue(profile.first_name)
+            && hasValue(profile.last_name)
+            && hasValue(profile.sex)
+            && hasValue(profile.barangay)
+            && hasValue(profile.address)
+            && hasValue(profile.mobile_number)
+        );
+        const familyComplete = !!(
+            hasValue(payload.fatherStatus)
+            && hasValue(payload.motherStatus)
+            && hasValue(payload.totalParentsGrossIncome)
+        );
+        const educationComplete = !!(
+            hasValue(payload.highestEducationAttainment)
+            && hasValue(payload.highestGradeYearLevel)
+            && hasValue(payload.schoolType)
+            && hasValue(payload.degreeProgramCourse)
+        );
+        const submitted = !!(application && application.submitted_at);
+        const officeReview = reviewStarted(application, examRecord, interviewRecord, approvalRecord);
+        const officeReviewDate = approvalRecord && (approvalRecord.decided_at || approvalRecord.updated_at)
+            ? (approvalRecord.decided_at || approvalRecord.updated_at)
+            : interviewRecord && (interviewRecord.updated_at || interviewRecord.scheduled_at)
+                ? (interviewRecord.updated_at || interviewRecord.scheduled_at)
+                : examRecord && (examRecord.updated_at || examRecord.scheduled_at)
+                    ? (examRecord.updated_at || examRecord.scheduled_at)
+                    : (application && application.updated_at ? application.updated_at : "");
+
+        const rawSteps = [
+            {
+                label: "Account Created",
+                complete: !!(user && user.created_at),
+                meta: user && user.created_at ? shortDateLabel(user.created_at) : "Create account"
+            },
+            {
+                label: "Personal Information",
+                complete: personalComplete,
+                meta: personalComplete
+                    ? shortDateLabel((profile && profile.updated_at) || (application && application.created_at) || (user && user.created_at))
+                    : "Complete your profile"
+            },
+            {
+                label: "Family Background",
+                complete: familyComplete,
+                meta: familyComplete
+                    ? shortDateLabel((application && application.updated_at) || (profile && profile.updated_at) || "")
+                    : "Add family details"
+            },
+            {
+                label: "Educational Background",
+                complete: educationComplete,
+                meta: educationComplete
+                    ? shortDateLabel((application && application.updated_at) || (profile && profile.updated_at) || "")
+                    : "Add education details"
+            },
+            {
+                label: "Requirements Uploaded",
+                complete: requirementsMeta.uploadedCount === requirementsMeta.total && requirementsMeta.total > 0,
+                meta: requirementsMeta.uploadedCount
+                    ? (requirementsMeta.uploadedCount + " of " + requirementsMeta.total + " uploaded")
+                    : "Upload requirements"
+            },
+            {
+                label: "Submitted",
+                complete: submitted,
+                meta: submitted
+                    ? shortDateLabel(application.submitted_at)
+                    : (application ? "Submit your application" : "Create application")
+            },
+            {
+                label: "Office Review",
+                complete: officeReview,
+                meta: officeReview
+                    ? shortDateLabel(officeReviewDate)
+                    : "Waiting for review"
+            }
+        ];
+
+        let activeAssigned = false;
+        return rawSteps.map(function (step) {
+            if (step.complete) {
+                return Object.assign({ state: "complete" }, step);
+            }
+            if (!activeAssigned) {
+                activeAssigned = true;
+                return Object.assign({ state: "active" }, step);
+            }
+            return Object.assign({ state: "pending" }, step);
+        });
+    }
+
+    function renderDashboardProgress(steps) {
+        const wrapper = byId("dashboardProgressList");
+        if (!wrapper) {
+            return;
+        }
+
+        if (!steps || !steps.length) {
+            wrapper.innerHTML = '<div class="ldss-dashboard-empty">No application progress to show yet.</div>';
+            return;
+        }
+
+        wrapper.innerHTML = '<div class="ldss-dashboard-progress-track">' + steps.map(function (step, index) {
+            const nodeLabel = step.state === "complete" ? "&#10003;" : String(index + 1);
+            return (
+                '<div class="ldss-dashboard-progress-step is-' + escapeHtml(step.state) + '">' +
+                '<div class="ldss-dashboard-progress-node">' + nodeLabel + '</div>' +
+                '<div class="ldss-dashboard-progress-title">' + escapeHtml(step.label) + "</div>" +
+                '<div class="ldss-dashboard-progress-meta">' + escapeHtml(step.meta) + "</div>" +
+                "</div>"
+            );
+        }).join("") + "</div>";
+    }
+
+    function renderDashboardAnnouncements(rows, unreadCount) {
+        const wrapper = byId("dashboardAnnouncementsList");
+        const countChip = byId("dashboardAnnouncementsCount");
+        if (!wrapper) {
+            return;
+        }
+
+        if (countChip) {
+            countChip.className = "ldss-chip " + (unreadCount > 0 ? "ldss-chip-accent" : "ldss-chip-neutral");
+            countChip.textContent = unreadCount > 0 ? (String(unreadCount) + " Unread") : "0 Unread";
+        }
+
+        if (!rows || !rows.length) {
+            wrapper.innerHTML = '<div class="ldss-dashboard-empty">No announcements yet from the scholarship office.</div>';
+            return;
+        }
+
+        wrapper.innerHTML = rows.map(function (row) {
+            const link = resolveNotificationLink(row);
+            const title = notificationSummaryLabel(row);
+            const message = truncateText(row.message || "Open your notification center to view the full update.", 90);
+            return (
+                '<a class="ldss-dashboard-list-item" href="' + escapeHtml(link) + '">' +
+                '<div class="ldss-dashboard-list-title">' + escapeHtml(title) + "</div>" +
+                '<div class="ldss-dashboard-list-copy">' + escapeHtml(message) + "</div>" +
+                '<div class="ldss-dashboard-list-meta">' + escapeHtml(formatDateTime(row.created_at)) + "</div>" +
+                "</a>"
+            );
+        }).join("");
+    }
+
+    function renderDashboardRequirementCard(documents, application) {
+        const meta = requirementsSummaryMeta(documents);
+        const countChip = byId("dashboardRequirementSummaryCount");
+        const link = byId("dashboardRequirementSummaryLink");
+
+        renderRequirementSummary(documents);
+
+        if (countChip) {
+            countChip.className = "ldss-chip " + meta.chipClass;
+            countChip.textContent = meta.uploadedCount + " of " + meta.total;
+        }
+
+        if (link) {
+            if (application && application.id) {
+                link.href = "application-detail.html?id=" + encodeURIComponent(application.id);
+                link.textContent = "View Application";
+            } else {
+                link.href = "applicant-applications.html";
+                link.textContent = "Open Application";
+            }
+        }
+    }
+
+    function renderDashboardSchedule(application, examRecord, examBatch, approvalRecord, specialConsideration) {
+        const examSummary = workflow().examSummaryFromRecord(examRecord);
+        const effectiveStatus = effectiveApplicantStatus(application, approvalRecord, specialConsideration);
+        const nextStep = application
+            ? workflow().nextStepForApplicant(effectiveStatus)
+            : "Create or submit your application first.";
+        const examScheduleAt = (examRecord && examRecord.scheduled_at) || (examBatch && examBatch.exam_datetime) || "";
+        const postedResult = postedExamResultMeta(
+            examSummary,
+            specialConsideration === true,
+            isSectorSelectedApplication(application, approvalRecord),
+            application && application.sector_classification
+        );
+
+        if (!application) {
+            setChip("dashboardScheduleChip", "Pending", "ldss-chip-neutral");
+            setText("dashboardScheduleHeadline", "Not yet available");
+            setText("dashboardScheduleMeta", "Please wait until your application is created and submitted.");
+            setText("dashboardExamBatchValue", "-");
+            setText("dashboardExamRoomValue", "-");
+            setText("dashboardExamSeatValue", "-");
+            setText("dashboardExamControlValue", "-");
+            setText("dashboardScheduleNextStep", nextStep);
+            return;
+        }
+
+        setChip(
+            "dashboardScheduleChip",
+            postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected"
+                ? postedResult.chipLabel
+                : (examScheduleAt ? "Scheduled" : "Pending"),
+            postedResult.result === "passed" || postedResult.result === "failed" || postedResult.result === "selected"
+                ? postedResult.chipClass
+                : (examScheduleAt ? "ldss-chip-accent" : "ldss-chip-neutral")
+        );
+        setText("dashboardScheduleHeadline", examScheduleAt ? formatDateTime(examScheduleAt) : "Not yet available");
+        setText(
+            "dashboardScheduleMeta",
+            examBatch && examBatch.venue
+                ? examBatch.venue
+                : (examScheduleAt ? "Exam schedule posted." : "Please wait for the official exam schedule and room posting.")
+        );
+        setText("dashboardExamBatchValue", examBatch && examBatch.batch_label ? examBatch.batch_label : "-");
+        setText("dashboardExamRoomValue", examSummary.roomLabel || "-");
+        setText("dashboardExamSeatValue", examSummary.seatNo || "-");
+        setText("dashboardExamControlValue", examSummary.controlNo || "-");
+        setText("dashboardScheduleNextStep", nextStep);
+    }
+
+    function dashboardBannerMeta(application, intakePolicy, completionReminder) {
+        if (completionReminder) {
+            return {
+                message: completionReminder.bannerHtml,
+                type: "alert-warning",
+                isHtml: true
+            };
+        }
+
+        if (!application) {
+            if (intakePolicy && !intakePolicy.isOpen) {
+                return {
+                    message: intakeClosedMessage(intakePolicy),
+                    type: "alert-warning",
+                    isHtml: false
+                };
+            }
+            return {
+                message: "You can start a new scholarship application from this dashboard when you are ready.",
+                type: "alert-info",
+                isHtml: false
+            };
+        }
+
+        if (application.submitted_at) {
+            return {
+                message: "Your application was successfully submitted. Please wait for further updates from the scholarship office.",
+                type: "alert-success",
+                isHtml: false
+            };
+        }
+
+        if (workflow().normalizeStatus(application.status) === "returned_for_correction") {
+            return {
+                message: "Your application needs correction. Open your application record and complete the required updates.",
+                type: "alert-warning",
+                isHtml: false
+            };
+        }
+
+        return {
+            message: "Your draft is saved. Continue your application and submit it when all details are complete.",
+            type: "alert-info",
+            isHtml: false
+        };
+    }
+
+    async function loadApplicantApplications(context) {
         let result = await context.client
             .from("applications")
-            .select("id, application_no, scholarship_type, status, submitted_at, created_at, updated_at, sector_classification")
+            .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at, sector_classification")
             .eq("applicant_id", context.user.id)
-            .order("created_at", { ascending: false })
-            .limit(1);
+            .order("created_at", { ascending: false });
 
         if (result.error && isMissingApplicationsColumnError(result.error, "sector_classification")) {
             result = await context.client
                 .from("applications")
-                .select("id, application_no, scholarship_type, status, submitted_at, created_at, updated_at")
+                .select("id, application_no, scholarship_type, school_year, status, submitted_at, created_at, updated_at")
                 .eq("applicant_id", context.user.id)
-                .order("created_at", { ascending: false })
-                .limit(1);
+                .order("created_at", { ascending: false });
         }
 
-        if (result.error || !result.data || result.data.length === 0) {
-            return null;
+        if (result.error || !Array.isArray(result.data)) {
+            return [];
         }
-        return result.data[0];
+        return result.data;
+    }
+
+    async function loadLatestApplication(context) {
+        const applications = await loadApplicantApplications(context);
+        return latestApplicationFromList(applications);
     }
 
     async function loadLatestEditableDraft(context, schoolYear) {
@@ -1236,7 +1843,7 @@
     async function loadProfileSummary(context) {
         const result = await context.client
             .from("profiles")
-            .select("first_name, middle_name, last_name, email, sex, address, barangay")
+            .select("first_name, middle_name, last_name, email, sex, civil_status, date_of_birth, mobile_number, address, barangay, school_name, course_or_strand, year_level, guardian_name, guardian_occupation, monthly_income, created_at, updated_at")
             .eq("id", context.user.id)
             .single();
 
@@ -1268,15 +1875,51 @@
         };
     }
 
+    async function loadApplicationDocuments(context, applicationId) {
+        if (!context || !context.client || !applicationId) {
+            return [];
+        }
+
+        const result = await context.client
+            .from("application_documents")
+            .select("document_type, verification_status, created_at")
+            .eq("application_id", applicationId)
+            .order("created_at", { ascending: false });
+
+        if (result.error || !Array.isArray(result.data)) {
+            return [];
+        }
+
+        return result.data;
+    }
+
+    function hasMissingExamAssignmentColumns(error) {
+        return !!(error && /room_label|room_seat_no/i.test(error.message || ""));
+    }
+
     async function loadExamRecord(context, applicationId, applicationStatus, specialConsideration) {
         const examResult = await context.client
             .from("exam_records")
-            .select("application_id, exam_control_no, raw_score, percentage_score, result, status, updated_at")
+            .select("application_id, batch_id, exam_control_no, scheduled_at, raw_score, percentage_score, result, status, room_label, room_seat_no, updated_at")
             .eq("application_id", applicationId)
             .maybeSingle();
 
         if (!examResult.error) {
             return examResult.data || null;
+        }
+
+        if (hasMissingExamAssignmentColumns(examResult.error)) {
+            const fallbackAssignments = await context.client
+                .from("exam_records")
+                .select("application_id, batch_id, exam_control_no, scheduled_at, raw_score, percentage_score, result, status, updated_at")
+                .eq("application_id", applicationId)
+                .maybeSingle();
+
+            if (!fallbackAssignments.error) {
+                return fallbackAssignments.data
+                    ? Object.assign({ room_label: "", room_seat_no: null }, fallbackAssignments.data)
+                    : null;
+            }
         }
 
         // TODO(Supabase): remove fallback once exam_records is deployed in production.
@@ -1300,13 +1943,35 @@
 
         return {
             application_id: applicationId,
+            batch_id: null,
             exam_control_no: null,
+            scheduled_at: null,
             raw_score: fallback.data.exam_score,
             percentage_score: fallback.data.exam_score,
+            room_label: "",
+            room_seat_no: null,
             result: inferredResult,
             status: "encoded",
             updated_at: fallback.data.updated_at || null
         };
+    }
+
+    async function loadExamBatchSummary(context, batchId) {
+        if (!context || !context.client || !batchId) {
+            return null;
+        }
+
+        const result = await context.client
+            .from("exam_batches")
+            .select("id, batch_label, exam_datetime, venue")
+            .eq("id", batchId)
+            .maybeSingle();
+
+        if (result.error) {
+            return null;
+        }
+
+        return result.data || null;
     }
 
     async function loadInterviewRecord(context, applicationId) {
@@ -1430,6 +2095,193 @@
         }
     }
 
+    function emptyDashboardApplicationBundle() {
+        return {
+            selectedApplication: null,
+            approvalRecord: null,
+            examRecord: null,
+            examBatch: null,
+            interviewRecord: null,
+            applicationAuxMeta: { available: false, payload: null },
+            documents: [],
+            specialConsideration: false,
+            examRank: null,
+            completionReminder: null
+        };
+    }
+
+    async function loadSelectedApplicationBundle(context, profileSummary, latestApplication, application) {
+        if (!application || !application.id) {
+            return emptyDashboardApplicationBundle();
+        }
+
+        const applicationId = application.id;
+        const initialResults = await Promise.all([
+            loadSpecialConsiderationFlag(context, applicationId),
+            loadSectorSelectionFlag(context, applicationId),
+            loadExamRank(context, applicationId)
+        ]);
+
+        const specialConsiderationFlag = initialResults[0];
+        const sectorSelectionFlag = initialResults[1];
+        const examRank = initialResults[2];
+        const recordResults = await Promise.all([
+            loadExamRecord(context, applicationId, application.status, specialConsiderationFlag),
+            loadApprovalRecord(context, applicationId),
+            loadInterviewRecord(context, applicationId),
+            loadLatestApplicationAuxMeta(context, applicationId),
+            loadApplicationDocuments(context, applicationId)
+        ]);
+
+        const examRecord = recordResults[0];
+        const approvalRecord = recordResults[1];
+        const interviewRecord = recordResults[2];
+        const applicationAuxMeta = recordResults[3];
+        const documents = recordResults[4];
+        const examBatch = examRecord && examRecord.batch_id
+            ? await loadExamBatchSummary(context, examRecord.batch_id)
+            : null;
+        const specialConsideration = Boolean(
+            specialConsiderationFlag
+            || (approvalRecord && approvalRecord.special_endorsement)
+            || workflow().normalizeStatus(application.status) === "special_endorsement_review"
+        );
+        const selectedApplication = Object.assign({}, application, { sector_selected: sectorSelectionFlag });
+        const completionReminder = latestApplication && latestApplication.id === applicationId
+            ? buildCompletionReminder(profileSummary, application, applicationAuxMeta)
+            : null;
+
+        return {
+            selectedApplication: selectedApplication,
+            approvalRecord: approvalRecord,
+            examRecord: examRecord,
+            examBatch: examBatch,
+            interviewRecord: interviewRecord,
+            applicationAuxMeta: applicationAuxMeta,
+            documents: documents,
+            specialConsideration: specialConsideration,
+            examRank: examRank,
+            completionReminder: completionReminder
+        };
+    }
+
+    function applyDashboardSelection(state, bundle) {
+        const currentBundle = bundle || emptyDashboardApplicationBundle();
+        const selectedApplication = currentBundle.selectedApplication;
+        const progressSteps = buildDashboardProgressSteps(
+            state.user,
+            state.profileSummary,
+            selectedApplication,
+            currentBundle.applicationAuxMeta,
+            currentBundle.documents,
+            currentBundle.examRecord,
+            currentBundle.interviewRecord,
+            currentBundle.approvalRecord
+        );
+        const bannerMeta = dashboardBannerMeta(selectedApplication, state.intakePolicy, currentBundle.completionReminder);
+
+        renderApplicationSelector(state.applications, selectedApplication ? selectedApplication.id : "");
+        renderApplicationSelectorMeta(selectedApplication, state.applications);
+        renderDashboardHero(
+            state.profileSummary,
+            state.user.email,
+            selectedApplication,
+            currentBundle.approvalRecord,
+            currentBundle.specialConsideration
+        );
+        renderDashboardOverviewCards(
+            selectedApplication,
+            currentBundle.documents,
+            state.notificationsData,
+            currentBundle.examRecord,
+            currentBundle.examBatch,
+            currentBundle.approvalRecord,
+            state.intakePolicy,
+            currentBundle.specialConsideration,
+            currentBundle.examRank
+        );
+        renderDashboardProgress(progressSteps);
+        renderDashboardRequirementCard(currentBundle.documents, selectedApplication);
+        renderDashboardAnnouncements(state.notificationsData.rows, state.notificationsData.unreadCount || 0);
+        renderDashboardSchedule(
+            selectedApplication,
+            currentBundle.examRecord,
+            currentBundle.examBatch,
+            currentBundle.approvalRecord,
+            currentBundle.specialConsideration
+        );
+        renderNotificationDropdown(state.notificationsData.rows, state.notificationsData.unreadCount || 0);
+        showStatus(bannerMeta.message, bannerMeta.type, bannerMeta.isHtml);
+    }
+
+    async function loadAndRenderDashboardSelection(applicationId, options) {
+        if (!dashboardRuntime || !dashboardRuntime.context) {
+            return;
+        }
+
+        const settings = options || {};
+        const selectedApplication = dashboardRuntime.applications.find(function (application) {
+            return application && application.id === applicationId;
+        }) || latestApplicationFromList(dashboardRuntime.applications) || null;
+        const cacheKey = selectedApplication && selectedApplication.id ? selectedApplication.id : "__none__";
+        const requestId = ++dashboardSelectionRequestId;
+
+        dashboardRuntime.selectedApplicationId = selectedApplication ? selectedApplication.id : "";
+        renderApplicationSelector(dashboardRuntime.applications, dashboardRuntime.selectedApplicationId);
+        renderApplicationSelectorMeta(selectedApplication, dashboardRuntime.applications);
+        setApplicationSelectorBusy(true);
+
+        try {
+            if (!dashboardRuntime.bundleCache[cacheKey]) {
+                dashboardRuntime.bundleCache[cacheKey] = await loadSelectedApplicationBundle(
+                    dashboardRuntime.context,
+                    dashboardRuntime.profileSummary,
+                    dashboardRuntime.latestApplication,
+                    selectedApplication
+                );
+            }
+
+            if (requestId !== dashboardSelectionRequestId) {
+                return;
+            }
+
+            const bundle = dashboardRuntime.bundleCache[cacheKey];
+            dashboardRuntime.selectedApplicationId = bundle.selectedApplication ? bundle.selectedApplication.id : "";
+            applyDashboardSelection(dashboardRuntime, bundle);
+
+            if (settings.manageReminderModal) {
+                if (bundle.completionReminder) {
+                    if (shouldShowProfileReminderModal(dashboardRuntime.user.id, bundle.completionReminder)) {
+                        showProfileReminderModal(dashboardRuntime.user.id, bundle.completionReminder);
+                    }
+                } else if (selectedApplication && dashboardRuntime.latestApplication && selectedApplication.id === dashboardRuntime.latestApplication.id) {
+                    clearProfileReminderDismissed(dashboardRuntime.user.id);
+                }
+            }
+        } catch (_error) {
+            if (requestId !== dashboardSelectionRequestId) {
+                return;
+            }
+            showStatus("Failed to load the selected application. Please try again.", "alert-warning");
+        } finally {
+            if (requestId === dashboardSelectionRequestId) {
+                setApplicationSelectorBusy(false);
+            }
+        }
+    }
+
+    function bindDashboardApplicationSelector() {
+        const select = byId("dashboardApplicationSelect");
+        if (!select || select.dataset.ldssBound === "true") {
+            return;
+        }
+
+        select.dataset.ldssBound = "true";
+        select.addEventListener("change", function () {
+            loadAndRenderDashboardSelection(select.value, { manageReminderModal: false });
+        });
+    }
+
     function renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy) {
         const intakeIsClosed = !!(intakePolicy && !intakePolicy.isOpen);
         const intakeHint = intakeClosedMessage(intakePolicy);
@@ -1542,62 +2394,53 @@
         showStatus("");
 
         try {
+            const notificationsPromise = loadNotifications(context);
             const headResults = await Promise.all([
                 loadProfileSummary(context),
-                loadLatestApplication(context),
+                loadApplicantApplications(context),
                 loadIntakePolicy(context),
                 loadActiveSchoolYear(context)
             ]);
 
             const profileSummary = headResults[0];
-            const latestApplication = headResults[1];
+            const applications = headResults[1];
             const intakePolicy = headResults[2];
             const activeSchoolYear = headResults[3];
+            const latestApplication = latestApplicationFromList(applications);
             const actionResults = await Promise.all([
                 loadLatestEditableDraft(context, activeSchoolYear),
                 loadLatestBlockingApplication(context, activeSchoolYear)
             ]);
             const latestDraft = actionResults[0];
             const latestBlockingApplication = actionResults[1];
-            const latestSpecialConsiderationFlag = latestApplication
-                ? await loadSpecialConsiderationFlag(context, latestApplication.id)
-                : false;
-            const latestSectorSelectionFlag = latestApplication
-                ? await loadSectorSelectionFlag(context, latestApplication.id)
-                : false;
-            const latestExamRank = latestApplication
-                ? await loadExamRank(context, latestApplication.id)
-                : null;
-            const latestExamRecord = latestApplication
-                ? await loadExamRecord(context, latestApplication.id, latestApplication.status, latestSpecialConsiderationFlag)
-                : null;
-            const latestApprovalRecord = latestApplication
-                ? await loadApprovalRecord(context, latestApplication.id)
-                : null;
-            const latestSpecialConsideration = Boolean(
-                latestSpecialConsiderationFlag
-                || (latestApprovalRecord && latestApprovalRecord.special_endorsement)
-                || (workflow().normalizeStatus(latestApplication.status) === "special_endorsement_review")
-            );
-            const latestSelectedApplication = latestApplication
-                ? Object.assign({}, latestApplication, { sector_selected: latestSectorSelectionFlag })
-                : null;
-            const latestApplicationAuxMeta = latestApplication
-                ? await loadLatestApplicationAuxMeta(context, latestApplication.id)
-                : { available: false, payload: null };
-            const completionReminder = buildCompletionReminder(profileSummary, latestApplication, latestApplicationAuxMeta);
+            const notificationsData = await notificationsPromise;
 
             renderProfileHeader(profileSummary, context.user.email);
-            renderStatusOverview(latestSelectedApplication, latestApprovalRecord, intakePolicy, latestExamRecord, latestSpecialConsideration, latestExamRank);
             renderQuickActions(latestApplication, latestDraft, latestBlockingApplication, intakePolicy);
-            showStatus(completionReminder ? completionReminder.bannerHtml : "", "alert-warning", true);
-            if (completionReminder) {
-                if (shouldShowProfileReminderModal(context.user.id, completionReminder)) {
-                    showProfileReminderModal(context.user.id, completionReminder);
-                }
-            } else {
-                clearProfileReminderDismissed(context.user.id);
-            }
+            renderDashboardAnnouncements(notificationsData.rows, notificationsData.unreadCount || 0);
+            renderNotificationDropdown(notificationsData.rows, notificationsData.unreadCount || 0);
+            renderApplicationSelector(applications, latestApplication ? latestApplication.id : "");
+            renderApplicationSelectorMeta(latestApplication, applications);
+            bindDashboardApplicationSelector();
+
+            dashboardRuntime = {
+                context: context,
+                user: context.user,
+                profileSummary: profileSummary,
+                intakePolicy: intakePolicy,
+                activeSchoolYear: activeSchoolYear,
+                applications: applications,
+                latestApplication: latestApplication,
+                latestDraft: latestDraft,
+                latestBlockingApplication: latestBlockingApplication,
+                notificationsData: notificationsData,
+                bundleCache: {}
+            };
+
+            await loadAndRenderDashboardSelection(
+                latestApplication ? latestApplication.id : "",
+                { manageReminderModal: true }
+            );
         } catch (error) {
             showStatus("Failed to load dashboard data. Please refresh.", "alert-warning");
         }

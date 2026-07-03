@@ -1,3 +1,14 @@
 node_modules/
 uploads/
 .env
+.DS_Store
+Thumbs.db
+snapshots/
+v42.zip
+v43.zip
+v44.zip
+V46.zip
+V47.zip
+V48.zip
+V50.zip
+v51.zip

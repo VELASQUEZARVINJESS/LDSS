@@ -2,6 +2,14 @@
 
 This project is deployable as a static frontend. Application data stays in Supabase, and new file uploads default to Supabase Storage so applicant submission still works on static hosting.
 
+## Current Auth Wiring
+- Shared login and forgot-password now accept `Email Address or Mobile Number` in the UI.
+- Email-based sign-in and recovery continue to work on fully static hosting.
+- Mobile-number sign-in and mobile-triggered password recovery now use the optional same-origin `server.js` auth helper route `POST /api/auth/resolve-login`.
+- The login `Remember me` option now controls Supabase session persistence across the whole frontend: checked uses `localStorage`, unchecked keeps the session in `sessionStorage` for the current tab only.
+- That mobile lookup helper requires `LDSS_SUPABASE_SERVICE_ROLE_KEY` on the Node host because anonymous browser requests cannot read `profiles.mobile_number` under Supabase RLS.
+- Next follow-up: if a deployment will stay frontend-only with no Node helper, add clearer pre-submit copy that email is the universal fallback login and recovery path whenever mobile lookup is unavailable.
+
 ## Main URLs
 - `https://daet-scholarship.gt.tc/` -> Login
 - `https://daet-scholarship.gt.tc/exam-room-lookup.html` -> Public exam room lookup
@@ -37,6 +45,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Workflow controls exam policy hotfix is in `supabase/workflow_controls_exam_policy_hotfix_2026_04_22.sql`.
 - Special consideration applicant visibility hotfix is in `supabase/special_consideration_applicant_visibility_hotfix_2026_05_05.sql`.
 - Sector-selection applicant visibility hotfix is in `supabase/current_user_application_sector_selection_flags_hotfix_2026_05_05.sql`.
+- Selection pool hotfix is in `supabase/selection_pool_hotfix_2026_06_30.sql`.
 - Intake date-time enforcement hotfix is in `supabase/application_intake_datetime_hotfix_2026_03_19.sql`.
 - Intake manual receive override hotfix is in `supabase/application_receive_override_hotfix_2026_03_22.sql`.
 - System Administrator audit logs hotfix is in `supabase/audit_logs_hotfix_2026_03_22.sql`.
@@ -48,6 +57,7 @@ This project is deployable as a static frontend. Application data stays in Supab
   - `js/supabase-applicant-application-form.js`
   - `js/supabase-applicant-dashboard.js`
   - `js/supabase-applicant-notifications.js`
+- Applicant Dashboard now uses a cleaner client-style layout in `APPLICANT/applicant-dashboard.html`, with a welcome/profile card, summary status cards, a live application-progress row, uploaded-requirements panel, announcements list, exam schedule card, and the existing reminder modal still wired to real applicant data in `js/supabase-applicant-dashboard.js`; the shell was also tightened and widened so it uses more of the desktop view without oversized card spacing, and the `Application Overview` card now includes a `Select Application` dropdown so applicants can switch between previous and current application records and reload the dashboard details for that chosen application.
 - Secretary live integrations now in:
   - `js/supabase-secretary-dashboard.js`
   - `js/supabase-secretary-applications.js`
@@ -55,8 +65,21 @@ This project is deployable as a static frontend. Application data stays in Supab
   - `js/supabase-secretary-exam-results.js`
   - `js/supabase-secretary-verification.js`
   - `js/supabase-secretary-interview.js`
+- Secretary sidebar now includes an `Interviews` group with `Scheduler`, `Initial Screening`, and `Final Interview`; the Initial Screening page cross-matches `Selection Pool`, saved hard-copy `Requirements`, and screening attendance before the office moves applicants into final interview.
+- Secretary sidebar now uses a `Selection` dropdown with `All Passed`, `Scholar Selection`, and `Final Selection` inside it, and the `Final Selection` page is currently a clean manual-selection shell for the later final-list workflow.
+- Secretary sidebar now uses an `Exam Management` dropdown with `Room Assignment`, `Score Exam`, and `Ranking`, and the old sidebar label `Exam Management` now appears as `Score Exam` on the exam-score page link.
+- Secretary sidebar now keeps `Reports` pinned as the last secretary item, below the injected `Selection`, `Requirements`, and `Interviews` navigation.
 - Secretary ranking print now supports a score-range mode, so office staff can print only a slice like `69` to `66` instead of the full ranked list; the next natural follow-up would be preset buttons for common ranges if staff starts reusing them often.
 - Secretary Scholar Selection now supports a matching score-range filter in the final list view, names-only PDF, and masterlist print, so office staff can print only the score band they need.
+- Secretary Ranking now supports bulk `Include to Selection` and `Remove from Selection` actions for checked ranked applicants, saving the selection type plus remarks into `application_staff_flags`.
+- Secretary Selection now includes a dedicated `Selection Pool` page for the first saved shortlist, with `Add Manual Candidate` and a `Selection Source` filter for `Passed Exam`, `Sector Classification`, or `Manual Office Selection`, while `Scholar Selection` stays as the separate builder page.
+- Secretary Selection Pool now also supports direct `Print Report` and `Save PDF` export from the saved shortlist page, with a `Print Order` selector for `By Score` or `Alphabetical` before the office prints or downloads the Selection Pool report.
+- Secretary Selection Pool now shows the `LDSP` application number under each applicant name in the live table and in the print/PDF exports, replacing the old school-name subline for faster office scanning.
+- Secretary Ranking now uses the main scrollable table on mobile too, and the old examinee avatar/initial strip plus ranking photo hydration were removed to keep the page lighter and faster to respond.
+- Initial Screening now has direct `Mark Done`, `No Show`, and `Reset` actions on the shortlist page, and that stage is tracked in `application_staff_flags` through `supabase/initial_screening_tracking_hotfix_2026_06_30.sql` so it stays separate from the later Final Interview records.
+- Initial Screening now uses ranking-style checkbox selection plus bulk header actions, so staff can mark many shortlisted applicants at once instead of saving one row at a time.
+- Initial Screening now includes a dedicated top `Printing` panel beside the filters, with `Print Report` plus direct `Save PDF` actions for `No Requirements`, `Attended Initial Screening`, `No Show Initial Screening`, and `Pending Screening`; both the browser print sheet and PDF export now use long bond `8.5 x 13` sizing instead of legal.
+- Secretary Requirements now removes the side-card applicant avatar so that inspector stays cleaner and does not load extra photo preview work there.
 - Admin live integrations now in:
   - `js/supabase-admin-dashboard.js`
   - `js/supabase-admin-approval-queue.js`
@@ -78,8 +101,7 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Applicant legacy barangay cleanup now uses the dedicated `profiles.barangay` field, a dashboard reminder modal, and a direct `My Profile` barangay update path for older accounts with existing applications.
 - Applicant application form now skips the auto-open Data Privacy Notice modal when reopening an already submitted application; the notice is still enforced on submit when needed.
 - Applicant mobile handling now keeps the sidenav temporary-only on phones and tightens the top bar, page headers, action rows, cards, and pagination for smaller screens.
-- Applicant dashboard now keeps a simpler top summary layout without the `Recent Activity`, `Requirement Summary`, and `Application Timeline` section row.
-- Applicant dashboard quick actions now show only the `New Application` button in the overview bar.
+- Applicant dashboard now focuses the applicant on one cleaner workspace: progress tracking, uploaded requirements, notifications, exam schedule, and direct `New Application` plus `My Applications` quick actions without bringing back the older crowded lower dashboard sections.
 - Applicant `My Applications` now removes the extra `Continue Draft` header button to keep the page less confusing.
 - Applicant record-table actions now show `View`, `Edit`, and `Download PDF`, with `Edit` opening the form in forced edit mode so applicants can jump straight into the editable application form from the table.
 - Applicant edit flows now refuse to fall back into a brand-new draft when an edit URL cannot load the existing record, and successful saves on existing records now say `Your changes were saved successfully`.
@@ -150,7 +172,8 @@ This project is deployable as a static frontend. Application data stays in Supab
 - Secretary Checking now keeps the `Back to Checking` button visible in the action row, and disables it with a short hint when the loaded record is not currently in `Returned for Correction`.
 - Secretary Checking now places the `Special Consideration` dropdown under `Secretary Remarks` for a cleaner responsive layout, and Scholarship Settings now has a separate `Show Special Consideration selector on Secretary Checking` flag so the System Administrator can hide or show that secretary-only input without changing the dedicated Special Consideration page toggle.
 - Secretary Exam Management now includes an exam-schedule notice form and `Send Schedule Emails` action that emails all applicants already saved in the selected batch, writes applicant notifications, and confirms those scheduled records stay in `exam_scheduled`; this action requires the Node server and SMTP to be configured.
-- Secretary Exam Management now uses the simpler office fields requested by staff: batch/session label (`Morning Session`, `Afternoon Session`, or `One Session`), venue, exam date, number of rooms, number of examinees per room, and room label; the system still auto-generates the internal exam number in the background after room and seat assignment is saved.
+- Secretary Exam Management now lets staff type the batch label manually, such as a year like `2026`, instead of forcing the old fixed session labels; the system still auto-generates the internal exam number in the background after room and seat assignment is saved.
+- Secretary Requirements now uses a split layout: the main `col-9` table card keeps the selection dropdowns in its card header, while the first `col-3` side card reflects the visible Requirements list and auto-loads the first applicant’s submitted requirement details, then switches when staff click another applicant name.
 - Secretary Exam Management now fills rooms sequentially by the configured per-room capacity, such as Room 1 first, then Room 2, until all selected examinees are consumed; the downloaded room-list and masterlist PDFs now show only applicant full name, LDSP application number, and seat number.
 - Secretary Exam Management now preloads the exam schedule email note with the office reminder to bring a school ID or any valid ID plus one black ballpen, while still letting staff edit that message before sending schedule emails.
 - Secretary Room Assignment now includes a one-person `Send Test Email` flow for a selected scheduled examinee, with an optional test receiver email so staff can preview the real exam notice in their own inbox before sending the full batch.
@@ -353,7 +376,8 @@ Important:
 
 Login behavior now:
 - Uses Supabase `signInWithPassword`.
-- The login form now uses email/password only.
+- The login form accepts email directly and can also resolve a mobile number through the optional same-origin auth helper route.
+- `Remember me` now decides whether the Supabase session stays on the device or only in the current browser tab.
 - The login page no longer includes the public exam room lookup shortcut; that checker stays on its dedicated page.
 - Fetches `profiles.role`.
 - Redirects automatically:
@@ -379,7 +403,7 @@ Session/logout behavior:
 - `verify-account.html` now handles applicant OTP email confirmation through `supabase.auth.verifyOtp(...)`.
 - `forgot-password.html` now uses Supabase `auth.resetPasswordForEmail`.
 - `reset-password.html` now updates password from recovery session link.
-- Password recovery is email-based by default (mobile recovery needs a separate OTP flow).
+- Password recovery stays email-delivered, but the forgot-password page can resolve a registered mobile number to the linked email when the optional auth helper route is available.
 - Frontend enforces strong password policy: minimum 12 chars + uppercase + lowercase + number + symbol.
 - Registration now redirects applicants into the OTP verification page, and login redirects unverified email users into the same OTP flow.
 - If an applicant cannot complete the email verification step, the System Administrator can now manually confirm that account from `SYSTEMADMINISTRATOR/super-admin-user-management.html` when the Node server is available.
@@ -395,10 +419,12 @@ Required Supabase Auth settings:
 ## Developer Checks
 - Run `npm run check:syntax` after low-risk JS changes to parse-check `server.js` plus every file under `js/` before uploading files to hosting.
 - `npm test` is still a placeholder and does not run application tests yet.
+- Repository hygiene: local snapshot archives and OS metadata files like `.DS_Store` should stay ignored and should not be uploaded to hosting.
 
 ## Placeholder Shells
 - Some pages intentionally remain static shells so role-based navigation works without breaking entry points.
 - Current shell examples include Applicant Help, Admin Notifications, and the System Administrator dashboard overview.
+- Secretary Requirements currently has its four-card summary block removed so the page can be redesigned manually without loading the previous summary layout.
 
 ## Security Headers
 - Apache/static hosting baseline headers are defined in `.htaccess`.
@@ -414,3 +440,11 @@ Required Supabase Auth settings:
 - Secretary Exam Management now uses a custom shell layout with a compact `Examinee` summary card on the left and a wider `Examinee List` table card on the right, with the table footer fixed to 10 rows per page.
 - Secretary Exam Management now loads a live examinee counter plus a paginated examinee list from Supabase, using a compact `col-xl-3` summary card and a `col-xl-9` table card with fixed 10-row pagination.
 - Secretary Exam Management now shows only applicants already moved by `Set for Examination` into the exam workflow, instead of all submitted forms.
+- Secretary Requirements now includes its own card-header search field so the Requirements List can be filtered by applicant name without leaving the requirements view.
+- Secretary Requirements now uses a cleaner card header in requirements view by removing the duplicate inner title copy and keeping the filters as the main focus.
+- Secretary Requirements now saves a full hard-copy checklist per applicant through `application_aux_data`, and the same saved checklist is shown read-only on the applicant tracking page.
+- Secretary Requirements now uses a smaller, more minimal checklist editor in the side card by showing only the requirement title with a compact status selector.
+- Secretary Requirements now uses a `col-xl-4` checklist card and a `col-xl-8` table, with the application ID moved under the applicant name and the Requirements table trimmed to sector, status, and `View Data`.
+- Secretary Requirements now labels the side checklist card as `Applicant Requirements` for a clearer title.
+- Secretary Requirements now shows the selected applicant with a round photo avatar and white border, matching the ranking-style identity treatment when a profile photo is available.
+- Secretary Requirements now opens the selected applicant's printable `Application Form` inside a modal preview when staff click the `Application Form` requirement title.

@@ -43,6 +43,9 @@ const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Prog
 const PUBLIC_LOOKUP_UNAVAILABLE_MESSAGE = "Exam room lookup is temporarily unavailable. Please try again later.";
 const PUBLIC_LOOKUP_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const PUBLIC_LOOKUP_RATE_LIMIT_MAX_REQUESTS = 12;
+const AUTH_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE = "Mobile account lookup is not available on this host yet. Use your registered email for now.";
+const AUTH_IDENTIFIER_LOOKUP_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const AUTH_IDENTIFIER_LOOKUP_RATE_LIMIT_MAX_REQUESTS = 20;
 const WALK_IN_TEMP_PASSWORD_LENGTH = 16;
 const SUPABASE_FETCH_LIMIT = 1000;
 const SUPPORT_FACEBOOK_PAGE_URL = "https://www.facebook.com/profile.php?id=61583672829501";
@@ -96,6 +99,7 @@ let reminderCampaignProcessorRunning = false;
 let reminderCampaignProcessorInterval = null;
 let examScheduleEmailProcessorRunning = false;
 let examScheduleEmailProcessorInterval = null;
+const authIdentifierLookupRateLimitState = new Map();
 const publicLookupRateLimitState = new Map();
 const MIME_BY_KIND = {
     jpg: "image/jpeg",
@@ -2821,6 +2825,15 @@ app.use(["/uploads", "/node_modules"], function (_request, response) {
     response.status(404).send("Not found");
 });
 
+app.use("/api/auth", function (request, response, next) {
+    applyUploadCors(request, response);
+    if (request.method === "OPTIONS") {
+        response.status(204).end();
+        return;
+    }
+    next();
+});
+
 app.use("/api/uploads", function (request, response, next) {
     applyUploadCors(request, response);
     if (request.method === "OPTIONS") {
@@ -3578,6 +3591,89 @@ app.post("/api/super-admin/users/:userId/reset-walk-in-password", authenticate, 
         });
     } catch (error) {
         writeJsonError(response, 500, error && error.message ? error.message : "Failed to reset walk-in temporary password.");
+    }
+});
+
+app.post("/api/auth/resolve-login", async function (request, response) {
+    try {
+        const rateLimit = consumeRateLimit(
+            authIdentifierLookupRateLimitState,
+            requestClientAddress(request),
+            AUTH_IDENTIFIER_LOOKUP_RATE_LIMIT_WINDOW_MS,
+            AUTH_IDENTIFIER_LOOKUP_RATE_LIMIT_MAX_REQUESTS
+        );
+        if (!rateLimit.allowed) {
+            response.setHeader("Retry-After", String(rateLimit.retryAfterSeconds));
+            writeJsonError(response, 429, "Too many account lookup attempts. Please wait a few minutes and try again.");
+            return;
+        }
+
+        const identifier = ((request.body && request.body.identifier) || "").toString().trim();
+        if (!identifier) {
+            writeJsonError(response, 400, "Email address or mobile number is required.");
+            return;
+        }
+
+        const normalizedEmail = normalizeEmailAddress(identifier);
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+            response.status(200).json({
+                ok: true,
+                email: normalizedEmail,
+                matched_by: "email"
+            });
+            return;
+        }
+
+        const mobileNumber = normalizePhoneNumber(identifier);
+        if (!mobileNumber) {
+            writeJsonError(response, 400, "Enter a valid email address or mobile number.");
+            return;
+        }
+
+        if (!SUPABASE_SERVICE_ROLE_KEY) {
+            writeJsonError(response, 503, AUTH_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE);
+            return;
+        }
+
+        const adminClient = createSupabaseAdminClient();
+        if (!adminClient) {
+            writeJsonError(response, 503, AUTH_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE);
+            return;
+        }
+
+        const profileResult = await adminClient
+            .from("profiles")
+            .select("email, is_active")
+            .eq("mobile_number", mobileNumber)
+            .maybeSingle();
+
+        if (profileResult.error) {
+            console.error("[auth-resolve-login] profile lookup failed:", profileResult.error.message || profileResult.error);
+            writeJsonError(response, 503, AUTH_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE);
+            return;
+        }
+
+        const resolvedEmail = normalizeEmailAddress(profileResult.data && profileResult.data.email ? profileResult.data.email : "");
+        if (!profileResult.data || !resolvedEmail) {
+            writeJsonError(response, 404, "No account matched that email or mobile number.");
+            return;
+        }
+        if (profileResult.data.is_active === false) {
+            writeJsonError(response, 403, "This account is inactive. Contact administrator.");
+            return;
+        }
+
+        response.status(200).json({
+            ok: true,
+            email: resolvedEmail,
+            matched_by: "mobile"
+        });
+    } catch (error) {
+        writeJsonError(
+            response,
+            500,
+            error && error.message ? error.message : AUTH_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE
+        );
     }
 });
 

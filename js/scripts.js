@@ -140,31 +140,76 @@ window.addEventListener('DOMContentLoaded', event => {
         document.body.classList.add('ldss-ready');
     });
 
-    function ensureSecretaryAllPassedLink() {
+    function removeLegacySecretarySelectionLinks(sidenav) {
+        Array.from(sidenav.children).forEach(function (node) {
+            if (!node || typeof node.matches !== 'function') {
+                return;
+            }
+            if (
+                node.matches('a.nav-link[href="secretary-all-passed.html"]')
+                || node.matches('a.nav-link[href="secretary-selection-pool.html"]')
+                || node.matches('a.nav-link[href="secretary-scholar-selection.html"]')
+                || node.matches('a.nav-link[href="secretary-final-selection.html"]')
+                || node.matches('#secretaryScholarSelectionMenu')
+            ) {
+                node.remove();
+            }
+        });
+    }
+
+    function removeLegacySecretaryExamLinks(sidenav) {
+        Array.from(sidenav.children).forEach(function (node) {
+            if (!node || typeof node.matches !== 'function') {
+                return;
+            }
+            if (
+                node.matches('a.nav-link[href="secretary-exam-batches.html"]')
+                || node.matches('a.nav-link[href="secretary-exam-results.html"]')
+                || node.matches('a.nav-link[href="secretary-ranking.html"]')
+                || node.matches('#secretaryExamManagementMenu')
+            ) {
+                node.remove();
+            }
+        });
+    }
+
+    function ensureSecretaryExamManagementMenu() {
         const secretaryAccountTrigger = document.body.querySelector('#secretaryUser');
         const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
 
         if (!secretaryAccountTrigger || !sidenav) {
             return;
         }
-        if (sidenav.querySelector('a.nav-link[href="secretary-all-passed.html"]')) {
-            return;
-        }
 
-        const rankingLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
+        removeLegacySecretaryExamLinks(sidenav);
+
+        const applicationsLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
             const href = (link.getAttribute('href') || '').trim();
-            return href === 'secretary-ranking.html';
+            return href === 'secretary-applications.html';
         });
 
-        if (!rankingLink) {
+        if (!applicationsLink) {
             return;
         }
 
-        const allPassedLink = rankingLink.cloneNode(true);
-        allPassedLink.setAttribute('href', 'secretary-all-passed.html');
-        allPassedLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="check-circle"></i></div>\n                                All Passed\n                            ';
+        const examManagementWrap = document.createElement('div');
+        examManagementWrap.id = 'secretaryExamManagementMenu';
+        examManagementWrap.innerHTML = [
+            '<a class="nav-link collapsed" href="javascript:void(0);" data-bs-toggle="collapse" data-bs-target="#secretaryExamManagementCollapse" aria-expanded="false" aria-controls="secretaryExamManagementCollapse">',
+            '    <div class="nav-link-icon"><i data-feather="clipboard"></i></div>',
+            '    Exam Management',
+            '    <div class="sidenav-collapse-arrow"><i data-feather="chevron-down"></i></div>',
+            '</a>',
+            '<div class="collapse" id="secretaryExamManagementCollapse">',
+            '    <nav class="sidenav-menu-nested nav">',
+            '        <a class="nav-link" href="secretary-exam-batches.html">Room Assignment</a>',
+            '        <a class="nav-link" href="secretary-exam-results.html">Score Exam</a>',
+            '        <a class="nav-link" href="secretary-ranking.html">Ranking</a>',
+            '    </nav>',
+            '</div>'
+        ].join('\n');
 
-        rankingLink.insertAdjacentElement('afterend', allPassedLink);
+        applicationsLink.insertAdjacentElement('afterend', examManagementWrap);
     }
 
     function ensureSecretaryScholarSelectionLink() {
@@ -174,29 +219,39 @@ window.addEventListener('DOMContentLoaded', event => {
         if (!secretaryAccountTrigger || !sidenav) {
             return;
         }
-        if (sidenav.querySelector('a.nav-link[href="secretary-scholar-selection.html"]')) {
+        removeLegacySecretarySelectionLinks(sidenav);
+        if (
+            sidenav.querySelector('#secretaryScholarSelectionCollapse')
+            || sidenav.querySelector('[data-bs-target="#secretaryScholarSelectionCollapse"]')
+        ) {
             return;
         }
 
-        const allPassedLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
-            const href = (link.getAttribute('href') || '').trim();
-            return href === 'secretary-all-passed.html';
-        });
-        const rankingLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
-            const href = (link.getAttribute('href') || '').trim();
-            return href === 'secretary-ranking.html';
-        });
-        const insertAfter = allPassedLink || rankingLink;
+        const examManagementMenu = sidenav.querySelector('#secretaryExamManagementMenu');
 
-        if (!insertAfter) {
+        if (!examManagementMenu) {
             return;
         }
 
-        const scholarSelectionLink = insertAfter.cloneNode(true);
-        scholarSelectionLink.setAttribute('href', 'secretary-scholar-selection.html');
-        scholarSelectionLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="award"></i></div>\n                                Scholar Selection\n                            ';
+        const scholarSelectionWrap = document.createElement('div');
+        scholarSelectionWrap.id = 'secretaryScholarSelectionMenu';
+        scholarSelectionWrap.innerHTML = [
+            '<a class="nav-link collapsed" href="javascript:void(0);" data-bs-toggle="collapse" data-bs-target="#secretaryScholarSelectionCollapse" aria-expanded="false" aria-controls="secretaryScholarSelectionCollapse">',
+            '    <div class="nav-link-icon"><i data-feather="award"></i></div>',
+            '    Selection',
+            '    <div class="sidenav-collapse-arrow"><i data-feather="chevron-down"></i></div>',
+            '</a>',
+            '<div class="collapse" id="secretaryScholarSelectionCollapse">',
+            '    <nav class="sidenav-menu-nested nav">',
+            '        <a class="nav-link" href="secretary-all-passed.html">All Passed</a>',
+            '        <a class="nav-link" href="secretary-selection-pool.html">Selection Pool</a>',
+            '        <a class="nav-link" href="secretary-scholar-selection.html">Scholar Selection</a>',
+            '        <a class="nav-link" href="secretary-final-selection.html">Final Selection</a>',
+            '    </nav>',
+            '</div>'
+        ].join('\n');
 
-        insertAfter.insertAdjacentElement('afterend', scholarSelectionLink);
+        examManagementMenu.insertAdjacentElement('afterend', scholarSelectionWrap);
     }
 
     function ensureSecretarySubmittedApplicationsLink() {
@@ -213,22 +268,77 @@ window.addEventListener('DOMContentLoaded', event => {
             return;
         }
 
-        const scholarSelectionLink = Array.from(sidenav.querySelectorAll('a.nav-link')).find(function (link) {
-            const href = (link.getAttribute('href') || '').trim();
-            return href === 'secretary-scholar-selection.html';
-        });
+        const scholarSelectionMenu = sidenav.querySelector('#secretaryScholarSelectionMenu');
 
-        if (!scholarSelectionLink) {
+        if (!scholarSelectionMenu) {
             return;
         }
 
-        const submittedApplicationsLink = scholarSelectionLink.cloneNode(true);
-        submittedApplicationsLink.classList.remove('active');
-        submittedApplicationsLink.removeAttribute('aria-current');
+        const submittedApplicationsLink = document.createElement('a');
+        submittedApplicationsLink.className = 'nav-link';
         submittedApplicationsLink.setAttribute('href', 'secretary-applications.html?view=requirements');
         submittedApplicationsLink.innerHTML = '\n                                <div class="nav-link-icon"><i data-feather="file-text"></i></div>\n                                Requirements\n                            ';
 
-        scholarSelectionLink.insertAdjacentElement('afterend', submittedApplicationsLink);
+        scholarSelectionMenu.insertAdjacentElement('afterend', submittedApplicationsLink);
+    }
+
+    function ensureSecretaryScreeningInterviewMenu() {
+        const secretaryAccountTrigger = document.body.querySelector('#secretaryUser');
+        const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
+
+        if (!secretaryAccountTrigger || !sidenav) {
+            return;
+        }
+        if (
+            sidenav.querySelector('#secretaryScreeningInterviewCollapse')
+            || sidenav.querySelector('[data-bs-target="#secretaryScreeningInterviewCollapse"]')
+        ) {
+            return;
+        }
+
+        const screeningWrap = document.createElement('div');
+        screeningWrap.innerHTML = [
+            '<a class="nav-link collapsed" href="javascript:void(0);" data-bs-toggle="collapse" data-bs-target="#secretaryScreeningInterviewCollapse" aria-expanded="false" aria-controls="secretaryScreeningInterviewCollapse">',
+            '    <div class="nav-link-icon"><i data-feather="calendar"></i></div>',
+            '    Interviews',
+            '    <div class="sidenav-collapse-arrow"><i data-feather="chevron-down"></i></div>',
+            '</a>',
+            '<div class="collapse" id="secretaryScreeningInterviewCollapse">',
+            '    <nav class="sidenav-menu-nested nav">',
+            '        <a class="nav-link" href="secretary-interview.html">Scheduler</a>',
+            '        <a class="nav-link" href="secretary-interview-attendances.html">Initial Screening</a>',
+            '        <a class="nav-link" href="secretary-interview-attendance-list.html">Final Interview</a>',
+            '    </nav>',
+            '</div>'
+        ].join('\n');
+
+        const collapseToggle = screeningWrap.querySelector('[data-bs-target="#secretaryScreeningInterviewCollapse"]');
+        if (collapseToggle && collapseToggle.classList.contains('active')) {
+            collapseToggle.classList.remove('active');
+        }
+
+        sidenav.appendChild(screeningWrap);
+    }
+
+    function ensureSecretaryReportsAtBottom() {
+        const secretaryAccountTrigger = document.body.querySelector('#secretaryUser');
+        const sidenav = document.body.querySelector('#layoutSidenav_nav .nav.accordion');
+
+        if (!secretaryAccountTrigger || !sidenav) {
+            return;
+        }
+
+        const reportsLink = Array.from(sidenav.children).find(function (node) {
+            return node
+                && typeof node.matches === 'function'
+                && node.matches('a.nav-link[href="secretary-reports.html"]');
+        });
+
+        if (!reportsLink) {
+            return;
+        }
+
+        sidenav.appendChild(reportsLink);
     }
 
     function ensureAdminSpecialConsiderationLink() {
@@ -283,9 +393,11 @@ window.addEventListener('DOMContentLoaded', event => {
         scholarshipSettingsLink.insertAdjacentElement('afterend', specialConsiderationLink);
     }
 
-    ensureSecretaryAllPassedLink();
+    ensureSecretaryExamManagementMenu();
     ensureSecretaryScholarSelectionLink();
     ensureSecretarySubmittedApplicationsLink();
+    ensureSecretaryScreeningInterviewMenu();
+    ensureSecretaryReportsAtBottom();
     ensureAdminSpecialConsiderationLink();
     ensureSuperAdminSpecialConsiderationLink();
 

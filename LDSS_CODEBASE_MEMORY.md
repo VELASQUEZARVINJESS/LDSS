@@ -60,9 +60,11 @@ Purpose: a fast working-memory note for future LDSS edits so we do not need to r
   - forgot password
   - reset password
   - logout
-- Important mismatch:
-  - PRD says login can use email or mobile.
-  - Current frontend login and recovery are email-only.
+- Current auth behavior:
+  - PRD-aligned login UI accepts email or mobile number.
+  - Email always works on static hosting.
+  - Mobile-number login and forgot-password lookup depend on the optional same-origin Node auth helper route.
+  - The login `Remember me` checkbox now controls whether the Supabase session persists on the device or only in the current browser tab.
 - Password rules are enforced in frontend:
   - minimum 12 chars
   - uppercase
@@ -280,7 +282,6 @@ This means schema deployment status matters before changing workflow code.
 
 ## Important Caveats
 
-- Current login implementation is email/password only.
 - Staff pages are desktop-only by design through the shared auth guard.
 - New uploads default to Supabase Storage.
 - Older `uploads/...` file paths still depend on the Node server for read/delete access.

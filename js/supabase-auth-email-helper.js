@@ -5,6 +5,7 @@
     const DEFAULT_PRODUCTION_RESET_URL = "https://daet-scholarship.gt.tc/reset-password.html";
     const DEFAULT_PRODUCTION_VERIFY_URL = "https://daet-scholarship.gt.tc/verify-account.html";
     const DEFAULT_COOLDOWN_MS = 60 * 1000;
+    const DEFAULT_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE = "Mobile account lookup is not available on this host yet. Use your registered email for now.";
     const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const PENDING_VERIFICATION_EMAIL_STORAGE_KEY = "ldss-pending-verification-email";
 
@@ -87,6 +88,14 @@
         return resolveOriginPath("/verify-account.html", defaultUrl || DEFAULT_PRODUCTION_VERIFY_URL);
     }
 
+    function resolveAuthApiBase(defaultUrl) {
+        const configured = (window.LDSS_AUTH_API_BASE || "").toString().trim();
+        if (configured) {
+            return configured.replace(/\/+$/, "");
+        }
+        return resolveOriginPath("/api/auth", defaultUrl || "");
+    }
+
     function normalizeEmailAddress(value) {
         return (value || "").toString().trim().toLowerCase();
     }
@@ -117,6 +126,166 @@
             return cleaned;
         }
         return null;
+    }
+
+    async function parseIdentifierLookupResponse(response) {
+        const contentType = ((response && response.headers && response.headers.get("content-type")) || "")
+            .toString()
+            .toLowerCase();
+        const isJson = contentType.includes("application/json");
+
+        if (!isJson) {
+            try {
+                const text = await response.text();
+                return {
+                    isJson: false,
+                    payload: text ? { message: text } : null
+                };
+            } catch (error) {
+                return {
+                    isJson: false,
+                    payload: null
+                };
+            }
+        }
+
+        try {
+            return {
+                isJson: true,
+                payload: await response.json()
+            };
+        } catch (error) {
+            return {
+                isJson: true,
+                payload: null
+            };
+        }
+    }
+
+    async function resolveIdentifierToEmail(identifier, options) {
+        const rawIdentifier = (identifier || "").toString().trim();
+        const useCase = options && options.useCase ? options.useCase : "login";
+        const helperUnavailableMessage = options && options.helperUnavailableMessage
+            ? options.helperUnavailableMessage
+            : DEFAULT_IDENTIFIER_LOOKUP_UNAVAILABLE_MESSAGE;
+        const notFoundMessage = options && options.notFoundMessage
+            ? options.notFoundMessage
+            : "No account matched that email or mobile number.";
+        const invalidMessage = options && options.invalidMessage
+            ? options.invalidMessage
+            : "Enter a valid email address or mobile number.";
+        const normalizedEmail = normalizeEmailAddress(rawIdentifier);
+
+        if (isValidEmail(normalizedEmail)) {
+            return {
+                ok: true,
+                email: normalizedEmail,
+                matchedBy: "email"
+            };
+        }
+
+        const mobileNumber = normalizePhoneNumber(rawIdentifier);
+        if (!mobileNumber) {
+            return {
+                ok: false,
+                code: "invalid_identifier",
+                message: invalidMessage
+            };
+        }
+
+        const authApiBase = resolveAuthApiBase();
+        if (!authApiBase) {
+            return {
+                ok: false,
+                code: "helper_unavailable",
+                message: helperUnavailableMessage
+            };
+        }
+
+        let response;
+        try {
+            response = await fetch(authApiBase + "/resolve-login", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    identifier: mobileNumber,
+                    use_case: useCase
+                })
+            });
+        } catch (error) {
+            return {
+                ok: false,
+                code: "helper_unavailable",
+                message: helperUnavailableMessage
+            };
+        }
+
+        const parsed = await parseIdentifierLookupResponse(response);
+        const payload = parsed.payload || null;
+
+        if (!response.ok) {
+            if (!parsed.isJson) {
+                return {
+                    ok: false,
+                    code: "helper_unavailable",
+                    message: helperUnavailableMessage
+                };
+            }
+
+            const errorMessage = getErrorMessage(payload, notFoundMessage);
+            if (response.status === 404) {
+                return {
+                    ok: false,
+                    code: "not_found",
+                    message: errorMessage || notFoundMessage
+                };
+            }
+            if (response.status === 403) {
+                return {
+                    ok: false,
+                    code: "inactive",
+                    message: errorMessage || "This account is inactive. Contact administrator."
+                };
+            }
+            if (response.status === 429) {
+                return {
+                    ok: false,
+                    code: "rate_limited",
+                    message: errorMessage || "Too many account lookup attempts. Please wait a few minutes and try again."
+                };
+            }
+            if (response.status >= 500) {
+                return {
+                    ok: false,
+                    code: "helper_unavailable",
+                    message: errorMessage || helperUnavailableMessage
+                };
+            }
+            return {
+                ok: false,
+                code: "lookup_failed",
+                message: errorMessage || invalidMessage
+            };
+        }
+
+        const resolvedEmail = normalizeEmailAddress(payload && payload.email ? payload.email : "");
+        if (!isValidEmail(resolvedEmail)) {
+            return {
+                ok: false,
+                code: "helper_unavailable",
+                message: helperUnavailableMessage
+            };
+        }
+
+        return {
+            ok: true,
+            email: resolvedEmail,
+            matchedBy: payload && payload.matched_by ? payload.matched_by : "mobile",
+            mobileNumber: mobileNumber
+        };
     }
 
     function rememberPendingVerificationEmail(email) {
@@ -368,6 +537,8 @@
         normalizePhoneNumber: normalizePhoneNumber,
         readPendingVerificationEmail: readPendingVerificationEmail,
         rememberPendingVerificationEmail: rememberPendingVerificationEmail,
+        resolveAuthApiBase: resolveAuthApiBase,
+        resolveIdentifierToEmail: resolveIdentifierToEmail,
         resolveEmailConfirmRedirectUrl: resolveEmailConfirmRedirectUrl,
         resolveVerifyAccountUrl: resolveVerifyAccountUrl,
         resolvePasswordResetRedirectUrl: resolvePasswordResetRedirectUrl

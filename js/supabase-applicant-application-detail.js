@@ -2,11 +2,13 @@
     "use strict";
 
     const STORAGE_BUCKET = window.LDSS_STORAGE_BUCKET || "ldss-documents";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const REMARKS_SECTOR_META_START = "[[LDSS_SECTOR_TAGS]]";
     const REMARKS_SECTOR_META_END = "[[/LDSS_SECTOR_TAGS]]";
     const EDITABLE_STATUSES = ["draft", "returned_for_correction", "submitted"];
 
     const DOC_TYPE_LABELS = {
+        barangay_certificate: "Certification of Residency",
         income_certificate: "Tax Exemption Certificate (PDF)"
     };
 
@@ -16,6 +18,34 @@
         rejected: { label: "Rejected", chipClass: "ldss-chip-danger" },
         needs_reupload: { label: "Needs Reupload", chipClass: "ldss-chip-danger" },
         missing: { label: "Not Uploaded", chipClass: "ldss-chip-neutral" }
+    };
+    const HARD_COPY_REQUIREMENTS_PAYLOAD_KEY = "hard_copy_requirements";
+    const REQUIREMENTS_STATUS_PENDING = "pending";
+    const REQUIREMENTS_STATUS_RECEIVED = "received";
+    const REQUIREMENTS_STATUS_NEEDS_CORRECTION = "needs_correction";
+    const REQUIREMENTS_STATUS_MISSING = "missing";
+    const REQUIREMENTS_STATUS_VALUES = new Set([
+        REQUIREMENTS_STATUS_PENDING,
+        REQUIREMENTS_STATUS_RECEIVED,
+        REQUIREMENTS_STATUS_NEEDS_CORRECTION,
+        REQUIREMENTS_STATUS_MISSING
+    ]);
+    const HARD_COPY_REQUIREMENTS = [
+        { key: "application_form", label: "Application Form" },
+        { key: "birth_certificate", label: "Birth Certificate" },
+        { key: "certification_of_residency", label: "Certification of Residency", fallbackDocumentType: "barangay_certificate" },
+        { key: "comelec_voters_certification", label: "COMELEC Voter's Certification" },
+        { key: "good_moral_character", label: "Good Moral Character (Certified True Copy)" },
+        { key: "form_138", label: "Form 138 (Certified True Copy)", fallbackDocumentType: "report_card" },
+        { key: "mswd_certification", label: "Certified True Copy of MSWD" },
+        { key: "bir_income_tax_or_tax_exemption", label: "BIR Income Tax Return / Tax Exemption", fallbackDocumentType: "income_certificate" },
+        { key: "notarized_sworn_affidavit", label: "Notarized Sworn Affidavit" }
+    ];
+    const HARD_COPY_REQUIREMENTS_STATUS_META = {
+        pending: { label: "Pending Review", chipClass: "ldss-chip-accent" },
+        received: { label: "Received", chipClass: "ldss-chip-success" },
+        needs_correction: { label: "Needs Correction", chipClass: "ldss-chip-danger" },
+        missing: { label: "Missing", chipClass: "ldss-chip-danger" }
     };
 
     const INTERVIEW_META = {
@@ -762,7 +792,8 @@
 
     function latestDocStatusByType(documents) {
         const map = {};
-        (documents || []).forEach(function (doc) {
+        const rows = Array.isArray(documents) ? documents : [];
+        rows.forEach(function (doc) {
             const existing = map[doc.document_type];
             if (!existing) {
                 map[doc.document_type] = doc;
@@ -777,24 +808,88 @@
         return map;
     }
 
-    function renderRequirements(documents) {
+    function normalizeRequirementsPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return {};
+        }
+        return payload;
+    }
+
+    function normalizeRequirementStatus(value) {
+        const normalized = (value || "").toString().trim().toLowerCase();
+        return REQUIREMENTS_STATUS_VALUES.has(normalized)
+            ? normalized
+            : REQUIREMENTS_STATUS_PENDING;
+    }
+
+    function requirementPayloadEntryStatus(entry) {
+        if (!entry) {
+            return "";
+        }
+        if (typeof entry === "string") {
+            return normalizeRequirementStatus(entry);
+        }
+        if (typeof entry === "object" && !Array.isArray(entry)) {
+            return normalizeRequirementStatus(entry.status || "");
+        }
+        return "";
+    }
+
+    function documentStatusToRequirementStatus(status) {
+        const normalized = workflow().normalizeStatus ? workflow().normalizeStatus(status || "") : (status || "").toString().trim().toLowerCase();
+        if (normalized === "verified") {
+            return REQUIREMENTS_STATUS_RECEIVED;
+        }
+        if (normalized === "rejected" || normalized === "needs_reupload") {
+            return REQUIREMENTS_STATUS_NEEDS_CORRECTION;
+        }
+        if (normalized === "pending") {
+            return REQUIREMENTS_STATUS_PENDING;
+        }
+        return "";
+    }
+
+    function buildHardCopyRequirementsStatusMap(documents, auxPayload) {
+        const latest = latestDocStatusByType(documents || []);
+        const payload = normalizeRequirementsPayload(auxPayload);
+        const checklist = normalizeRequirementsPayload(payload[HARD_COPY_REQUIREMENTS_PAYLOAD_KEY]);
+        const statusMap = {};
+
+        HARD_COPY_REQUIREMENTS.forEach(function (requirement) {
+            const savedStatus = requirementPayloadEntryStatus(checklist[requirement.key]);
+            if (savedStatus) {
+                statusMap[requirement.key] = savedStatus;
+                return;
+            }
+
+            const fallbackDocument = requirement.fallbackDocumentType
+                ? latest[requirement.fallbackDocumentType]
+                : null;
+            const fallbackStatus = fallbackDocument
+                ? documentStatusToRequirementStatus(fallbackDocument.verification_status)
+                : "";
+
+            statusMap[requirement.key] = fallbackStatus || REQUIREMENTS_STATUS_PENDING;
+        });
+
+        return statusMap;
+    }
+
+    function renderRequirements(documents, auxPayload) {
         const wrapper = byId("detailRequirementChecklist");
         if (!wrapper) {
             return;
         }
 
-        const latest = latestDocStatusByType(documents || []);
-        const requiredOrder = ["income_certificate"];
+        const statusMap = buildHardCopyRequirementsStatusMap(documents || [], auxPayload || {});
 
-        wrapper.innerHTML = requiredOrder
-            .map(function (docType) {
-                const row = latest[docType];
-                const status = row ? row.verification_status : "missing";
-                const meta = DOC_STATUS_META[status] || DOC_STATUS_META.missing;
-                const label = DOC_TYPE_LABELS[docType] || docType;
+        wrapper.innerHTML = HARD_COPY_REQUIREMENTS
+            .map(function (requirement) {
+                const status = statusMap[requirement.key];
+                const meta = HARD_COPY_REQUIREMENTS_STATUS_META[status] || HARD_COPY_REQUIREMENTS_STATUS_META.pending;
                 return (
-                    '<div class="d-flex justify-content-between mb-2">' +
-                    '<span class="small">' + label + "</span>" +
+                    '<div class="ldss-applicant-requirement-item">' +
+                    '<span class="ldss-applicant-requirement-label">' + requirement.label + "</span>" +
                     '<span class="ldss-chip ' + meta.chipClass + '">' + meta.label + "</span>" +
                     "</div>"
                 );
@@ -884,6 +979,11 @@
                 .select("document_type, verification_status, created_at")
                 .eq("application_id", application.id),
             context.client
+                .from(APPLICATION_AUX_DATA_TABLE)
+                .select("payload")
+                .eq("application_id", application.id)
+                .maybeSingle(),
+            context.client
                 .from("profiles")
                 .select("applicant_photo_path, verified_interview_photo_path")
                 .eq("id", context.user.id)
@@ -900,9 +1000,13 @@
         );
         application.sector_selected = sectorSelectionFlag;
         const docsResult = dataResults[3];
-        const profileResult = dataResults[4];
+        const auxDataResult = dataResults[4];
+        const profileResult = dataResults[5];
 
         const documents = docsResult && !docsResult.error ? docsResult.data : [];
+        const auxPayload = auxDataResult && !auxDataResult.error && auxDataResult.data && auxDataResult.data.payload
+            ? normalizeRequirementsPayload(auxDataResult.data.payload)
+            : {};
         const profile = profileResult && !profileResult.error ? profileResult.data : null;
 
         const sectorMeta = parseRemarksWithSectorMeta((interviewRecord && interviewRecord.remarks) || application.secretary_remarks || "");
@@ -922,7 +1026,7 @@
 
         renderHeader(application);
         renderStatusCards(application, examRecord, interviewRecord, approvalRecord, specialConsideration, examRank);
-        renderRequirements(documents);
+        renderRequirements(documents, auxPayload);
         renderTimeline(application, examRecord, interviewRecord, approvalRecord, specialConsideration);
         renderSectorTags(sectorMeta.sectorTags);
 

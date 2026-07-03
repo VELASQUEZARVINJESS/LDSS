@@ -38,23 +38,25 @@
         const identifier = (document.getElementById("resetIdentifier")?.value || "").trim();
         const helper = authHelper();
         if (!identifier) {
-            setStatus("Enter your registered email address.", "alert-danger");
+            setStatus("Enter your registered email address or mobile number.", "alert-danger");
             return;
         }
 
-        if (!helper.looksLikeEmail(identifier)) {
-            setStatus("Mobile recovery is not enabled yet. Please use your registered email.", "alert-warning");
-            return;
-        }
-        if (!helper.isValidEmail(identifier)) {
-            setStatus("Please enter a valid email address.", "alert-danger");
+        const resolvedIdentifier = await helper.resolveIdentifierToEmail(identifier, {
+            useCase: "password_reset",
+            helperUnavailableMessage: "Mobile recovery is not available on this host yet. Use your registered email for now.",
+            invalidMessage: "Please enter a valid email address or mobile number."
+        });
+        if (!resolvedIdentifier.ok) {
+            const alertType = resolvedIdentifier.code === "helper_unavailable" ? "alert-warning" : "alert-danger";
+            setStatus(resolvedIdentifier.message, alertType);
             return;
         }
 
         setSubmitLoading(true);
         try {
             const redirectTo = helper.resolvePasswordResetRedirectUrl();
-            const { error } = await client.auth.resetPasswordForEmail(helper.normalizeEmailAddress(identifier), {
+            const { error } = await client.auth.resetPasswordForEmail(resolvedIdentifier.email, {
                 redirectTo: redirectTo
             });
 
@@ -69,7 +71,7 @@
                 return;
             }
 
-            setStatus("Recovery email sent. Check your inbox and open the reset link.", "alert-success");
+            setStatus("Recovery email sent. Check the email linked to your account and open the reset link.", "alert-success");
         } catch (err) {
             setStatus(
                 helper.getErrorMessage(

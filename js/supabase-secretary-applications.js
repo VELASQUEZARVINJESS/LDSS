@@ -9,10 +9,42 @@
     const SETTINGS_STORAGE_KEY = "ldss:ranking-settings:fallback:v1";
     const VERIFICATION_QUEUE_STORAGE_KEY = "ldss:secretary-verification-queue:v1";
     const WALK_IN_API_PATH = "/api/secretary/walk-in-intake";
+    const APPLICATION_AUX_DATA_TABLE = "application_aux_data";
     const NO_BARANGAY_FILTER_VALUE = "__no_barangay__";
     const NO_BARANGAY_FILTER_LABEL = "No Barangay";
+    const NO_REQUIREMENTS_BATCH_FILTER_VALUE = "__no_requirements_batch__";
     const REQUIREMENTS_VIEW = "requirements";
     const LEGACY_SUBMITTED_REQUIREMENTS_VIEW = "submitted_requirements";
+    const HARD_COPY_REQUIREMENTS_PAYLOAD_KEY = "hard_copy_requirements";
+    const REQUIREMENTS_STATUS_PENDING = "pending";
+    const REQUIREMENTS_STATUS_RECEIVED = "received";
+    const REQUIREMENTS_STATUS_NEEDS_CORRECTION = "needs_correction";
+    const REQUIREMENTS_STATUS_MISSING = "missing";
+    const REQUIREMENTS_STATUS_VALUES = new Set([
+        REQUIREMENTS_STATUS_PENDING,
+        REQUIREMENTS_STATUS_RECEIVED,
+        REQUIREMENTS_STATUS_NEEDS_CORRECTION,
+        REQUIREMENTS_STATUS_MISSING
+    ]);
+    const REQUIREMENTS_STATUS_META = {
+        pending: { label: "For Review", chipClass: "ldss-chip-accent" },
+        received: { label: "Received", chipClass: "ldss-chip-success" },
+        needs_correction: { label: "Needs Correction", chipClass: "ldss-chip-danger" },
+        missing: { label: "Missing", chipClass: "ldss-chip-danger" }
+    };
+    const HARD_COPY_REQUIREMENTS = [
+        { key: "application_form", label: "Application Form" },
+        { key: "birth_certificate", label: "Birth Certificate" },
+        { key: "certification_of_residency", label: "Certification of Residency", fallbackDocumentType: "barangay_certificate" },
+        { key: "comelec_voters_certification", label: "COMELEC Voter's Certification" },
+        { key: "good_moral_character", label: "Good Moral Character (Certified True Copy)" },
+        { key: "form_138", label: "Form 138 (Certified True Copy)", fallbackDocumentType: "report_card" },
+        { key: "mswd_certification", label: "Certified True Copy of MSWD" },
+        { key: "bir_income_tax_or_tax_exemption", label: "BIR Income Tax Return / Tax Exemption", fallbackDocumentType: "income_certificate" },
+        { key: "notarized_sworn_affidavit", label: "Notarized Sworn Affidavit" }
+    ];
+    const REQUIREMENTS_SAVE_LABEL_IDLE = "Save Checklist";
+    const REQUIREMENTS_SAVE_LABEL_BUSY = "Saving...";
     const DEFAULT_WALK_IN_SCHOLARSHIP_TYPE = "Revised Daet Expanded Scholarship Program";
     const DEFAULT_WORKFLOW_CONTROLS = {
         allow_secretary_draft_completion: false,
@@ -67,6 +99,11 @@
     let walkInSubmitting = false;
     let bulkForExamSubmitting = false;
     let applicationsLoadToken = 0;
+    let selectedRequirementsApplicationId = "";
+    let requirementsDocumentsByApplicationId = {};
+    let requirementsAuxPayloadByApplicationId = {};
+    let requirementsSavingApplicationId = "";
+    let requirementsPrintModalInstance = null;
 
     function byId(id) {
         return document.getElementById(id);
@@ -186,28 +223,27 @@
         alert.textContent = message;
     }
 
-    function setTextValue(id, value) {
-        const element = byId(id);
-        if (!element) {
-            return;
-        }
-        element.textContent = String(value);
-    }
-
     function applyViewMeta() {
         if (!isSubmittedRequirementsView()) {
             return;
         }
 
+        document.body.classList.add("ldss-secretary-requirements-view");
+
         const pageTitle = byId("secretaryApplicationsPageTitle");
         const pageSubtitle = byId("secretaryApplicationsPageSubtitle");
         const breadcrumbCurrent = byId("secretaryApplicationsBreadcrumbCurrent");
         const queueTitle = byId("secretaryApplicationsQueueTitle");
+        const queueHeading = queueTitle && queueTitle.parentElement
+            ? queueTitle.parentElement
+            : null;
         const bulkButton = byId("secretaryBulkForExamBtn");
         const bulkMeta = byId("secretaryBulkForExamMeta");
-        const summaryShell = byId("secretaryRequirementsSummaryShell");
         const actionShell = byId("secretaryApplicationsActionShell");
         const filterShell = byId("secretaryApplicationsFilterShell");
+        const requirementsFilterShell = byId("secretaryRequirementsFilterShell");
+        const requirementsSummaryShell = byId("secretaryRequirementsSummaryShell");
+        const queueMainCol = byId("secretaryApplicationsQueueMainCol");
         const queueShell = byId("secretaryApplicationsQueueShell");
 
         document.title = "LDSP | Requirements";
@@ -221,17 +257,15 @@
         if (breadcrumbCurrent) {
             breadcrumbCurrent.textContent = "Requirements";
         }
-        if (queueTitle) {
-            queueTitle.textContent = "Requirements List";
+        if (queueHeading) {
+            queueHeading.classList.add("d-none");
         }
         if (bulkButton) {
             bulkButton.classList.add("d-none");
         }
         if (bulkMeta) {
-            bulkMeta.textContent = "Applicants listed here already completed hard-copy requirement submission to the office.";
-        }
-        if (summaryShell) {
-            summaryShell.classList.remove("d-none");
+            bulkMeta.textContent = "";
+            bulkMeta.classList.add("d-none");
         }
         if (actionShell) {
             actionShell.classList.add("d-none");
@@ -239,8 +273,19 @@
         if (filterShell) {
             filterShell.classList.add("d-none");
         }
+        if (requirementsFilterShell) {
+            requirementsFilterShell.classList.remove("d-none");
+        }
+        if (requirementsSummaryShell) {
+            requirementsSummaryShell.classList.remove("d-none");
+        }
+        if (queueMainCol) {
+            queueMainCol.classList.remove("col-xl-12");
+            queueMainCol.classList.remove("col-xl-9");
+            queueMainCol.classList.add("col-xl-8");
+        }
         if (queueShell) {
-            queueShell.classList.add("d-none");
+            queueShell.classList.remove("d-none");
         }
 
         if (window.feather && typeof window.feather.replace === "function") {
@@ -248,12 +293,34 @@
         }
     }
 
-    function renderRequirementsSummary(counts) {
-        const safeCounts = counts || {};
-        setTextValue("secretaryRequirementsCompletedCount", Math.max(0, Number(safeCounts.completed) || 0));
-        setTextValue("secretaryRequirementsFollowUpCount", Math.max(0, Number(safeCounts.followUp) || 0));
-        setTextValue("secretaryRequirementsNotSubmittedCount", Math.max(0, Number(safeCounts.notSubmitted) || 0));
-        setTextValue("secretaryRequirementsSubmittedCount", Math.max(0, Number(safeCounts.submitted) || 0));
+    function renderTableHead() {
+        const thead = byId("secretaryApplicationsTableHead");
+        if (!thead) {
+            return;
+        }
+
+        if (isSubmittedRequirementsView()) {
+            thead.innerHTML = (
+                "<tr>" +
+                "<th>Applicant</th>" +
+                "<th>Sector Classification</th>" +
+                "<th>Status</th>" +
+                "<th>View Data</th>" +
+                "</tr>"
+            );
+            return;
+        }
+
+        thead.innerHTML = (
+            "<tr>" +
+            "<th>Applicant</th>" +
+            "<th>Application ID</th>" +
+            "<th>Sector Classification</th>" +
+            "<th>Submitted</th>" +
+            "<th>Status</th>" +
+            "<th>Action</th>" +
+            "</tr>"
+        );
     }
 
     function delay(ms) {
@@ -740,160 +807,25 @@
         };
     }
 
-    async function fetchApplicantProfileCount(context) {
-        const result = await context.client
-            .from("profiles")
-            .select("id", { count: "exact", head: true })
-            .eq("role", "applicant");
-
-        if (result.error) {
-            return {
-                count: 0,
-                error: result.error
-            };
-        }
-
-        return {
-            count: Number(result.count || 0),
-            error: null
-        };
-    }
-
-    async function fetchApplicationSummaryRows(context, mode) {
+    async function fetchAllApplications(context) {
         const rows = [];
+        const includeDrafts = workflowControls.allow_secretary_draft_completion === true;
 
         for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
             let query = context.client
                 .from("applications")
-                .select("applicant_id, status")
-                .order("updated_at", { ascending: false })
-                .range(from, from + SUPABASE_FETCH_LIMIT - 1);
-
-            if (mode === "draft") {
-                query = query.eq("status", "draft");
-            } else {
-                query = query.neq("status", "draft");
-            }
-
-            const result = await query;
-            if (result.error) {
-                return {
-                    data: rows,
-                    error: result.error
-                };
-            }
-
-            const batch = result.data || [];
-            rows.push.apply(rows, batch);
-            if (batch.length < SUPABASE_FETCH_LIMIT) {
-                break;
-            }
-        }
-
-        return {
-            data: rows,
-            error: null
-        };
-    }
-
-    async function loadRequirementsSummary(context, loadToken) {
-        renderRequirementsSummary({
-            completed: 0,
-            followUp: 0,
-            notSubmitted: 0,
-            submitted: 0
-        });
-
-        const summaryResults = await Promise.all([
-            fetchApplicantProfileCount(context),
-            fetchApplicationSummaryRows(context, "non_draft"),
-            fetchApplicationSummaryRows(context, "draft")
-        ]);
-
-        if (loadToken !== applicationsLoadToken) {
-            return;
-        }
-
-        const profileCountResult = summaryResults[0];
-        const submittedRowsResult = summaryResults[1];
-        const draftRowsResult = summaryResults[2];
-
-        if (submittedRowsResult.error) {
-            showStatus("Failed to load requirements summary: " + submittedRowsResult.error.message, "alert-danger");
-            return;
-        }
-
-        const submittedRows = submittedRowsResult.data || [];
-        const draftRows = draftRowsResult.error ? [] : (draftRowsResult.data || []);
-        const submittedApplicantIds = new Set();
-        const completedApplicantIds = new Set();
-        const followUpApplicantIds = new Set();
-
-        submittedRows.forEach(function (row) {
-            const applicantId = row && row.applicant_id ? row.applicant_id : "";
-            if (!applicantId) {
-                return;
-            }
-
-            submittedApplicantIds.add(applicantId);
-            if (normalizeStatus(row.status) === "hard_copy_verified") {
-                completedApplicantIds.add(applicantId);
-                return;
-            }
-            followUpApplicantIds.add(applicantId);
-        });
-
-        const draftApplicantIds = new Set();
-        draftRows.forEach(function (row) {
-            const applicantId = row && row.applicant_id ? row.applicant_id : "";
-            if (!applicantId || submittedApplicantIds.has(applicantId)) {
-                return;
-            }
-            draftApplicantIds.add(applicantId);
-        });
-
-        const registeredApplicantCount = profileCountResult.error
-            ? 0
-            : Math.max(0, Number(profileCountResult.count || 0));
-        const submittedApplicantCount = submittedApplicantIds.size;
-        const notSubmittedCount = profileCountResult.error
-            ? 0
-            : Math.max(0, registeredApplicantCount - submittedApplicantCount - draftApplicantIds.size);
-
-        renderRequirementsSummary({
-            completed: completedApplicantIds.size,
-            followUp: followUpApplicantIds.size,
-            notSubmitted: notSubmittedCount,
-            submitted: submittedApplicantCount
-        });
-
-        if (profileCountResult.error || draftRowsResult.error) {
-            showStatus(
-                "Requirements summary loaded, but some counts are partial right now. Refresh again if you need the latest totals.",
-                "alert-warning"
-            );
-            return;
-        }
-
-        showStatus("");
-    }
-
-    async function fetchAllApplications(context) {
-        const rows = [];
-        const includeDrafts = workflowControls.allow_secretary_draft_completion === true;
-        const queueStatuses = isSubmittedRequirementsView()
-            ? ["hard_copy_verified"]
-            : (includeDrafts
-                ? ["draft", "submitted", "returned_for_correction"]
-                : ["submitted", "returned_for_correction"]);
-
-        for (let from = 0; ; from += SUPABASE_FETCH_LIMIT) {
-            const query = context.client
-                .from("applications")
                 .select("id, application_no, applicant_id, scholarship_type, school_year, sector_classification, status, submitted_at, created_at, updated_at")
                 .order("updated_at", { ascending: false })
-                .in("status", queueStatuses)
                 .range(from, from + SUPABASE_FETCH_LIMIT - 1);
+
+            if (isSubmittedRequirementsView()) {
+                query = query.neq("status", "draft");
+            } else {
+                const queueStatuses = includeDrafts
+                    ? ["draft", "submitted", "returned_for_correction"]
+                    : ["submitted", "returned_for_correction"];
+                query = query.in("status", queueStatuses);
+            }
 
             const result = await query;
 
@@ -917,22 +849,347 @@
         };
     }
 
-    function buildQueueRows(rawRows, profileMap, correctionNoticeMap) {
+    async function loadExamBatchLabelsByApplicationIds(context, applicationIds) {
+        const recordBatchMap = {};
+        const batchLabelLookup = {};
+        let lastErrorMessage = "";
+
+        for (let start = 0; start < applicationIds.length; start += PROFILE_BATCH_SIZE) {
+            const batchIds = applicationIds.slice(start, start + PROFILE_BATCH_SIZE);
+            if (!batchIds.length) {
+                continue;
+            }
+
+            const recordResult = await context.client
+                .from("exam_records")
+                .select("application_id, batch_id")
+                .in("application_id", batchIds);
+
+            if (recordResult.error) {
+                lastErrorMessage = recordResult.error.message || "";
+                continue;
+            }
+
+            (recordResult.data || []).forEach(function (record) {
+                const applicationId = (record && record.application_id ? record.application_id : "").toString().trim();
+                if (!applicationId) {
+                    return;
+                }
+                recordBatchMap[applicationId] = record.batch_id || "";
+            });
+        }
+
+        const uniqueBatchIds = Array.from(new Set(
+            Object.keys(recordBatchMap)
+                .map(function (applicationId) {
+                    return recordBatchMap[applicationId];
+                })
+                .filter(Boolean)
+        ));
+
+        for (let start = 0; start < uniqueBatchIds.length; start += PROFILE_BATCH_SIZE) {
+            const batchIds = uniqueBatchIds.slice(start, start + PROFILE_BATCH_SIZE);
+            if (!batchIds.length) {
+                continue;
+            }
+
+            const batchResult = await context.client
+                .from("exam_batches")
+                .select("id, batch_label")
+                .in("id", batchIds);
+
+            if (batchResult.error) {
+                lastErrorMessage = batchResult.error.message || "";
+                continue;
+            }
+
+            (batchResult.data || []).forEach(function (batch) {
+                const batchId = (batch && batch.id ? batch.id : "").toString().trim();
+                if (!batchId) {
+                    return;
+                }
+                batchLabelLookup[batchId] = (batch.batch_label || "").toString().trim();
+            });
+        }
+
+        const batchLabelMap = {};
+        Object.keys(recordBatchMap).forEach(function (applicationId) {
+            const batchId = recordBatchMap[applicationId];
+            batchLabelMap[applicationId] = batchId ? (batchLabelLookup[batchId] || "") : "";
+        });
+
+        return {
+            batchLabelMap: batchLabelMap,
+            errorMessage: lastErrorMessage
+        };
+    }
+
+    function buildQueueRows(rawRows, profileMap, correctionNoticeMap, examBatchLabelMap) {
         const safeProfileMap = profileMap || {};
         const safeNoticeMap = correctionNoticeMap || {};
+        const safeExamBatchLabelMap = examBatchLabelMap || {};
 
         return (rawRows || []).map(function (row) {
             const profile = safeProfileMap[row.applicant_id] || null;
             const latestCorrectionNotice = safeNoticeMap[row.id] || null;
+            const requirementsPayload = requirementsAuxPayloadByApplicationId[row.id] || {};
+            const requirementsStatusMap = buildRequirementsStatusMap(requirementsPayload, null);
+            const requirementsSummary = summarizeRequirementsStatusMap(requirementsStatusMap);
             return Object.assign({}, row, {
                 applicant_name: buildApplicantName(profile),
                 barangay: profile && profile.barangay ? profile.barangay : "",
                 sector_classification: row.sector_classification || "",
+                exam_batch_label: safeExamBatchLabelMap[row.id] || "",
+                requirements_payload: requirementsPayload,
+                requirements_status_map: requirementsStatusMap,
+                requirements_complete: requirementsSummary.complete,
+                requirements_received_count: requirementsSummary.receivedCount,
+                requirements_total_count: requirementsSummary.totalCount,
                 latest_correction_notice: latestCorrectionNotice,
                 resubmitted_for_check: isResubmittedForCheck(row, latestCorrectionNotice),
                 resubmitted_notice_label: latestCorrectionNotice ? correctionNoticeLabel(latestCorrectionNotice, row) : ""
             });
         });
+    }
+
+    function normalizeRequirementsPayload(payload) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            return {};
+        }
+        return payload;
+    }
+
+    function normalizeRequirementStatus(value) {
+        const normalized = (value || "").toString().trim().toLowerCase();
+        return REQUIREMENTS_STATUS_VALUES.has(normalized)
+            ? normalized
+            : REQUIREMENTS_STATUS_PENDING;
+    }
+
+    function requirementPayloadEntryStatus(entry) {
+        if (!entry) {
+            return "";
+        }
+        if (typeof entry === "string") {
+            return normalizeRequirementStatus(entry);
+        }
+        if (typeof entry === "object" && !Array.isArray(entry)) {
+            return normalizeRequirementStatus(entry.status || "");
+        }
+        return "";
+    }
+
+    function documentStatusToRequirementStatus(status) {
+        const normalized = normalizeStatus(status || "");
+        if (normalized === "verified") {
+            return REQUIREMENTS_STATUS_RECEIVED;
+        }
+        if (normalized === "rejected" || normalized === "needs_reupload") {
+            return REQUIREMENTS_STATUS_NEEDS_CORRECTION;
+        }
+        if (normalized === "pending") {
+            return REQUIREMENTS_STATUS_PENDING;
+        }
+        return "";
+    }
+
+    function buildRequirementsStatusMap(payload, documents) {
+        const normalizedPayload = normalizeRequirementsPayload(payload);
+        const payloadChecklist = normalizeRequirementsPayload(normalizedPayload[HARD_COPY_REQUIREMENTS_PAYLOAD_KEY]);
+        const latestDocuments = latestRequirementDocStatusByType(documents || []);
+        const statusMap = {};
+
+        HARD_COPY_REQUIREMENTS.forEach(function (requirement) {
+            const savedStatus = requirementPayloadEntryStatus(payloadChecklist[requirement.key]);
+            if (savedStatus) {
+                statusMap[requirement.key] = savedStatus;
+                return;
+            }
+
+            const fallbackType = requirement.fallbackDocumentType || "";
+            const fallbackDocument = fallbackType ? latestDocuments[fallbackType] : null;
+            const fallbackStatus = fallbackDocument
+                ? documentStatusToRequirementStatus(fallbackDocument.verification_status)
+                : "";
+
+            statusMap[requirement.key] = fallbackStatus || REQUIREMENTS_STATUS_PENDING;
+        });
+
+        return statusMap;
+    }
+
+    function summarizeRequirementsStatusMap(statusMap) {
+        let receivedCount = 0;
+        HARD_COPY_REQUIREMENTS.forEach(function (requirement) {
+            if (normalizeRequirementStatus(statusMap && statusMap[requirement.key]) === REQUIREMENTS_STATUS_RECEIVED) {
+                receivedCount += 1;
+            }
+        });
+        return {
+            receivedCount: receivedCount,
+            totalCount: HARD_COPY_REQUIREMENTS.length,
+            complete: HARD_COPY_REQUIREMENTS.length > 0 && receivedCount === HARD_COPY_REQUIREMENTS.length
+        };
+    }
+
+    async function loadRequirementsAuxByApplicationIds(context, rows) {
+        const payloadMap = {};
+        const sourceRows = Array.isArray(rows) ? rows : [];
+
+        for (let start = 0; start < sourceRows.length; start += PROFILE_BATCH_SIZE) {
+            const batchRows = sourceRows.slice(start, start + PROFILE_BATCH_SIZE);
+            const batchIds = batchRows.map(function (row) {
+                return row && row.id ? row.id : "";
+            }).filter(Boolean);
+
+            if (!batchIds.length) {
+                continue;
+            }
+
+            const result = await context.client
+                .from(APPLICATION_AUX_DATA_TABLE)
+                .select("application_id, payload")
+                .in("application_id", batchIds);
+
+            if (result.error) {
+                return {
+                    payloadMap: payloadMap,
+                    errorMessage: result.error.message || ""
+                };
+            }
+
+            (result.data || []).forEach(function (entry) {
+                const applicationId = (entry && entry.application_id ? entry.application_id : "").toString().trim();
+                if (!applicationId) {
+                    return;
+                }
+                payloadMap[applicationId] = normalizeRequirementsPayload(entry.payload);
+            });
+        }
+
+        return {
+            payloadMap: payloadMap,
+            errorMessage: ""
+        };
+    }
+
+    function latestRequirementDocStatusByType(documents) {
+        const map = {};
+        const rows = Array.isArray(documents) ? documents : [];
+        rows.forEach(function (doc) {
+            const key = (doc && doc.document_type ? doc.document_type : "").toString().trim();
+            if (!key) {
+                return;
+            }
+            const existing = map[key];
+            if (!existing) {
+                map[key] = doc;
+                return;
+            }
+            const existingTime = new Date(existing.created_at || 0).getTime();
+            const currentTime = new Date(doc.created_at || 0).getTime();
+            if (currentTime > existingTime) {
+                map[key] = doc;
+            }
+        });
+        return map;
+    }
+
+    async function fetchRequirementDocuments(applicationId) {
+        const key = (applicationId || "").toString().trim();
+        if (!key || !authContext || !authContext.client) {
+            return [];
+        }
+        if (Object.prototype.hasOwnProperty.call(requirementsDocumentsByApplicationId, key)) {
+            return requirementsDocumentsByApplicationId[key] || [];
+        }
+
+        const result = await authContext.client
+            .from("application_documents")
+            .select("document_type, verification_status, original_filename, created_at")
+            .eq("application_id", key)
+            .order("created_at", { ascending: false });
+
+        if (result.error) {
+            throw new Error(result.error.message || "Failed to load requirement documents.");
+        }
+
+        requirementsDocumentsByApplicationId[key] = result.data || [];
+        return requirementsDocumentsByApplicationId[key];
+    }
+
+    function isRequirementsCompleteRow(row) {
+        return !!(row && row.requirements_complete === true);
+    }
+
+    function fillRequirementsFilters(rows) {
+        const batchFilter = byId("secretaryRequirementsBatchFilter");
+        const completionFilter = byId("secretaryRequirementsCompletionFilter");
+        if (!batchFilter || !completionFilter) {
+            return;
+        }
+
+        const selectedBatch = batchFilter.value || "";
+        const selectedCompletion = completionFilter.value || "incomplete";
+        const batchLabels = Array.from(
+            new Set(
+                (rows || [])
+                    .map(function (row) {
+                        return (row && row.exam_batch_label ? row.exam_batch_label : "").toString().trim();
+                    })
+                    .filter(Boolean)
+            )
+        ).sort(function (left, right) {
+            return left.localeCompare(right);
+        });
+        const hasRowsWithoutBatch = (rows || []).some(function (row) {
+            return !(row && row.exam_batch_label ? row.exam_batch_label : "").toString().trim();
+        });
+
+        batchFilter.innerHTML = "";
+        if (!batchLabels.length && !hasRowsWithoutBatch) {
+            batchFilter.innerHTML = '<option value="all">No exam batches found</option>';
+            batchFilter.value = "all";
+        } else {
+            const allOption = document.createElement("option");
+            allOption.value = "all";
+            allOption.textContent = "All Exam Batches";
+            batchFilter.appendChild(allOption);
+
+            batchLabels.forEach(function (batchLabel) {
+                const option = document.createElement("option");
+                option.value = batchLabel;
+                option.textContent = batchLabel;
+                batchFilter.appendChild(option);
+            });
+
+            if (hasRowsWithoutBatch) {
+                const noBatchOption = document.createElement("option");
+                noBatchOption.value = NO_REQUIREMENTS_BATCH_FILTER_VALUE;
+                noBatchOption.textContent = "No Batch Assigned";
+                batchFilter.appendChild(noBatchOption);
+            }
+
+            if (selectedBatch === "all") {
+                batchFilter.value = "all";
+            } else if (selectedBatch === NO_REQUIREMENTS_BATCH_FILTER_VALUE && hasRowsWithoutBatch) {
+                batchFilter.value = NO_REQUIREMENTS_BATCH_FILTER_VALUE;
+            } else if (batchLabels.includes(selectedBatch)) {
+                batchFilter.value = selectedBatch;
+            } else if (batchLabels.length) {
+                batchFilter.value = batchLabels[0];
+            } else if (hasRowsWithoutBatch) {
+                batchFilter.value = NO_REQUIREMENTS_BATCH_FILTER_VALUE;
+            } else {
+                batchFilter.value = "all";
+            }
+        }
+
+        completionFilter.innerHTML = [
+            '<option value="incomplete">Incomplete Requirements</option>',
+            '<option value="complete">Complete Requirements</option>'
+        ].join("");
+        completionFilter.value = selectedCompletion === "complete" ? "complete" : "incomplete";
     }
 
     function getPageCount(total) {
@@ -943,6 +1200,11 @@
     }
 
     function fillFilters(rows) {
+        if (isSubmittedRequirementsView()) {
+            fillRequirementsFilters(rows);
+            return;
+        }
+
         const barangayFilter = byId("secretaryApplicationsBarangayFilter");
         const sectorFilter = byId("secretaryApplicationsSectorFilter");
         const statusFilter = byId("secretaryApplicationsStatusFilter");
@@ -1110,6 +1372,37 @@
     }
 
     function applyFilterRows() {
+        if (isSubmittedRequirementsView()) {
+            const batchSelection = byId("secretaryRequirementsBatchFilter")
+                ? byId("secretaryRequirementsBatchFilter").value
+                : "all";
+            const completion = byId("secretaryRequirementsCompletionFilter")
+                ? byId("secretaryRequirementsCompletionFilter").value
+                : "incomplete";
+            const searchQuery = byId("secretaryRequirementsSearchInput")
+                ? byId("secretaryRequirementsSearchInput").value.toLowerCase().trim()
+                : "";
+
+            return allRows.filter(function (row) {
+                const normalizedStatus = normalizeStatus(row.status);
+                if (!normalizedStatus || normalizedStatus === "draft") {
+                    return false;
+                }
+
+                const rowBatchLabel = (row.exam_batch_label || "").toString().trim();
+                const matchesBatch = batchSelection === "all"
+                    || (batchSelection === NO_REQUIREMENTS_BATCH_FILTER_VALUE
+                        ? !rowBatchLabel
+                        : rowBatchLabel === batchSelection);
+                const matchesCompletion = completion === "complete"
+                    ? isRequirementsCompleteRow(row)
+                    : !isRequirementsCompleteRow(row);
+                const applicantName = (row.applicant_name || "").toLowerCase();
+                const matchesSearch = !searchQuery || applicantName.indexOf(searchQuery) !== -1;
+                return matchesBatch && matchesCompletion && matchesSearch;
+            });
+        }
+
         const barangay = byId("secretaryApplicationsBarangayFilter") ? byId("secretaryApplicationsBarangayFilter").value : "all";
         const sector = byId("secretaryApplicationsSectorFilter") ? byId("secretaryApplicationsSectorFilter").value : "all";
         const status = isSubmittedRequirementsView()
@@ -1230,19 +1523,40 @@
         if (!tbody) {
             return;
         }
+        const requirementsMode = isSubmittedRequirementsView();
+        const tableColspan = requirementsMode ? 4 : 6;
         if (!rows.length) {
-            tbody.innerHTML = isSubmittedRequirementsView()
-                ? '<tr><td colspan="6"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No requirement records yet</div><div class="ldss-table-empty-copy">Applicants who already completed hard-copy requirement submission will appear here.</div></div></td></tr>'
-                : '<tr><td colspan="6"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No application records found</div><div class="ldss-table-empty-copy">Try adjusting the current search or filters to see more records.</div></div></td></tr>';
+            const requirementsCompletion = byId("secretaryRequirementsCompletionFilter")
+                ? byId("secretaryRequirementsCompletionFilter").value
+                : "complete";
+            tbody.innerHTML = requirementsMode
+                ? (
+                    requirementsCompletion === "incomplete"
+                        ? '<tr><td colspan="' + String(tableColspan) + '"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No incomplete requirement records yet</div><div class="ldss-table-empty-copy">Applicants with pending hard-copy requirements for the selected exam batch will appear here.</div></div></td></tr>'
+                        : '<tr><td colspan="' + String(tableColspan) + '"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No complete requirement records yet</div><div class="ldss-table-empty-copy">Applicants with completed hard-copy requirements for the selected exam batch will appear here.</div></div></td></tr>'
+                )
+                : '<tr><td colspan="' + String(tableColspan) + '"><div class="ldss-table-empty-state"><div class="ldss-table-empty-title">No application records found</div><div class="ldss-table-empty-copy">Try adjusting the current search or filters to see more records.</div></div></td></tr>';
             return;
         }
         tbody.innerHTML = rows.map(function (row) {
             const normalized = normalizeStatus(row.status);
-            const meta = statusMeta(normalized);
-            const submitted = row.submitted_at || row.created_at;
+            const meta = requirementsMode
+                ? {
+                    label: row.requirements_complete ? "Complete Requirements" : "Incomplete Requirements",
+                    chipClass: row.requirements_complete ? "ldss-chip-success" : "ldss-chip-danger"
+                }
+                : statusMeta(normalized);
             const action = actionForStatus(normalized, row.id);
             const applicantName = row.applicant_name || "Unknown";
+            const applicationNo = row.application_no || "-";
             const sectorClassification = row.sector_classification || "-";
+            const applicantNameMarkup = requirementsMode
+                ? (
+                    '<button class="btn btn-link p-0 text-start ldss-requirements-applicant-trigger" type="button" data-requirements-application="' + escapeHtml(row.id || "") + '">' +
+                    escapeHtml(applicantName) +
+                    "</button>"
+                )
+                : ('<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + "</span>");
             const resubmittedMarkup = row.resubmitted_for_check
                 ? '<div class="ldss-queue-applicant-meta">' +
                     '<span class="ldss-chip ldss-chip-accent">Resubmitted</span>' +
@@ -1250,20 +1564,35 @@
                     "</div>"
                 : "";
             return (
-                '<tr class="ldss-secretary-app-row" tabindex="0">' +
+                '<tr class="ldss-secretary-app-row' + (requirementsMode && row.id === selectedRequirementsApplicationId ? ' ldss-secretary-app-row-active' : '') + '" tabindex="0">' +
                 '<td data-label="Applicant">' +
                 '<div class="ldss-queue-applicant">' +
                 '<div class="ldss-queue-applicant-body">' +
-                '<span class="ldss-queue-applicant-name ldss-table-ellipsis" title="' + escapeHtml(applicantName) + '">' + escapeHtml(applicantName) + "</span>" +
+                applicantNameMarkup +
+                (
+                    requirementsMode
+                        ? ('<div class="ldss-queue-applicant-submeta">Application ID: ' + escapeHtml(applicationNo) + "</div>")
+                        : ""
+                ) +
                 resubmittedMarkup +
                 "</div>" +
                 "</div>" +
                 "</td>" +
-                '<td data-label="Application ID">' + escapeHtml(row.application_no || "-") + "</td>" +
-                '<td data-label="Sector Classification"><span class="ldss-table-ellipsis" title="' + escapeHtml(sectorClassification) + '">' + escapeHtml(sectorClassification) + "</span></td>" +
-                '<td data-label="Submitted">' + escapeHtml(formatDate(submitted)) + "</td>" +
-                '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
-                '<td data-label="Action">' + renderActionMarkup(action, row.id) + "</td>" +
+                (
+                    requirementsMode
+                        ? (
+                            '<td data-label="Sector Classification"><span class="ldss-table-ellipsis" title="' + escapeHtml(sectorClassification) + '">' + escapeHtml(sectorClassification) + "</span></td>" +
+                            '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
+                            '<td data-label="View Data">' + renderActionMarkup(action, row.id) + "</td>"
+                        )
+                        : (
+                            '<td data-label="Application ID">' + escapeHtml(applicationNo) + "</td>" +
+                            '<td data-label="Sector Classification"><span class="ldss-table-ellipsis" title="' + escapeHtml(sectorClassification) + '">' + escapeHtml(sectorClassification) + "</span></td>" +
+                            '<td data-label="Submitted">' + escapeHtml(formatDate(row.submitted_at || row.created_at)) + "</td>" +
+                            '<td data-label="Status"><span class="ldss-chip ' + meta.chipClass + '">' + escapeHtml(meta.label) + "</span></td>" +
+                            '<td data-label="Action">' + renderActionMarkup(action, row.id) + "</td>"
+                        )
+                ) +
                 "</tr>"
             );
         }).join("");
@@ -1281,11 +1610,19 @@
         const rows = bulkPendingExamRows();
 
         if (isSubmittedRequirementsView()) {
+            const batchFilter = byId("secretaryRequirementsBatchFilter");
+            const completionFilter = byId("secretaryRequirementsCompletionFilter");
+            const selectedBatchLabel = batchFilter && batchFilter.selectedIndex >= 0
+                ? batchFilter.options[batchFilter.selectedIndex].textContent
+                : "selected exam batch";
+            const completionLabel = completionFilter && completionFilter.value === "incomplete"
+                ? "incomplete"
+                : "complete";
             if (button) {
                 button.classList.add("d-none");
             }
             if (meta) {
-                meta.textContent = "Applicants listed here already completed hard-copy requirement submission to the office.";
+                meta.textContent = "Showing " + completionLabel + " requirements for " + selectedBatchLabel + ".";
             }
             return;
         }
@@ -1305,6 +1642,361 @@
         }
 
         meta.textContent = String(rows.length) + " currently filtered submitted application(s) can be moved to Pending Exam at once.";
+    }
+
+    function renderRequirementsSaveControls(applicationId, disabled, helperText, isBusy) {
+        const actionsEl = byId("secretaryRequirementsInspectorActions");
+        const saveMetaEl = byId("secretaryRequirementsInspectorSaveMeta");
+        const saveBtn = byId("secretaryRequirementsSaveBtn");
+        const hasSelection = !!(applicationId || "").toString().trim();
+
+        if (actionsEl) {
+            actionsEl.classList.toggle("d-none", !hasSelection);
+        }
+        if (saveMetaEl) {
+            saveMetaEl.textContent = helperText || "Save checklist updates here to reflect them on the applicant tracking page.";
+        }
+        if (saveBtn) {
+            saveBtn.disabled = !hasSelection || disabled === true;
+            saveBtn.textContent = isBusy ? REQUIREMENTS_SAVE_LABEL_BUSY : REQUIREMENTS_SAVE_LABEL_IDLE;
+        }
+    }
+
+    function requirementStatusSelectMarkup(requirement, currentStatus) {
+        const currentValue = normalizeRequirementStatus(currentStatus);
+        const options = [
+            { value: REQUIREMENTS_STATUS_PENDING, label: "Pending Review" },
+            { value: REQUIREMENTS_STATUS_RECEIVED, label: "Received" },
+            { value: REQUIREMENTS_STATUS_NEEDS_CORRECTION, label: "Needs Correction" },
+            { value: REQUIREMENTS_STATUS_MISSING, label: "Missing" }
+        ];
+
+        return (
+            '<select class="form-select form-select-sm ldss-secretary-requirements-status-select" data-requirement-key="' + escapeHtml(requirement.key) + '" aria-label="' + escapeHtml(requirement.label) + '">' +
+            options.map(function (option) {
+                return '<option value="' + escapeHtml(option.value) + '"' + (option.value === currentValue ? " selected" : "") + '>' + escapeHtml(option.label) + "</option>";
+            }).join("") +
+            "</select>"
+        );
+    }
+
+    function requirementsPrintFormUrl(applicationId, embedMode) {
+        const id = (applicationId || "").toString().trim();
+        if (!id) {
+            return "";
+        }
+        const params = new URLSearchParams();
+        params.set("id", id);
+        if (embedMode === true) {
+            params.set("embed", "1");
+        }
+        return "secretary-print-form.html?" + params.toString();
+    }
+
+    function requirementsPrintTitleMarkup(requirement, applicationId) {
+        const label = escapeHtml(requirement.label);
+        const appId = (applicationId || "").toString().trim();
+        if (requirement.key !== "application_form" || !appId) {
+            return '<div class="ldss-secretary-requirements-inspector-item-title">' + label + "</div>";
+        }
+
+        return (
+            '<button class="btn btn-link p-0 text-start ldss-secretary-requirements-doc-trigger" type="button" data-requirements-print-application="' + escapeHtml(appId) + '">' +
+            label +
+            "</button>"
+        );
+    }
+
+    function requirementsPrintModal() {
+        const modalEl = byId("secretaryRequirementsPrintModal");
+        if (!modalEl || !window.bootstrap || !window.bootstrap.Modal) {
+            return null;
+        }
+        if (!requirementsPrintModalInstance) {
+            requirementsPrintModalInstance = window.bootstrap.Modal.getOrCreateInstance(modalEl);
+        }
+        return requirementsPrintModalInstance;
+    }
+
+    function resetRequirementsPrintModal() {
+        const frame = byId("secretaryRequirementsPrintFrame");
+        const loading = byId("secretaryRequirementsPrintModalLoading");
+        const openTab = byId("secretaryRequirementsPrintOpenTab");
+        const title = byId("secretaryRequirementsPrintModalTitle");
+
+        if (frame) {
+            frame.classList.add("d-none");
+            frame.removeAttribute("src");
+        }
+        if (loading) {
+            loading.classList.remove("d-none");
+            loading.textContent = "Loading printable application form...";
+        }
+        if (openTab) {
+            openTab.setAttribute("href", "secretary-print-form.html");
+        }
+        if (title) {
+            title.textContent = "Printable Application Form";
+        }
+    }
+
+    function openRequirementsPrintModal(applicationId) {
+        const appId = (applicationId || "").toString().trim();
+        if (!appId) {
+            return;
+        }
+
+        const row = allRows.find(function (entry) {
+            return entry && entry.id === appId;
+        }) || null;
+        const previewUrl = requirementsPrintFormUrl(appId, true);
+        const openTabUrl = requirementsPrintFormUrl(appId, false);
+        const modal = requirementsPrintModal();
+        const frame = byId("secretaryRequirementsPrintFrame");
+        const loading = byId("secretaryRequirementsPrintModalLoading");
+        const openTab = byId("secretaryRequirementsPrintOpenTab");
+        const title = byId("secretaryRequirementsPrintModalTitle");
+
+        if (!modal || !frame || !loading) {
+            if (openTabUrl) {
+                window.open(openTabUrl, "_blank", "noopener");
+            }
+            return;
+        }
+
+        if (title) {
+            title.textContent = row && row.applicant_name
+                ? ("Application Form - " + row.applicant_name)
+                : "Printable Application Form";
+        }
+        if (openTab) {
+            openTab.setAttribute("href", openTabUrl || "secretary-print-form.html");
+        }
+
+        frame.classList.add("d-none");
+        loading.classList.remove("d-none");
+        loading.textContent = "Loading printable application form...";
+        frame.src = previewUrl;
+        modal.show();
+    }
+
+    function renderRequirementsInspectorState(applicationRow, documents) {
+        if (!isSubmittedRequirementsView()) {
+            return;
+        }
+
+        const nameEl = byId("secretaryRequirementsInspectorName");
+        const metaEl = byId("secretaryRequirementsInspectorMeta");
+        const checklistEl = byId("secretaryRequirementsInspectorChecklist");
+
+        if (!nameEl || !metaEl || !checklistEl) {
+            return;
+        }
+
+        if (!applicationRow) {
+            nameEl.textContent = "No applicant selected";
+            metaEl.textContent = "Click an applicant name to review the submitted requirements.";
+            checklistEl.innerHTML = '<div class="ldss-secretary-requirements-inspector-empty">Select an applicant from the table to show the requirement checklist for this applicant.</div>';
+            renderRequirementsSaveControls("", true, "Save checklist updates here to reflect them on the applicant tracking page.", false);
+            return;
+        }
+
+        const latest = latestRequirementDocStatusByType(documents || []);
+        const payload = requirementsAuxPayloadByApplicationId[applicationRow.id] || {};
+        const checklistMap = buildRequirementsStatusMap(payload, latest);
+        const summary = summarizeRequirementsStatusMap(checklistMap);
+        const status = statusMeta(applicationRow.status || "");
+        const submittedAt = applicationRow.submitted_at || applicationRow.created_at;
+
+        nameEl.textContent = applicationRow.applicant_name || "Unknown Applicant";
+        metaEl.textContent = "Application ID: " + (applicationRow.application_no || "-")
+            + " | " + String(summary.receivedCount) + "/" + String(summary.totalCount) + " received"
+            + " | Status: " + (status.label || "-")
+            + " | Submitted: " + formatDate(submittedAt);
+
+        checklistEl.innerHTML = HARD_COPY_REQUIREMENTS.map(function (requirement) {
+            const currentStatus = checklistMap[requirement.key];
+            return (
+                '<div class="ldss-secretary-requirements-inspector-item ldss-secretary-requirements-editor-item">' +
+                '<div class="ldss-secretary-requirements-editor-row">' +
+                requirementsPrintTitleMarkup(requirement, applicationRow.id) +
+                '<div class="ldss-secretary-requirements-editor-select">' + requirementStatusSelectMarkup(requirement, currentStatus) + "</div>" +
+                "</div>" +
+                "</div>"
+            );
+        }).join("");
+
+        renderRequirementsSaveControls(
+            applicationRow.id,
+            requirementsSavingApplicationId === applicationRow.id,
+            "Save checklist updates here to reflect them on the applicant tracking page.",
+            requirementsSavingApplicationId === applicationRow.id
+        );
+    }
+
+    function renderRequirementsInspectorLoading(applicationRow) {
+        if (!isSubmittedRequirementsView()) {
+            return;
+        }
+
+        const nameEl = byId("secretaryRequirementsInspectorName");
+        const metaEl = byId("secretaryRequirementsInspectorMeta");
+        const checklistEl = byId("secretaryRequirementsInspectorChecklist");
+
+        if (!nameEl || !metaEl || !checklistEl) {
+            return;
+        }
+
+        if (!applicationRow) {
+            renderRequirementsInspectorState(null, []);
+            return;
+        }
+
+        nameEl.textContent = applicationRow.applicant_name || "Unknown Applicant";
+        metaEl.textContent = "Loading requirement checklist...";
+        checklistEl.innerHTML = '<div class="ldss-secretary-requirements-inspector-empty">Loading requirement checklist for this applicant.</div>';
+        renderRequirementsSaveControls(applicationRow.id, true, "Loading current checklist values...", true);
+    }
+
+    function readRequirementsChecklistFromDom() {
+        const values = {};
+        document.querySelectorAll(".ldss-secretary-requirements-status-select").forEach(function (select) {
+            const key = select.getAttribute("data-requirement-key") || "";
+            if (!key) {
+                return;
+            }
+            values[key] = normalizeRequirementStatus(select.value || "");
+        });
+        return values;
+    }
+
+    function mergeRequirementsChecklistIntoPayload(payload, checklistMap) {
+        const normalizedPayload = normalizeRequirementsPayload(payload);
+        const nextPayload = Object.assign({}, normalizedPayload);
+        const previousChecklist = normalizeRequirementsPayload(nextPayload[HARD_COPY_REQUIREMENTS_PAYLOAD_KEY]);
+        const nextChecklist = Object.assign({}, previousChecklist);
+        const nowIso = new Date().toISOString();
+
+        HARD_COPY_REQUIREMENTS.forEach(function (requirement) {
+            nextChecklist[requirement.key] = {
+                status: normalizeRequirementStatus(checklistMap[requirement.key]),
+                updated_at: nowIso,
+                updated_by: authContext && authContext.user ? authContext.user.id : null
+            };
+        });
+
+        nextPayload[HARD_COPY_REQUIREMENTS_PAYLOAD_KEY] = nextChecklist;
+        return nextPayload;
+    }
+
+    async function saveRequirementsChecklist() {
+        const applicationId = (selectedRequirementsApplicationId || "").toString().trim();
+        if (!applicationId || !authContext || !authContext.client) {
+            return;
+        }
+
+        const applicationRow = allRows.find(function (row) {
+            return row && row.id === applicationId;
+        }) || null;
+
+        if (!applicationRow || !applicationRow.applicant_id) {
+            showStatus("Select an applicant first before saving the checklist.", "alert-warning");
+            return;
+        }
+
+        const checklistMap = readRequirementsChecklistFromDom();
+        const mergedPayload = mergeRequirementsChecklistIntoPayload(
+            requirementsAuxPayloadByApplicationId[applicationId] || {},
+            checklistMap
+        );
+
+        requirementsSavingApplicationId = applicationId;
+        renderRequirementsSaveControls(applicationId, true, "Saving checklist updates...", true);
+
+        const result = await authContext.client
+            .from(APPLICATION_AUX_DATA_TABLE)
+            .upsert({
+                application_id: applicationId,
+                applicant_id: applicationRow.applicant_id,
+                payload: mergedPayload
+            }, { onConflict: "application_id" });
+
+        requirementsSavingApplicationId = "";
+
+        if (result.error) {
+            renderRequirementsSaveControls(applicationId, false, "Checklist save failed. Please try again.", false);
+            throw new Error(result.error.message || "Failed to save requirement checklist.");
+        }
+
+        requirementsAuxPayloadByApplicationId[applicationId] = mergedPayload;
+
+        allRows = allRows.map(function (row) {
+            if (!row || row.id !== applicationId) {
+                return row;
+            }
+            const statusMap = buildRequirementsStatusMap(mergedPayload, null);
+            const summary = summarizeRequirementsStatusMap(statusMap);
+            return Object.assign({}, row, {
+                requirements_payload: mergedPayload,
+                requirements_status_map: statusMap,
+                requirements_complete: summary.complete,
+                requirements_received_count: summary.receivedCount,
+                requirements_total_count: summary.totalCount
+            });
+        });
+
+        applyFiltersAndRender(false);
+        if (selectedRequirementsApplicationId === applicationId) {
+            const nextSelectedRow = allRows.find(function (row) {
+                return row && row.id === applicationId;
+            }) || applicationRow;
+            renderRequirementsInspectorState(nextSelectedRow, requirementsDocumentsByApplicationId[applicationId] || []);
+        }
+        showStatus("Requirement checklist saved successfully.", "alert-success");
+    }
+
+    async function handleRequirementsApplicantSelection(applicationId) {
+        const key = (applicationId || "").toString().trim();
+        if (!key) {
+            return;
+        }
+
+        const row = allRows.find(function (entry) {
+            return entry && entry.id === key;
+        }) || null;
+
+        if (!row) {
+            renderRequirementsInspectorState(null, []);
+            return;
+        }
+
+        selectedRequirementsApplicationId = key;
+        renderTable(filteredRows.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize));
+        renderRequirementsInspectorLoading(row);
+
+        try {
+            const documents = await fetchRequirementDocuments(key);
+            if (selectedRequirementsApplicationId !== key) {
+                return;
+            }
+
+            renderRequirementsInspectorState(row, documents);
+        } catch (error) {
+            const nameEl = byId("secretaryRequirementsInspectorName");
+            const metaEl = byId("secretaryRequirementsInspectorMeta");
+            const checklistEl = byId("secretaryRequirementsInspectorChecklist");
+            if (nameEl) {
+                nameEl.textContent = row.applicant_name || "Unknown Applicant";
+            }
+            if (metaEl) {
+                metaEl.textContent = "Could not load the requirement checklist right now.";
+            }
+            if (checklistEl) {
+                checklistEl.innerHTML = '<div class="ldss-secretary-requirements-inspector-empty">Try clicking the applicant again after refreshing the page.</div>';
+            }
+            renderRequirementsSaveControls(key, true, "Checklist loading failed. Refresh and try again.", false);
+            showStatus(error && error.message ? error.message : "Failed to load requirement checklist.", "alert-warning");
+        }
     }
 
     function populateBulkForExamModal(rows) {
@@ -1496,22 +2188,47 @@
 
         const start = (currentPage - 1) * pageSize;
         const pageRows = filteredRows.slice(start, start + pageSize);
+        let autoSelectRequirementsRowId = "";
+
+        if (isSubmittedRequirementsView()) {
+            const selectedVisibleOnCurrentPage = pageRows.some(function (row) {
+                return row && row.id === selectedRequirementsApplicationId;
+            });
+
+            if (!selectedVisibleOnCurrentPage) {
+                selectedRequirementsApplicationId = "";
+            }
+
+            if (!selectedRequirementsApplicationId && pageRows.length) {
+                autoSelectRequirementsRowId = pageRows[0] && pageRows[0].id
+                    ? pageRows[0].id
+                    : "";
+                selectedRequirementsApplicationId = autoSelectRequirementsRowId;
+            }
+
+            if (!pageRows.length) {
+                renderRequirementsInspectorState(null, []);
+            }
+        } else if (selectedRequirementsApplicationId) {
+            selectedRequirementsApplicationId = "";
+        } else {
+            renderRequirementsInspectorState(null, []);
+        }
 
         renderTable(pageRows);
         renderPaginationInfo(filteredRows.length);
         renderPagination(filteredRows.length);
         renderBulkForExamAction();
+
+        if (autoSelectRequirementsRowId) {
+            handleRequirementsApplicantSelection(autoSelectRequirementsRowId);
+        }
     }
 
     async function loadApplications(context) {
         const loadToken = applicationsLoadToken + 1;
         applicationsLoadToken = loadToken;
         showStatus("");
-
-        if (isSubmittedRequirementsView()) {
-            await loadRequirementsSummary(context, loadToken);
-            return;
-        }
 
         const appResult = await fetchAllApplications(context);
 
@@ -1531,22 +2248,46 @@
         const profileLoadPromise = applicantIds.length > 0
             ? loadProfilesByIds(context, applicantIds)
             : Promise.resolve({ profileMap: {}, failedBatchCount: 0, lastErrorMessage: "" });
+        const examBatchLoadPromise = isSubmittedRequirementsView() && applicationIds.length > 0
+            ? loadExamBatchLabelsByApplicationIds(context, applicationIds)
+            : Promise.resolve({ batchLabelMap: {}, errorMessage: "" });
+        const requirementsAuxLoadPromise = isSubmittedRequirementsView() && rows.length > 0
+            ? loadRequirementsAuxByApplicationIds(context, rows)
+            : Promise.resolve({ payloadMap: {}, errorMessage: "" });
         const correctionNoticeLoadPromise = applicationIds.length > 0
             ? loadLatestCorrectionNoticesByApplicationIds(context, applicationIds)
             : Promise.resolve({ noticeMap: {}, errorMessage: "" });
 
         const profileLoad = await profileLoadPromise;
+        const examBatchLoad = await examBatchLoadPromise;
+        const requirementsAuxLoad = await requirementsAuxLoadPromise;
         if (loadToken !== applicationsLoadToken) {
             return;
         }
 
         const profileMap = profileLoad.profileMap;
-        allRows = buildQueueRows(rows, profileMap, {});
+        const examBatchLabelMap = examBatchLoad.batchLabelMap || {};
+        requirementsAuxPayloadByApplicationId = requirementsAuxLoad.payloadMap || {};
+        allRows = buildQueueRows(rows, profileMap, {}, examBatchLabelMap);
 
         if (profileLoad.failedBatchCount > 0) {
             showStatus(
                 "Loaded application queue, but some applicant profiles could not be loaded. " +
                 (profileLoad.lastErrorMessage ? ("Last error: " + profileLoad.lastErrorMessage) : "Please refresh and try again."),
+                "alert-warning"
+            );
+        }
+        if (isSubmittedRequirementsView() && examBatchLoad.errorMessage) {
+            showStatus(
+                "Requirements queue loaded, but some exam batch labels could not be loaded. " +
+                "Filtering by saved exam batches may be incomplete.",
+                "alert-warning"
+            );
+        }
+        if (isSubmittedRequirementsView() && requirementsAuxLoad.errorMessage) {
+            showStatus(
+                "Requirements queue loaded, but some saved checklist statuses could not be loaded. " +
+                "Applicants may default to pending review until you refresh.",
                 "alert-warning"
             );
         }
@@ -1576,7 +2317,7 @@
             return;
         }
 
-        allRows = buildQueueRows(rows, profileMap, correctionNoticeLoad.noticeMap || {});
+        allRows = buildQueueRows(rows, profileMap, correctionNoticeLoad.noticeMap || {}, examBatchLabelMap);
         applyFiltersAndRender(false);
     }
 
@@ -1587,8 +2328,15 @@
         const sectorFilter = byId("secretaryApplicationsSectorFilter");
         const statusFilter = byId("secretaryApplicationsStatusFilter");
         const yearFilter = byId("secretaryApplicationsYearFilter");
+        const requirementsSearchInput = byId("secretaryRequirementsSearchInput");
+        const requirementsBatchFilter = byId("secretaryRequirementsBatchFilter");
+        const requirementsCompletionFilter = byId("secretaryRequirementsCompletionFilter");
+        const requirementsSaveBtn = byId("secretaryRequirementsSaveBtn");
+        const requirementsPrintModalEl = byId("secretaryRequirementsPrintModal");
+        const requirementsPrintFrame = byId("secretaryRequirementsPrintFrame");
         const pagination = byId("secretaryApplicationsPagination");
         const pageSizeSelect = byId("secretaryApplicationsPageSize");
+        const tableBody = byId("secretaryApplicationsTableBody");
         const bulkForExamBtn = byId("secretaryBulkForExamBtn");
         const bulkForExamProceedBtn = byId("secretaryBulkForExamProceedBtn");
         const bulkForExamModalEl = byId("secretaryBulkForExamModal");
@@ -1611,6 +2359,19 @@
                 applyFiltersAndRender(true);
             });
             searchInput.addEventListener("keydown", function (event) {
+                if (event.key !== "Enter") {
+                    return;
+                }
+                event.preventDefault();
+                applyFiltersAndRender(true);
+            });
+        }
+
+        if (requirementsSearchInput) {
+            requirementsSearchInput.addEventListener("input", function () {
+                applyFiltersAndRender(true);
+            });
+            requirementsSearchInput.addEventListener("keydown", function (event) {
                 if (event.key !== "Enter") {
                     return;
                 }
@@ -1643,6 +2404,28 @@
             });
         }
 
+        if (requirementsBatchFilter) {
+            requirementsBatchFilter.addEventListener("change", function () {
+                applyFiltersAndRender(true);
+            });
+        }
+
+        if (requirementsCompletionFilter) {
+            requirementsCompletionFilter.addEventListener("change", function () {
+                applyFiltersAndRender(true);
+            });
+        }
+
+        if (requirementsSaveBtn) {
+            requirementsSaveBtn.addEventListener("click", async function () {
+                try {
+                    await saveRequirementsChecklist();
+                } catch (error) {
+                    showStatus(error && error.message ? error.message : "Failed to save requirement checklist.", "alert-danger");
+                }
+            });
+        }
+
         if (pageSizeSelect) {
             pageSizeSelect.value = String(pageSize);
             pageSizeSelect.addEventListener("change", function () {
@@ -1670,6 +2453,42 @@
                 }
                 currentPage = nextPage;
                 applyFiltersAndRender(false);
+            });
+        }
+
+        if (tableBody) {
+            tableBody.addEventListener("click", function (event) {
+                const trigger = event.target.closest("[data-requirements-application]");
+                if (!trigger) {
+                    return;
+                }
+                event.preventDefault();
+                handleRequirementsApplicantSelection(trigger.getAttribute("data-requirements-application") || "");
+            });
+        }
+
+        document.addEventListener("click", function (event) {
+            const trigger = event.target.closest("[data-requirements-print-application]");
+            if (!trigger) {
+                return;
+            }
+            event.preventDefault();
+            openRequirementsPrintModal(trigger.getAttribute("data-requirements-print-application") || "");
+        });
+
+        if (requirementsPrintFrame) {
+            requirementsPrintFrame.addEventListener("load", function () {
+                const loading = byId("secretaryRequirementsPrintModalLoading");
+                requirementsPrintFrame.classList.remove("d-none");
+                if (loading) {
+                    loading.classList.add("d-none");
+                }
+            });
+        }
+
+        if (requirementsPrintModalEl) {
+            requirementsPrintModalEl.addEventListener("hidden.bs.modal", function () {
+                resetRequirementsPrintModal();
             });
         }
 
@@ -1721,6 +2540,7 @@
 
         authContext = context;
         applyViewMeta();
+        renderTableHead();
         try {
             await loadWorkflowControls(context);
         } catch (error) {

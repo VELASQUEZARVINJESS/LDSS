@@ -14,6 +14,10 @@
         return window.LDSSAuthEmailHelper || null;
     }
 
+    function authStorage() {
+        return window.LDSSAuthStorage || null;
+    }
+
     function setStatus(message, type) {
         const el = document.getElementById("loginStatus");
         if (!el) {
@@ -78,13 +82,42 @@
         return "verify-account.html";
     }
 
+    function syncRememberMeState() {
+        const checkbox = document.getElementById("rememberMe");
+        const storage = authStorage();
+        if (!checkbox) {
+            return;
+        }
+        if (storage && typeof storage.getMode === "function") {
+            checkbox.checked = storage.getMode() !== "session";
+            return;
+        }
+        checkbox.checked = true;
+    }
+
+    function applyRememberMePreference() {
+        const checkbox = document.getElementById("rememberMe");
+        const storage = authStorage();
+        const rememberMe = checkbox ? checkbox.checked !== false : true;
+
+        if (!storage || typeof storage.setMode !== "function") {
+            return rememberMe;
+        }
+        storage.setMode(rememberMe ? "local" : "session");
+        return rememberMe;
+    }
+
     function applyInitialQueryState() {
         const helper = authHelper();
         const params = new URLSearchParams(window.location.search || "");
         const loginIdentifier = document.getElementById("loginIdentifier");
+        const queryIdentifierRaw = (params.get("identifier") || params.get("email") || "").toString().trim();
         const queryEmail = helper && typeof helper.normalizeEmailAddress === "function"
-            ? helper.normalizeEmailAddress(params.get("email") || "")
-            : (params.get("email") || "").toString().trim().toLowerCase();
+            ? helper.normalizeEmailAddress(queryIdentifierRaw)
+            : queryIdentifierRaw.toLowerCase();
+        const queryMobile = helper && typeof helper.normalizePhoneNumber === "function"
+            ? helper.normalizePhoneNumber(queryIdentifierRaw)
+            : "";
         const pendingEmail = helper && typeof helper.readPendingVerificationEmail === "function"
             ? helper.readPendingVerificationEmail()
             : "";
@@ -92,6 +125,8 @@
         if (loginIdentifier && !loginIdentifier.value) {
             if (helper && helper.isValidEmail(queryEmail)) {
                 loginIdentifier.value = queryEmail;
+            } else if (queryMobile) {
+                loginIdentifier.value = queryIdentifierRaw;
             } else if (helper && helper.isValidEmail(pendingEmail)) {
                 loginIdentifier.value = pendingEmail;
             }
@@ -102,7 +137,7 @@
             return;
         }
         if (params.get("registered") === "1") {
-            setStatus("Registration successful. Sign in with your email and password.", "alert-success");
+            setStatus("Registration successful. Sign in with your email or mobile number and password.", "alert-success");
         }
     }
 
@@ -149,22 +184,37 @@
         const helper = authHelper();
 
         if (!identifier || !password) {
-            setStatus("Please enter your email and password.", "alert-danger");
+            setStatus("Please enter your email or mobile number and password.", "alert-danger");
             return;
         }
 
-        const normalizedEmail = helper && typeof helper.normalizeEmailAddress === "function"
-            ? helper.normalizeEmailAddress(identifier)
-            : identifier.toLowerCase();
-        const isValidEmail = helper && typeof helper.isValidEmail === "function"
-            ? helper.isValidEmail(normalizedEmail)
-            : /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
-        if (!isValidEmail) {
-            setStatus("Please enter a valid email address.", "alert-danger");
+        let resolvedIdentifier;
+        try {
+            resolvedIdentifier = await helper.resolveIdentifierToEmail(identifier, {
+                useCase: "login",
+                helperUnavailableMessage: "Mobile sign-in is not available on this host yet. Use your registered email for now.",
+                invalidMessage: "Please enter a valid email address or mobile number."
+            });
+        } catch (err) {
+            setStatus(helper.getErrorMessage(err, "Unexpected login error. Please try again."), "alert-danger");
             return;
         }
-        const payload = { email: normalizedEmail, password: password };
+        if (!resolvedIdentifier || !resolvedIdentifier.ok) {
+            const alertType = resolvedIdentifier && resolvedIdentifier.code === "helper_unavailable"
+                ? "alert-warning"
+                : "alert-danger";
+            setStatus(
+                resolvedIdentifier && resolvedIdentifier.message
+                    ? resolvedIdentifier.message
+                    : "Please enter a valid email address or mobile number.",
+                alertType
+            );
+            return;
+        }
 
+        const payload = { email: resolvedIdentifier.email, password: password };
+
+        applyRememberMePreference();
         setSubmitLoading(true);
         try {
             const { data, error } = await client.auth.signInWithPassword(payload);
@@ -202,6 +252,7 @@
             return;
         }
         bindPasswordToggle("loginPassword", "loginPasswordToggle");
+        syncRememberMeState();
         applyInitialQueryState();
 
         const url = window.LDSS_SUPABASE_URL || "";
